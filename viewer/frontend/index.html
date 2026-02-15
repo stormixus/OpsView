@@ -1157,18 +1157,30 @@
       mixedCanvas = document.getElementById('mixedScreen');
       mixedCtx = mixedCanvas.getContext('2d');
 
-      // Mirror main canvas to mixed canvas every frame
+      // Mirror Ops source (canvas or video) to mixed canvas every frame
       function mirrorLoop() {
-        const src = document.getElementById('screen');
-        if (src.width > 0 && src.height > 0) {
+        // Pick source: stream video if active, otherwise relay canvas
+        let src = null;
+        const video = document.getElementById('streamVideo');
+        const canvas = document.getElementById('screen');
+
+        if (streamMode && video && video.readyState >= 2 && video.videoWidth > 0) {
+          src = video;
+          var srcW = video.videoWidth, srcH = video.videoHeight;
+        } else if (canvas && canvas.width > 0 && canvas.height > 0) {
+          src = canvas;
+          var srcW = canvas.width, srcH = canvas.height;
+        }
+
+        if (src) {
           if (cropRegion) {
             mixedCanvas.width = cropRegion.w;
             mixedCanvas.height = cropRegion.h;
             mixedCtx.drawImage(src, cropRegion.x, cropRegion.y, cropRegion.w, cropRegion.h, 0, 0, cropRegion.w, cropRegion.h);
           } else {
-            if (mixedCanvas.width !== src.width || mixedCanvas.height !== src.height) {
-              mixedCanvas.width = src.width;
-              mixedCanvas.height = src.height;
+            if (mixedCanvas.width !== srcW || mixedCanvas.height !== srcH) {
+              mixedCanvas.width = srcW;
+              mixedCanvas.height = srcH;
             }
             mixedCtx.drawImage(src, 0, 0);
           }
