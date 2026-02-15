@@ -186,9 +186,17 @@
     .ops-form .btn-row { display: flex; gap: 8px; margin-top: 4px; }
     .ops-form .divider {
       text-align: center;
-      color: #555;
+      color: #444;
       font-size: 11px;
-      margin: 4px 0;
+      margin: 6px 0;
+      border-top: 1px solid #222;
+      padding-top: 10px;
+    }
+    .ops-option-header {
+      font-size: 12px;
+      font-weight: 600;
+      color: #60a5fa;
+      margin-bottom: 2px;
     }
     .ops-form .status-msg {
       font-size: 11px;
@@ -378,21 +386,19 @@
 
   <!-- Panels -->
   <div class="panel active" id="panel-ops" style="position:relative;">
-    <!-- Toolbar (visible when connected) -->
+    <!-- Toolbar (visible when playing) -->
     <div class="ops-toolbar" id="opsToolbar" style="display:none;">
-      <button class="ops-setup-btn edit" onclick="showOpsForm()">Settings</button>
+      <button class="ops-setup-btn edit" onclick="showOpsSetup()">Settings</button>
       <button class="ops-setup-btn disconnect" onclick="opsDisconnect()">Disconnect</button>
     </div>
-    <!-- Setup overlay -->
+    <!-- Setup: 2 options -->
     <div class="ops-setup" id="opsSetup">
-      <button class="ops-setup-btn" onclick="showOpsForm()">Setup Relay Connection</button>
-    </div>
-    <!-- Config form overlay -->
-    <div class="ops-setup hidden" id="opsFormOverlay">
       <div class="ops-form">
-        <h3>Relay Connection</h3>
+        <h3>Screen Source</h3>
+        <!-- Option 1: Relay -->
+        <div class="ops-option-header">OpsView Relay</div>
         <div>
-          <label>Relay WebSocket URL</label>
+          <label>WebSocket URL</label>
           <input type="text" id="relayUrl" placeholder="ws://127.0.0.1:8080/watch" value="ws://127.0.0.1:8080/watch">
         </div>
         <div>
@@ -400,28 +406,29 @@
           <input type="password" id="token" placeholder="watcher token" value="dev-watcher-token">
         </div>
         <div class="btn-row">
-          <button onclick="opsConnect()">Connect</button>
-          <button class="secondary" onclick="hideOpsForm()">Cancel</button>
+          <button onclick="opsConnect()">Connect Relay</button>
         </div>
         <div class="status-msg" id="opsRelayStatus"></div>
-        <div class="divider">-- or fallback --</div>
+        <div class="divider">or</div>
+        <!-- Option 2: Stream -->
+        <div class="ops-option-header">Direct Stream</div>
         <div>
-          <label>RTSP / M3U8 Stream URL</label>
+          <label>RTSP / M3U8 / Video URL</label>
           <input type="text" id="fallbackUrl" placeholder="http://... .m3u8 or rtsp://...">
         </div>
         <div class="btn-row">
-          <button onclick="opsFallbackPlay()">Play Stream</button>
+          <button onclick="opsStreamPlay()">Play Stream</button>
         </div>
-        <div class="status-msg" id="opsFallbackStatus"></div>
+        <div class="status-msg" id="opsStreamStatus"></div>
       </div>
     </div>
     <!-- Canvas for relay -->
-    <div class="canvas-wrap" id="opsCanvasWrap">
+    <div class="canvas-wrap" id="opsCanvasWrap" style="display:none;">
       <canvas id="screen"></canvas>
     </div>
-    <!-- Video for fallback stream -->
-    <div class="canvas-wrap" id="opsFallbackWrap" style="display:none;">
-      <video id="fallbackVideo" autoplay muted playsinline style="max-width:100%;max-height:100%;"></video>
+    <!-- Video for stream -->
+    <div class="canvas-wrap" id="opsStreamWrap" style="display:none;">
+      <video id="streamVideo" autoplay muted playsinline style="max-width:100%;max-height:100%;"></video>
     </div>
   </div>
   <div class="panel" id="panel-cctv" style="flex-direction:column;">
@@ -494,20 +501,11 @@
 
     // === Ops Panel UI ===
     let hlsInstance = null;
-    let fallbackMode = false;
+    let streamMode = false; // true = playing direct stream
 
-    function showOpsForm() {
-      document.getElementById('opsSetup').classList.add('hidden');
-      document.getElementById('opsFormOverlay').classList.remove('hidden');
-      document.getElementById('opsRelayStatus').textContent = '';
-      document.getElementById('opsFallbackStatus').textContent = '';
-    }
-    function hideOpsForm() {
-      document.getElementById('opsFormOverlay').classList.add('hidden');
-      // Show setup button only if not connected
-      if (!connected && !fallbackMode) {
-        document.getElementById('opsSetup').classList.remove('hidden');
-      }
+    function showOpsSetup() {
+      // Stop everything and show setup
+      opsDisconnect();
     }
 
     function opsConnect() {
@@ -523,31 +521,24 @@
       document.getElementById('opsRelayStatus').textContent = 'Connecting...';
       document.getElementById('opsRelayStatus').style.color = '#eab308';
 
-      // Stop any fallback
-      stopFallback();
-
-      // Show canvas, hide fallback
+      stopStream();
       document.getElementById('opsCanvasWrap').style.display = 'flex';
-      document.getElementById('opsFallbackWrap').style.display = 'none';
-      fallbackMode = false;
+      document.getElementById('opsStreamWrap').style.display = 'none';
+      streamMode = false;
 
-      // Use viewer.js connect
       connect();
 
-      // Watch for connection result
       let checks = 0;
       const checker = setInterval(() => {
         checks++;
         if (connected) {
           clearInterval(checker);
-          document.getElementById('opsRelayStatus').textContent = 'Connected';
-          document.getElementById('opsRelayStatus').style.color = '#22c55e';
-          document.getElementById('opsFormOverlay').classList.add('hidden');
-          document.getElementById('opsSetup').classList.add('hidden');
+          document.getElementById('opsRelayStatus').textContent = '';
+          document.getElementById('opsSetup').style.display = 'none';
           document.getElementById('opsToolbar').style.display = 'flex';
         } else if (checks > 30) {
           clearInterval(checker);
-          document.getElementById('opsRelayStatus').textContent = 'Connection failed - try fallback stream';
+          document.getElementById('opsRelayStatus').textContent = 'Connection failed';
           document.getElementById('opsRelayStatus').style.color = '#ef4444';
         }
       }, 200);
@@ -555,86 +546,69 @@
 
     function opsDisconnect() {
       disconnect();
-      stopFallback();
-      fallbackMode = false;
+      stopStream();
+      streamMode = false;
       document.getElementById('opsToolbar').style.display = 'none';
-      document.getElementById('opsSetup').classList.remove('hidden');
-      document.getElementById('opsCanvasWrap').style.display = 'flex';
-      document.getElementById('opsFallbackWrap').style.display = 'none';
+      document.getElementById('opsSetup').style.display = 'flex';
+      document.getElementById('opsCanvasWrap').style.display = 'none';
+      document.getElementById('opsStreamWrap').style.display = 'none';
     }
 
-    function opsFallbackPlay() {
+    function opsStreamPlay() {
       const url = document.getElementById('fallbackUrl').value.trim();
       if (!url) {
-        document.getElementById('opsFallbackStatus').textContent = 'Enter stream URL';
-        document.getElementById('opsFallbackStatus').style.color = '#ef4444';
+        document.getElementById('opsStreamStatus').textContent = 'Enter stream URL';
+        document.getElementById('opsStreamStatus').style.color = '#ef4444';
         return;
       }
       localStorage.setItem('opsview_fallback_url', url);
+      document.getElementById('opsStreamStatus').textContent = 'Loading...';
+      document.getElementById('opsStreamStatus').style.color = '#eab308';
 
-      // Disconnect relay if connected
       if (connected) disconnect();
-      stopFallback();
+      stopStream();
 
-      const video = document.getElementById('fallbackVideo');
+      const video = document.getElementById('streamVideo');
       document.getElementById('opsCanvasWrap').style.display = 'none';
-      document.getElementById('opsFallbackWrap').style.display = 'flex';
-      fallbackMode = true;
+      document.getElementById('opsStreamWrap').style.display = 'flex';
+      streamMode = true;
+
+      function onPlaying() {
+        document.getElementById('opsStreamStatus').textContent = '';
+        document.getElementById('opsSetup').style.display = 'none';
+        document.getElementById('opsToolbar').style.display = 'flex';
+      }
+      function onError(msg) {
+        document.getElementById('opsStreamStatus').textContent = msg;
+        document.getElementById('opsStreamStatus').style.color = '#ef4444';
+      }
 
       if (url.includes('.m3u8')) {
-        // HLS stream
-        if (Hls.isSupported()) {
+        if (typeof Hls !== 'undefined' && Hls.isSupported()) {
           hlsInstance = new Hls({ enableWorker: true, lowLatencyMode: true });
           hlsInstance.loadSource(url);
           hlsInstance.attachMedia(video);
-          hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-            video.play();
-            document.getElementById('opsFallbackStatus').textContent = 'Playing HLS stream';
-            document.getElementById('opsFallbackStatus').style.color = '#22c55e';
-            document.getElementById('opsFormOverlay').classList.add('hidden');
-            document.getElementById('opsSetup').classList.add('hidden');
-            document.getElementById('opsToolbar').style.display = 'flex';
-          });
-          hlsInstance.on(Hls.Events.ERROR, (e, data) => {
-            if (data.fatal) {
-              document.getElementById('opsFallbackStatus').textContent = 'HLS error: ' + data.type;
-              document.getElementById('opsFallbackStatus').style.color = '#ef4444';
-            }
-          });
+          hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => { video.play(); onPlaying(); });
+          hlsInstance.on(Hls.Events.ERROR, (e, data) => { if (data.fatal) onError('HLS error: ' + data.type); });
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-          // Safari native HLS
           video.src = url;
-          video.addEventListener('loadedmetadata', () => video.play());
-          document.getElementById('opsFallbackStatus').textContent = 'Playing (native HLS)';
-          document.getElementById('opsFallbackStatus').style.color = '#22c55e';
-          document.getElementById('opsFormOverlay').classList.add('hidden');
-          document.getElementById('opsSetup').classList.add('hidden');
-          document.getElementById('opsToolbar').style.display = 'flex';
+          video.addEventListener('loadedmetadata', () => { video.play(); onPlaying(); });
+          video.onerror = () => onError('Failed to load HLS');
+        } else {
+          onError('HLS not supported');
         }
       } else {
-        // Direct video URL (mp4, etc)
         video.src = url;
-        video.onloadeddata = () => {
-          document.getElementById('opsFallbackStatus').textContent = 'Playing stream';
-          document.getElementById('opsFallbackStatus').style.color = '#22c55e';
-          document.getElementById('opsFormOverlay').classList.add('hidden');
-          document.getElementById('opsSetup').classList.add('hidden');
-          document.getElementById('opsToolbar').style.display = 'flex';
-        };
-        video.onerror = () => {
-          document.getElementById('opsFallbackStatus').textContent = 'Failed to load stream';
-          document.getElementById('opsFallbackStatus').style.color = '#ef4444';
-        };
+        video.onloadeddata = () => onPlaying();
+        video.onerror = () => onError('Failed to load stream');
         video.play().catch(() => {});
       }
     }
 
-    function stopFallback() {
+    function stopStream() {
       if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
-      const video = document.getElementById('fallbackVideo');
-      video.pause();
-      video.removeAttribute('src');
-      video.load();
+      const video = document.getElementById('streamVideo');
+      if (video) { video.pause(); video.removeAttribute('src'); video.load(); }
     }
 
     // === CCTV Multi-DVR ===
