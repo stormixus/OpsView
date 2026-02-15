@@ -122,14 +122,10 @@
     }
     .ops-setup-btn:hover { background: #1d4ed8; }
     .ops-setup-btn.edit {
-      position: absolute;
-      top: 8px;
-      right: 8px;
       padding: 4px 12px;
       font-size: 11px;
       border-radius: 4px;
       background: rgba(37,99,235,0.6);
-      z-index: 11;
     }
     .ops-setup-btn.edit:hover { background: #2563eb; }
     .ops-setup-btn.disconnect {
@@ -398,12 +394,15 @@
     .mixed-cctv-grid {
       flex: 1;
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
       gap: 3px;
       padding: 3px;
       background: #000;
       overflow-y: auto;
+      align-content: center;
+      width: 100%;
     }
+    .mixed-cctv-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+    .mixed-cctv-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
     .mixed-cctv-grid .cctv-cell { cursor: default; }
 
     /* Region select */
@@ -1107,10 +1106,14 @@
 
       if (enabled.length === 0 || !activeDvrId) {
         grid.innerHTML = '<div class="cctv-no-channels">No CCTV channels</div>';
+        grid.classList.remove('cols-3', 'cols-4');
         return;
       }
 
       grid.innerHTML = '';
+      // Fixed grid: <=9 channels → 3x3, >9 → 4x4
+      grid.classList.remove('cols-3', 'cols-4');
+      grid.classList.add(enabled.length <= 9 ? 'cols-3' : 'cols-4');
       const dvr = dvrs.find(d => d.id === activeDvrId);
       const refreshMs = (dvr && dvr.refresh_rate) ? dvr.refresh_rate : 2000;
 
