@@ -475,15 +475,17 @@
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
   <script src="viewer.js"></script>
   <script>
-    // Tab switching
+    // Tab switching (saves last tab)
     function switchTab(el) {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
       document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
       el.classList.add('active');
-      document.getElementById('panel-' + el.dataset.panel).classList.add('active');
+      const panel = el.dataset.panel;
+      document.getElementById('panel-' + panel).classList.add('active');
+      localStorage.setItem('opsview_last_tab', panel);
     }
 
-    // Load config from Go backend or localStorage
+    // Load saved config into form fields
     (function initOpsConfig() {
       const savedUrl = localStorage.getItem('opsview_relay_url');
       const savedToken = localStorage.getItem('opsview_token');
@@ -496,6 +498,22 @@
           if (cfg.url) document.getElementById('relayUrl').value = cfg.url;
           if (cfg.token) document.getElementById('token').value = cfg.token;
         });
+      }
+    })();
+
+    // Restore last tab + auto-start
+    (function restoreLastTab() {
+      const lastTab = localStorage.getItem('opsview_last_tab');
+      if (lastTab && lastTab !== 'ops') {
+        const tabEl = document.querySelector('.tab[data-panel="' + lastTab + '"]');
+        if (tabEl) switchTab(tabEl);
+      }
+      // Auto-connect Ops if we have saved relay or stream URL
+      const lastOpsMode = localStorage.getItem('opsview_ops_mode'); // 'relay' or 'stream'
+      if (lastOpsMode === 'relay' && localStorage.getItem('opsview_relay_url')) {
+        setTimeout(() => opsConnect(), 500);
+      } else if (lastOpsMode === 'stream' && localStorage.getItem('opsview_fallback_url')) {
+        setTimeout(() => opsStreamPlay(), 500);
       }
     })();
 
@@ -518,6 +536,7 @@
       }
       localStorage.setItem('opsview_relay_url', url);
       localStorage.setItem('opsview_token', token);
+      localStorage.setItem('opsview_ops_mode', 'relay');
       document.getElementById('opsRelayStatus').textContent = 'Connecting...';
       document.getElementById('opsRelayStatus').style.color = '#eab308';
 
@@ -548,6 +567,7 @@
       disconnect();
       stopStream();
       streamMode = false;
+      localStorage.removeItem('opsview_ops_mode');
       document.getElementById('opsToolbar').style.display = 'none';
       document.getElementById('opsSetup').style.display = 'flex';
       document.getElementById('opsCanvasWrap').style.display = 'none';
@@ -564,6 +584,7 @@
         return;
       }
       localStorage.setItem('opsview_fallback_url', url);
+      localStorage.setItem('opsview_ops_mode', 'stream');
       document.getElementById('opsStreamStatus').textContent = 'Loading...';
       document.getElementById('opsStreamStatus').style.color = '#eab308';
 
