@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e3a5f"/>
+      <stop offset="100%" style="stop-color:#0a1628"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a2740"/>
+      <stop offset="100%" style="stop-color:#0d1520"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#3b82f6"/>
+      <stop offset="100%" style="stop-color:#60a5fa"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#22c55e"/>
+      <stop offset="100%" style="stop-color:#16a34a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect width="512" height="512" rx="100" fill="url(#bg)"/>
+
+  <!-- Monitor frame -->
+  <rect x="72" y="80" width="368" height="250" rx="16" fill="#2a3f5c" stroke="#3b82f6" stroke-width="3"/>
+
+  <!-- Screen -->
+  <rect x="88" y="96" width="336" height="218" rx="8" fill="url(#screen)"/>
+
+  <!-- Grid tiles on screen (representing tile delta) -->
+  <!-- Row 1 -->
+  <rect x="96" y="104" width="52" height="42" rx="3" fill="#1e3350" opacity="0.6"/>
+  <rect x="154" y="104" width="52" height="42" rx="3" fill="#1e3350" opacity="0.6"/>
+  <rect x="212" y="104" width="52" height="42" rx="3" fill="#3b82f6" opacity="0.35"/>
+  <rect x="270" y="104" width="52" height="42" rx="3" fill="#1e3350" opacity="0.6"/>
+  <rect x="328" y="104" width="52" height="42" rx="3" fill="#1e3350" opacity="0.6"/>
+
+  <!-- Row 2 -->
+  <rect x="96" y="152" width="52" height="42" rx="3" fill="#1e3350" opacity="0.6"/>
+  <rect x="154" y="152" width="52" height="42" rx="3" fill="#3b82f6" opacity="0.35"/>
+  <rect x="212" y="152" width="52" height="42" rx="3" fill="#3b82f6" opacity="0.5"/>
+  <rect x="270" y="152" width="52" height="42" rx="3" fill="#3b82f6" opacity="0.35"/>
+  <rect x="328" y="152" width="52" height="42" rx="3" fill="#1e3350" opacity="0.6"/>
+
+  <!-- Row 3 -->
+  <rect x="96" y="200" width="52" height="42" rx="3" fill="#1e3350" opacity="0.6"/>
+  <rect x="154" y="200" width="52" height="42" rx="3" fill="#1e3350" opacity="0.6"/>
+  <rect x="212" y="200" width="52" height="42" rx="3" fill="#3b82f6" opacity="0.35"/>
+  <rect x="270" y="200" width="52" height="42" rx="3" fill="#22c55e" opacity="0.4"/>
+  <rect x="328" y="200" width="52" height="42" rx="3" fill="#1e3350" opacity="0.6"/>
+
+  <!-- Row 4 -->
+  <rect x="96" y="248" width="52" height="42" rx="3" fill="#1e3350" opacity="0.6"/>
+  <rect x="154" y="248" width="52" height="42" rx="3" fill="#1e3350" opacity="0.6"/>
+  <rect x="212" y="248" width="52" height="42" rx="3" fill="#1e3350" opacity="0.6"/>
+  <rect x="270" y="248" width="52" height="42" rx="3" fill="#1e3350" opacity="0.6"/>
+  <rect x="328" y="248" width="52" height="42" rx="3" fill="#1e3350" opacity="0.6"/>
+
+  <!-- Monitor stand -->
+  <rect x="220" y="330" width="72" height="16" rx="4" fill="#2a3f5c"/>
+  <rect x="196" y="346" width="120" height="10" rx="5" fill="#2a3f5c"/>
+
+  <!-- Streaming signal arcs (bottom right) -->
+  <g transform="translate(380, 390)">
+    <circle cx="0" cy="0" r="8" fill="url(#signal)"/>
+    <path d="M 12,-16 A 24,24 0 0,1 12,16" fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round" opacity="0.8"/>
+    <path d="M 22,-28 A 40,40 0 0,1 22,28" fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round" opacity="0.5"/>
+    <path d="M 32,-40 A 56,56 0 0,1 32,40" fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round" opacity="0.3"/>
+  </g>
+
+  <!-- "OV" text -->
+  <text x="256" y="450" text-anchor="middle" font-family="SF Pro Display, Helvetica Neue, Arial, sans-serif" font-size="52" font-weight="700" fill="url(#accent)" letter-spacing="6">OpsView</text>
+</svg>
