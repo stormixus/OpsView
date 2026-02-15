@@ -228,19 +228,23 @@ function handleFrameDelta(buffer, offset, payloadLen) {
 // --- UI helpers ---
 function setStatus(state, text) {
   const dot = document.getElementById('statusDot');
-  const label = document.getElementById('statusText');
-  dot.className = 'status-dot ' + state;
-  label.textContent = text;
+  if (!dot) return;
+  // Map state to dot class: connected→on, connecting→warn, error→err
+  dot.className = 'dot';
+  if (state === 'connected') dot.classList.add('on');
+  else if (state === 'connecting') dot.classList.add('warn');
+  else if (state === 'error') dot.classList.add('err');
 }
 
 function updateStats() {
   const el = document.getElementById('stats');
+  if (!el) return;
   if (!connected) {
     el.textContent = '';
     return;
   }
   const kbps = ((bytesReceived * 8) / 1000).toFixed(0);
-  el.textContent = `${fps} fps | ${tilesReceived} tiles | ${kbps} kbps`;
+  el.textContent = `${fps}fps ${kbps}kbps`;
   bytesReceived = 0;
   tilesReceived = 0;
 }

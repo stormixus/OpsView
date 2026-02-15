@@ -42,32 +42,32 @@
       cursor: default;
     }
 
-    /* Header */
-    .header {
+    /* Tab status indicators (right side of tab bar) */
+    .tab-status-area {
+      margin-left: auto;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      padding: 6px 16px;
-      background: #0d0d14;
-      flex-shrink: 0;
+      gap: 12px;
+      padding-right: 12px;
+      font-size: 11px;
     }
-    .status {
+    .tab-status {
       display: flex;
       align-items: center;
-      gap: 8px;
-      font-size: 13px;
+      gap: 5px;
+      color: #555;
     }
-    .status-dot {
-      width: 8px; height: 8px;
+    .tab-status .dot {
+      width: 6px; height: 6px;
       border-radius: 50%;
-      background: #666;
+      background: #444;
     }
-    .status-dot.connected { background: #22c55e; }
-    .status-dot.connecting { background: #eab308; animation: pulse 1s infinite; }
-    .status-dot.error { background: #ef4444; }
+    .tab-status .dot.on { background: #22c55e; }
+    .tab-status .dot.warn { background: #eab308; animation: pulse 1s infinite; }
+    .tab-status .dot.err { background: #ef4444; }
     @keyframes pulse { 50% { opacity: 0.5; } }
-
-    .stats { font-size: 12px; color: #666; font-family: monospace; }
+    .tab-status .label { color: #666; }
+    .tab-status .info { color: #555; font-family: monospace; font-size: 10px; }
 
     /* Panels */
     .panel {
@@ -447,15 +447,18 @@
     <div class="tab active" data-panel="ops" onclick="switchTab(this)">Ops</div>
     <div class="tab" data-panel="cctv" onclick="switchTab(this)">CCTV</div>
     <div class="tab" data-panel="mixed" onclick="switchTab(this)">Mixed</div>
-  </div>
-
-  <!-- Header -->
-  <div class="header">
-    <div class="status">
-      <span class="status-dot" id="statusDot"></span>
-      <span id="statusText">Disconnected</span>
+    <div class="tab-status-area">
+      <div class="tab-status" id="opsStatus">
+        <span class="dot" id="statusDot"></span>
+        <span class="label">Ops</span>
+        <span class="info" id="stats"></span>
+      </div>
+      <div class="tab-status" id="cctvStatus">
+        <span class="dot" id="cctvDot"></span>
+        <span class="label">CCTV</span>
+        <span class="info" id="cctvInfo"></span>
+      </div>
     </div>
-    <div class="stats" id="stats"></div>
   </div>
 
   <!-- Panels -->
@@ -763,6 +766,7 @@
       try {
         dvrs = await CM().ListDVRs() || [];
         renderDVRTabs();
+        updateCCTVStatus();
         if (dvrs.length > 0 && !activeDvrId) {
           selectDVR(dvrs[0].id);
         }
@@ -792,22 +796,39 @@
       bar.appendChild(addTab);
     }
 
+    function updateCCTVStatus() {
+      const dot = document.getElementById('cctvDot');
+      const info = document.getElementById('cctvInfo');
+      if (!dot || !info) return;
+      const en = cctvChannels.filter(c => c.enabled).length;
+      if (en > 0) {
+        dot.className = 'dot on';
+        const dvrName = dvrs.find(d => d.id === activeDvrId);
+        info.textContent = (dvrName ? dvrName.name + ' ' : '') + en + 'ch';
+      } else if (dvrs.length > 0) {
+        dot.className = 'dot warn';
+        info.textContent = dvrs.length + ' DVR';
+      } else {
+        dot.className = 'dot';
+        info.textContent = '';
+      }
+    }
+
     async function selectDVR(id) {
       activeDvrId = id;
       renderDVRTabs();
       hideDVRForm();
-      // Load channels
       if (!CM()) return;
       try {
         cctvChannels = await CM().ListChannels(id) || [];
         if (cctvChannels.length === 0) {
-          // Auto-discover
           setDVRStatus('Discovering channels...', '#eab308');
           cctvChannels = await CM().DiscoverChannels(id) || [];
           setDVRStatus(cctvChannels.length + ' channels', '#22c55e');
         }
         const dvr = dvrs.find(d => d.id === id);
         renderCCTVGrid(dvr);
+        updateCCTVStatus();
       } catch(e) {
         setDVRStatus('Error: ' + e, '#ef4444');
       }
