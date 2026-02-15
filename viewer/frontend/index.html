@@ -1268,16 +1268,55 @@
         const selH = Math.abs(curY - startY);
 
         if (selW > 10 && selH > 10) {
-          // Convert overlay coords → source canvas coords
-          const src = document.getElementById('screen');
-          const scaleX = src.width / bounds.width;
-          const scaleY = src.height / bounds.height;
+          // Get source dimensions (video or canvas)
+          const video = document.getElementById('streamVideo');
+          const canvas = document.getElementById('screen');
+          let srcW, srcH;
+          if (streamMode && video && video.videoWidth > 0) {
+            srcW = video.videoWidth;
+            srcH = video.videoHeight;
+          } else if (canvas && canvas.width > 0) {
+            srcW = canvas.width;
+            srcH = canvas.height;
+          } else {
+            srcW = bounds.width;
+            srcH = bounds.height;
+          }
+
+          // Account for object-fit:contain letterboxing
+          const containerW = bounds.width;
+          const containerH = bounds.height;
+          const srcRatio = srcW / srcH;
+          const containerRatio = containerW / containerH;
+          let renderW, renderH, offsetX, offsetY;
+          if (srcRatio > containerRatio) {
+            // Source wider → pillarboxed top/bottom
+            renderW = containerW;
+            renderH = containerW / srcRatio;
+            offsetX = 0;
+            offsetY = (containerH - renderH) / 2;
+          } else {
+            // Source taller → letterboxed left/right
+            renderH = containerH;
+            renderW = containerH * srcRatio;
+            offsetX = (containerW - renderW) / 2;
+            offsetY = 0;
+          }
+
+          // Map selection coords to source coords
+          const scale = srcW / renderW;
           cropRegion = {
-            x: Math.round(selX * scaleX),
-            y: Math.round(selY * scaleY),
-            w: Math.round(selW * scaleX),
-            h: Math.round(selH * scaleY)
+            x: Math.max(0, Math.round((selX - offsetX) * scale)),
+            y: Math.max(0, Math.round((selY - offsetY) * scale)),
+            w: Math.min(srcW, Math.round(selW * scale)),
+            h: Math.min(srcH, Math.round(selH * scale))
           };
+          // Clamp to source bounds
+          cropRegion.x = Math.min(cropRegion.x, srcW - cropRegion.w);
+          cropRegion.y = Math.min(cropRegion.y, srcH - cropRegion.h);
+          if (cropRegion.x < 0) cropRegion.x = 0;
+          if (cropRegion.y < 0) cropRegion.y = 0;
+
           localStorage.setItem('opsview_crop_region', JSON.stringify(cropRegion));
           document.getElementById('regionResetBtn').style.display = 'inline-block';
         }
