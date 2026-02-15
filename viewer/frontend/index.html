@@ -129,14 +129,158 @@
     }
     .settings-bar button:hover { background: #1d4ed8; }
     .settings-bar button.off { background: #dc2626; }
+
+    /* CCTV DVR sub-tabs */
+    .dvr-tabs {
+      display: flex;
+      background: #0d0d14;
+      border-bottom: 1px solid #1a1a24;
+      flex-shrink: 0;
+      overflow-x: auto;
+    }
+    .dvr-tab {
+      padding: 5px 16px;
+      font-size: 11px;
+      color: #777;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+    .dvr-tab:hover { color: #bbb; }
+    .dvr-tab.active { color: #60a5fa; border-bottom-color: #60a5fa; }
+    .dvr-tab.add-dvr { color: #22c55e; }
+    .dvr-tab .del-btn {
+      margin-left: 6px;
+      color: #555;
+      font-size: 10px;
+      cursor: pointer;
+    }
+    .dvr-tab .del-btn:hover { color: #ef4444; }
+
+    .dvr-form {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 16px;
+      background: #111118;
+      border-bottom: 1px solid #222;
+      font-size: 11px;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    .dvr-form label { color: #777; }
+    .dvr-form input, .dvr-form select {
+      background: #1a1a24;
+      color: #e0e0e0;
+      border: 1px solid #333;
+      border-radius: 3px;
+      padding: 3px 6px;
+      font-size: 11px;
+    }
+    .dvr-form button {
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 3px;
+      padding: 4px 12px;
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .dvr-form button:hover { background: #1d4ed8; }
+
+    /* CCTV Grid */
+    .cctv-grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 4px;
+      padding: 4px;
+      background: #000;
+      overflow-y: auto;
+    }
+    .cctv-cell {
+      position: relative;
+      background: #0a0a14;
+      border: 2px solid #222;
+      border-radius: 4px;
+      overflow: hidden;
+      cursor: grab;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    }
+    .cctv-cell:active { cursor: grabbing; }
+    .cctv-cell.dragging {
+      opacity: 0.4;
+      transform: scale(0.95);
+      border-color: #3b82f6;
+      box-shadow: 0 0 20px rgba(59,130,246,0.3);
+    }
+    .cctv-cell.dragover {
+      border-color: #22c55e;
+      transform: scale(1.02);
+      box-shadow: 0 0 15px rgba(34,197,94,0.3);
+    }
+    .cctv-cell img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+      display: block;
+    }
+    .cctv-cell .ch-label {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(0,0,0,0.75);
+      padding: 3px 8px;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .cctv-cell .ch-name {
+      border: none;
+      background: transparent;
+      font-size: 11px;
+      color: #e0e0e0;
+      width: 100%;
+      outline: none;
+      cursor: text;
+    }
+    .cctv-cell .ch-name:focus {
+      background: #1a1a24;
+      border-radius: 2px;
+      padding: 1px 4px;
+    }
+    .cctv-cell .ch-id {
+      color: #555;
+      font-size: 10px;
+      margin-left: 6px;
+      white-space: nowrap;
+    }
+    .cctv-cell .ch-res {
+      color: #444;
+      font-size: 9px;
+      margin-left: 4px;
+    }
+    .cctv-no-channels {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #444;
+      font-size: 16px;
+      min-height: 200px;
+    }
   </style>
 </head>
 <body>
   <!-- Tabs -->
   <div class="tabs">
     <div class="tab active" data-panel="ops" onclick="switchTab(this)">Ops</div>
-    <div class="tab disabled" data-panel="cctv">CCTV</div>
-    <div class="tab disabled" data-panel="mixed">Mixed</div>
+    <div class="tab" data-panel="cctv" onclick="switchTab(this)">CCTV</div>
+    <div class="tab" data-panel="mixed" onclick="switchTab(this)">Mixed</div>
   </div>
 
   <!-- Header -->
@@ -154,8 +298,40 @@
       <canvas id="screen"></canvas>
     </div>
   </div>
-  <div class="panel" id="panel-cctv">
-    <div class="placeholder">CCTV - Coming soon</div>
+  <div class="panel" id="panel-cctv" style="flex-direction:column;">
+    <!-- DVR sub-tabs -->
+    <div class="dvr-tabs" id="dvrTabs">
+      <div class="dvr-tab add-dvr" onclick="showAddDVR()">+ Add DVR</div>
+    </div>
+    <!-- Add DVR form (hidden by default) -->
+    <div class="dvr-form" id="dvrForm" style="display:none;">
+      <label>Name:</label>
+      <input type="text" id="dvrName" placeholder="My DVR" style="width:100px">
+      <label>IP:</label>
+      <input type="text" id="dvrAddr" placeholder="192.168.1.64" style="width:130px">
+      <label>Port:</label>
+      <input type="number" id="dvrPort" value="80" style="width:50px">
+      <label>User:</label>
+      <input type="text" id="dvrUser" value="admin" style="width:70px">
+      <label>Pass:</label>
+      <input type="password" id="dvrPass" style="width:80px">
+      <label>Quality:</label>
+      <select id="dvrQuality"><option value="sub">Sub</option><option value="main">Main</option></select>
+      <label>Refresh:</label>
+      <select id="dvrRefresh">
+        <option value="1000">1s</option>
+        <option value="2000" selected>2s</option>
+        <option value="3000">3s</option>
+        <option value="5000">5s</option>
+      </select>
+      <button onclick="saveDVR()">Save & Connect</button>
+      <button onclick="hideDVRForm()" style="background:#666;">Cancel</button>
+      <span id="dvrStatus" style="color:#888;margin-left:8px;"></span>
+    </div>
+    <!-- Channel grid -->
+    <div class="cctv-grid" id="cctvGrid">
+      <div class="cctv-no-channels">Add a DVR to view channels</div>
+    </div>
   </div>
   <div class="panel" id="panel-mixed">
     <div class="placeholder">Mixed View - Coming soon</div>
@@ -175,7 +351,6 @@
   <script>
     // Tab switching
     function switchTab(el) {
-      if (el.classList.contains('disabled')) return;
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
       document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
       el.classList.add('active');
@@ -189,6 +364,264 @@
         if (cfg.token) document.getElementById('token').value = cfg.token;
       });
     }
+
+    // === CCTV Multi-DVR ===
+    const CM = () => window.go && window.go.main && window.go.main.CCTVManager;
+    let dvrs = [];
+    let activeDvrId = null;
+    let cctvChannels = [];
+    let cctvTimers = [];
+    let dragSrcChNum = null;
+
+    async function loadDVRs() {
+      if (!CM()) return;
+      try {
+        dvrs = await CM().ListDVRs() || [];
+        renderDVRTabs();
+        if (dvrs.length > 0 && !activeDvrId) {
+          selectDVR(dvrs[0].id);
+        }
+      } catch(e) { console.error('loadDVRs:', e); }
+    }
+
+    function renderDVRTabs() {
+      const bar = document.getElementById('dvrTabs');
+      bar.innerHTML = '';
+      dvrs.forEach(d => {
+        const tab = document.createElement('div');
+        tab.className = 'dvr-tab' + (d.id === activeDvrId ? ' active' : '');
+        tab.innerHTML = d.name + '<span class="del-btn" title="Delete DVR">&times;</span>';
+        tab.addEventListener('click', e => {
+          if (e.target.classList.contains('del-btn')) { deleteDVR(d.id); return; }
+          selectDVR(d.id);
+        });
+        bar.appendChild(tab);
+      });
+      const addTab = document.createElement('div');
+      addTab.className = 'dvr-tab add-dvr';
+      addTab.textContent = '+ Add DVR';
+      addTab.onclick = showAddDVR;
+      bar.appendChild(addTab);
+    }
+
+    async function selectDVR(id) {
+      activeDvrId = id;
+      renderDVRTabs();
+      hideDVRForm();
+      // Load channels
+      if (!CM()) return;
+      try {
+        cctvChannels = await CM().ListChannels(id) || [];
+        if (cctvChannels.length === 0) {
+          // Auto-discover
+          setDVRStatus('Discovering channels...', '#eab308');
+          cctvChannels = await CM().DiscoverChannels(id) || [];
+          setDVRStatus(cctvChannels.length + ' channels', '#22c55e');
+        }
+        const dvr = dvrs.find(d => d.id === id);
+        renderCCTVGrid(dvr);
+      } catch(e) {
+        setDVRStatus('Error: ' + e, '#ef4444');
+      }
+    }
+
+    function showAddDVR() {
+      document.getElementById('dvrForm').style.display = 'flex';
+      document.getElementById('dvrName').value = '';
+      document.getElementById('dvrAddr').value = '';
+      document.getElementById('dvrPort').value = '80';
+      document.getElementById('dvrUser').value = 'admin';
+      document.getElementById('dvrPass').value = '';
+      document.getElementById('dvrAddr').focus();
+    }
+    function hideDVRForm() { document.getElementById('dvrForm').style.display = 'none'; }
+
+    async function saveDVR() {
+      if (!CM()) return;
+      const name = document.getElementById('dvrName').value.trim();
+      const addr = document.getElementById('dvrAddr').value.trim();
+      const port = parseInt(document.getElementById('dvrPort').value) || 80;
+      const user = document.getElementById('dvrUser').value.trim();
+      const pass = document.getElementById('dvrPass').value;
+      const quality = document.getElementById('dvrQuality').value;
+      const refresh = parseInt(document.getElementById('dvrRefresh').value) || 2000;
+
+      if (!addr) { setDVRStatus('Enter DVR address', '#ef4444'); return; }
+      setDVRStatus('Connecting...', '#eab308');
+
+      try {
+        const dvr = await CM().AddDVR(name || addr, addr, port, user, pass);
+        await CM().UpdateDVR(dvr.id, dvr.name, addr, port, user, pass, refresh, quality);
+        dvr.refresh_rate = refresh;
+        dvr.stream_quality = quality;
+        dvrs.push(dvr);
+        hideDVRForm();
+        selectDVR(dvr.id);
+      } catch(e) {
+        setDVRStatus('Error: ' + e, '#ef4444');
+      }
+    }
+
+    async function deleteDVR(id) {
+      if (!CM()) return;
+      if (!confirm('Delete this DVR and all its channels?')) return;
+      try {
+        await CM().DeleteDVR(id);
+        dvrs = dvrs.filter(d => d.id !== id);
+        if (activeDvrId === id) {
+          activeDvrId = dvrs.length > 0 ? dvrs[0].id : null;
+        }
+        renderDVRTabs();
+        if (activeDvrId) selectDVR(activeDvrId);
+        else { cctvChannels = []; renderCCTVGrid(null); }
+      } catch(e) { console.error('deleteDVR:', e); }
+    }
+
+    function setDVRStatus(text, color) {
+      const el = document.getElementById('dvrStatus');
+      el.textContent = text;
+      el.style.color = color || '#888';
+    }
+
+    // --- Grid rendering with preload (no flicker) ---
+    function renderCCTVGrid(dvr) {
+      const grid = document.getElementById('cctvGrid');
+      cctvTimers.forEach(t => clearInterval(t));
+      cctvTimers = [];
+
+      const enabled = cctvChannels.filter(ch => ch.enabled);
+      enabled.sort((a, b) => a.order - b.order);
+
+      if (enabled.length === 0) {
+        grid.innerHTML = '<div class="cctv-no-channels">No channels found</div>';
+        return;
+      }
+
+      grid.innerHTML = '';
+      const refreshMs = (dvr && dvr.refresh_rate) ? dvr.refresh_rate : 2000;
+
+      enabled.forEach(ch => {
+        const cell = document.createElement('div');
+        cell.className = 'cctv-cell';
+        cell.draggable = true;
+        cell.dataset.chnum = ch.ch_num;
+
+        // Set aspect ratio from detected resolution
+        if (ch.width > 0 && ch.height > 0) {
+          cell.style.aspectRatio = ch.width + '/' + ch.height;
+        } else {
+          cell.style.aspectRatio = '16/9';
+        }
+
+        const img = document.createElement('img');
+        img.alt = ch.name;
+        img.src = '/cctv/snapshot/' + activeDvrId + '/' + ch.ch_num + '?t=' + Date.now();
+        img.onerror = function() {
+          this.style.opacity = '0.3';
+        };
+        img.onload = function() {
+          this.style.opacity = '1';
+          // Auto-detect aspect ratio from loaded image
+          if (this.naturalWidth > 0 && this.naturalHeight > 0 && ch.width === 0) {
+            cell.style.aspectRatio = this.naturalWidth + '/' + this.naturalHeight;
+          }
+        };
+        cell.appendChild(img);
+
+        // Label
+        const label = document.createElement('div');
+        label.className = 'ch-label';
+        const nameInput = document.createElement('input');
+        nameInput.className = 'ch-name';
+        nameInput.value = ch.name;
+        nameInput.addEventListener('change', () => renameChannel(ch.id, nameInput.value, ch));
+        nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') nameInput.blur(); });
+        label.appendChild(nameInput);
+
+        const info = document.createElement('span');
+        info.className = 'ch-id';
+        info.textContent = 'CH' + ch.ch_num;
+        label.appendChild(info);
+
+        if (ch.width > 0) {
+          const res = document.createElement('span');
+          res.className = 'ch-res';
+          res.textContent = ch.width + 'x' + ch.height;
+          label.appendChild(res);
+        }
+
+        cell.appendChild(label);
+        grid.appendChild(cell);
+
+        // Preloaded snapshot refresh (no flicker)
+        const timer = setInterval(() => {
+          const preload = new Image();
+          preload.onload = () => {
+            img.src = preload.src;
+            img.style.opacity = '1';
+            if (preload.naturalWidth > 0 && ch.width === 0) {
+              cell.style.aspectRatio = preload.naturalWidth + '/' + preload.naturalHeight;
+            }
+          };
+          preload.src = '/cctv/snapshot/' + activeDvrId + '/' + ch.ch_num + '?t=' + Date.now();
+        }, refreshMs);
+        cctvTimers.push(timer);
+
+        // D&D with animation
+        cell.addEventListener('dragstart', e => {
+          dragSrcChNum = ch.ch_num;
+          cell.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', ch.ch_num);
+        });
+        cell.addEventListener('dragend', () => {
+          cell.classList.remove('dragging');
+          dragSrcChNum = null;
+          grid.querySelectorAll('.cctv-cell').forEach(c => c.classList.remove('dragover'));
+        });
+        cell.addEventListener('dragover', e => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          if (ch.ch_num !== dragSrcChNum) cell.classList.add('dragover');
+        });
+        cell.addEventListener('dragleave', () => cell.classList.remove('dragover'));
+        cell.addEventListener('drop', e => {
+          e.preventDefault();
+          cell.classList.remove('dragover');
+          const fromChNum = parseInt(e.dataTransfer.getData('text/plain'));
+          if (fromChNum !== ch.ch_num) reorderChannels(fromChNum, ch.ch_num);
+        });
+      });
+    }
+
+    async function renameChannel(id, newName, ch) {
+      if (!CM()) return;
+      ch.name = newName;
+      try { await CM().UpdateChannel(id, newName, ch.order, ch.enabled); }
+      catch(e) { console.error('rename:', e); }
+    }
+
+    async function reorderChannels(fromChNum, toChNum) {
+      if (!CM() || !activeDvrId) return;
+      const enabled = cctvChannels.filter(c => c.enabled).sort((a,b) => a.order - b.order);
+      const nums = enabled.map(c => c.ch_num);
+      const fromIdx = nums.indexOf(fromChNum);
+      const toIdx = nums.indexOf(toChNum);
+      if (fromIdx < 0 || toIdx < 0) return;
+      nums.splice(fromIdx, 1);
+      nums.splice(toIdx, 0, fromChNum);
+      nums.forEach((num, i) => {
+        const ch = cctvChannels.find(c => c.ch_num === num);
+        if (ch) ch.order = i;
+      });
+      const dvr = dvrs.find(d => d.id === activeDvrId);
+      renderCCTVGrid(dvr);
+      try { await CM().ReorderChannels(activeDvrId, nums); }
+      catch(e) { console.error('reorder:', e); }
+    }
+
+    // Init CCTV
+    loadDVRs();
   </script>
 </body>
 </html>

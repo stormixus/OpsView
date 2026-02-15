@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"log"
 
@@ -14,6 +15,8 @@ var assets embed.FS
 
 func main() {
 	app := NewApp()
+	cctv := NewCCTVManager()
+	cctvProxy := NewCCTVProxyMiddleware(cctv)
 
 	err := wails.Run(&options.App{
 		Title:     "OpsView",
@@ -22,11 +25,16 @@ func main() {
 		MinWidth:  800,
 		MinHeight: 600,
 		AssetServer: &assetserver.Options{
-			Assets: assets,
+			Assets:     assets,
+			Middleware: cctvProxy.Middleware,
 		},
-		OnStartup: app.startup,
+		OnStartup: func(ctx context.Context) {
+			app.startup(ctx)
+			cctv.startup(ctx)
+		},
 		Bind: []interface{}{
 			app,
+			cctv,
 		},
 	})
 	if err != nil {
