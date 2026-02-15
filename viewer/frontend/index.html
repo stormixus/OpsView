@@ -554,7 +554,9 @@
       document.getElementById('opsStreamWrap').style.display = 'none';
     }
 
-    function opsStreamPlay() {
+    const SP = () => window.go && window.go.main && window.go.main.StreamProxy;
+
+    async function opsStreamPlay() {
       const url = document.getElementById('fallbackUrl').value.trim();
       if (!url) {
         document.getElementById('opsStreamStatus').textContent = 'Enter stream URL';
@@ -583,25 +585,45 @@
         document.getElementById('opsStreamStatus').style.color = '#ef4444';
       }
 
-      if (url.includes('.m3u8')) {
-        if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-          hlsInstance = new Hls({ enableWorker: true, lowLatencyMode: true });
-          hlsInstance.loadSource(url);
-          hlsInstance.attachMedia(video);
-          hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => { video.play(); onPlaying(); });
-          hlsInstance.on(Hls.Events.ERROR, (e, data) => { if (data.fatal) onError('HLS error: ' + data.type); });
-        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-          video.src = url;
-          video.addEventListener('loadedmetadata', () => { video.play(); onPlaying(); });
-          video.onerror = () => onError('Failed to load HLS');
-        } else {
-          onError('HLS not supported');
+      // RTSP: use Go backend ffmpeg proxy → HLS
+      if (url.startsWith('rtsp://')) {
+        if (!SP()) { onError('Stream proxy not available'); return; }
+        try {
+          document.getElementById('opsStreamStatus').textContent = 'Starting RTSP transcoder...';
+          const hlsUrl = await SP().StartStream(url);
+          playHLS(hlsUrl, video, onPlaying, onError);
+        } catch(e) {
+          onError('RTSP error: ' + e);
         }
-      } else {
+        return;
+      }
+
+      // M3U8: play directly via HLS.js
+      if (url.includes('.m3u8')) {
+        playHLS(url, video, onPlaying, onError);
+        return;
+      }
+
+      // Direct video URL (mp4, etc)
+      video.src = url;
+      video.onloadeddata = () => onPlaying();
+      video.onerror = () => onError('Failed to load stream');
+      video.play().catch(() => {});
+    }
+
+    function playHLS(url, video, onPlaying, onError) {
+      if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+        hlsInstance = new Hls({ enableWorker: true, lowLatencyMode: true });
+        hlsInstance.loadSource(url);
+        hlsInstance.attachMedia(video);
+        hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => { video.play(); onPlaying(); });
+        hlsInstance.on(Hls.Events.ERROR, (e, data) => { if (data.fatal) onError('HLS error: ' + data.type); });
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = url;
-        video.onloadeddata = () => onPlaying();
-        video.onerror = () => onError('Failed to load stream');
-        video.play().catch(() => {});
+        video.addEventListener('loadedmetadata', () => { video.play(); onPlaying(); });
+        video.onerror = () => onError('Failed to load HLS');
+      } else {
+        onError('HLS not supported');
       }
     }
 
@@ -609,6 +631,8 @@
       if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
       const video = document.getElementById('streamVideo');
       if (video) { video.pause(); video.removeAttribute('src'); video.load(); }
+      // Stop ffmpeg backend
+      if (SP()) { SP().StopStream().catch(() => {}); }
     }
 
     // === CCTV Multi-DVR ===

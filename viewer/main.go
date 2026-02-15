@@ -16,7 +16,8 @@ var assets embed.FS
 func main() {
 	app := NewApp()
 	cctv := NewCCTVManager()
-	cctvProxy := NewCCTVProxyMiddleware(cctv)
+	stream := NewStreamProxy()
+	proxy := NewAssetProxyMiddleware(cctv, stream)
 
 	err := wails.Run(&options.App{
 		Title:     "OpsView",
@@ -26,15 +27,19 @@ func main() {
 		MinHeight: 600,
 		AssetServer: &assetserver.Options{
 			Assets:     assets,
-			Middleware: cctvProxy.Middleware,
+			Middleware: proxy.Middleware,
 		},
 		OnStartup: func(ctx context.Context) {
 			app.startup(ctx)
 			cctv.startup(ctx)
 		},
+		OnShutdown: func(ctx context.Context) {
+			stream.StopStream()
+		},
 		Bind: []interface{}{
 			app,
 			cctv,
+			stream,
 		},
 	})
 	if err != nil {

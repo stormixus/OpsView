@@ -6,17 +6,18 @@ import (
 	"strings"
 )
 
-// CCTVProxyMiddleware intercepts /cctv/* paths to proxy DVR snapshots/streams.
-type CCTVProxyMiddleware struct {
-	cctv *CCTVManager
+// AssetProxyMiddleware intercepts /cctv/* and /ops/* paths.
+type AssetProxyMiddleware struct {
+	cctv   *CCTVManager
+	stream *StreamProxy
 }
 
-func NewCCTVProxyMiddleware(cctv *CCTVManager) *CCTVProxyMiddleware {
-	return &CCTVProxyMiddleware{cctv: cctv}
+func NewAssetProxyMiddleware(cctv *CCTVManager, stream *StreamProxy) *AssetProxyMiddleware {
+	return &AssetProxyMiddleware{cctv: cctv, stream: stream}
 }
 
 // Middleware returns a Wails-compatible middleware.
-func (p *CCTVProxyMiddleware) Middleware(next http.Handler) http.Handler {
+func (p *AssetProxyMiddleware) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
@@ -26,11 +27,17 @@ func (p *CCTVProxyMiddleware) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// /ops/hls/* — HLS segments from ffmpeg
+		if strings.HasPrefix(path, "/ops/hls/") {
+			p.stream.ServeHLS(w, r)
+			return
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }
 
-func (p *CCTVProxyMiddleware) handleSnapshot(w http.ResponseWriter, r *http.Request) {
+func (p *AssetProxyMiddleware) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	// Parse /cctv/snapshot/{dvrID}/{chNum}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/cctv/snapshot/"), "/")
 	if len(parts) != 2 {
