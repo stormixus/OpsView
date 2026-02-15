@@ -150,12 +150,13 @@
     .dvr-tab:hover { color: #bbb; }
     .dvr-tab.active { color: #60a5fa; border-bottom-color: #60a5fa; }
     .dvr-tab.add-dvr { color: #22c55e; }
-    .dvr-tab .del-btn {
+    .dvr-tab .edit-btn, .dvr-tab .del-btn {
       margin-left: 6px;
       color: #555;
       font-size: 10px;
       cursor: pointer;
     }
+    .dvr-tab .edit-btn:hover { color: #60a5fa; }
     .dvr-tab .del-btn:hover { color: #ef4444; }
 
     .dvr-form {
@@ -223,6 +224,12 @@
       transform: scale(1.02);
       border-color: #3b82f6;
       box-shadow: 0 8px 30px rgba(59,130,246,0.4);
+    }
+    .sortable-fallback {
+      opacity: 0.85;
+      transform: scale(1.05);
+      border-color: #60a5fa;
+      box-shadow: 0 12px 40px rgba(59,130,246,0.5);
     }
     .cctv-cell img {
       width: 100%;
@@ -328,7 +335,7 @@
         <option value="3000">3s</option>
         <option value="5000">5s</option>
       </select>
-      <button onclick="saveDVR()">Save & Connect</button>
+      <button id="dvrSaveBtn" onclick="saveDVR()">Save & Connect</button>
       <button onclick="hideDVRForm()" style="background:#666;">Cancel</button>
       <span id="dvrStatus" style="color:#888;margin-left:8px;"></span>
     </div>
@@ -393,9 +400,12 @@
       dvrs.forEach(d => {
         const tab = document.createElement('div');
         tab.className = 'dvr-tab' + (d.id === activeDvrId ? ' active' : '');
-        tab.innerHTML = d.name + '<span class="del-btn" title="Delete DVR">&times;</span>';
+        tab.innerHTML = d.name
+          + '<span class="edit-btn" title="Edit DVR">&#9998;</span>'
+          + '<span class="del-btn" title="Delete DVR">&times;</span>';
         tab.addEventListener('click', e => {
           if (e.target.classList.contains('del-btn')) { deleteDVR(d.id); return; }
+          if (e.target.classList.contains('edit-btn')) { showEditDVR(d.id); return; }
           selectDVR(d.id);
         });
         bar.appendChild(tab);
@@ -428,16 +438,44 @@
       }
     }
 
+    let editingDvrId = null; // null = add mode, number = edit mode
+
     function showAddDVR() {
+      editingDvrId = null;
       document.getElementById('dvrForm').style.display = 'flex';
       document.getElementById('dvrName').value = '';
       document.getElementById('dvrAddr').value = '';
       document.getElementById('dvrPort').value = '80';
       document.getElementById('dvrUser').value = 'admin';
       document.getElementById('dvrPass').value = '';
+      document.getElementById('dvrQuality').value = 'sub';
+      document.getElementById('dvrRefresh').value = '2000';
+      document.getElementById('dvrSaveBtn').textContent = 'Save & Connect';
+      setDVRStatus('', '');
       document.getElementById('dvrAddr').focus();
     }
-    function hideDVRForm() { document.getElementById('dvrForm').style.display = 'none'; }
+
+    function showEditDVR(id) {
+      const d = dvrs.find(v => v.id === id);
+      if (!d) return;
+      editingDvrId = id;
+      document.getElementById('dvrForm').style.display = 'flex';
+      document.getElementById('dvrName').value = d.name || '';
+      document.getElementById('dvrAddr').value = d.addr || '';
+      document.getElementById('dvrPort').value = d.port || 80;
+      document.getElementById('dvrUser').value = d.username || 'admin';
+      document.getElementById('dvrPass').value = d.password || '';
+      document.getElementById('dvrQuality').value = d.stream_quality || 'sub';
+      document.getElementById('dvrRefresh').value = d.refresh_rate || 2000;
+      document.getElementById('dvrSaveBtn').textContent = 'Update';
+      setDVRStatus('', '');
+      document.getElementById('dvrName').focus();
+    }
+
+    function hideDVRForm() {
+      document.getElementById('dvrForm').style.display = 'none';
+      editingDvrId = null;
+    }
 
     async function saveDVR() {
       if (!CM()) return;
@@ -450,16 +488,32 @@
       const refresh = parseInt(document.getElementById('dvrRefresh').value) || 2000;
 
       if (!addr) { setDVRStatus('Enter DVR address', '#ef4444'); return; }
-      setDVRStatus('Connecting...', '#eab308');
+      setDVRStatus('Saving...', '#eab308');
 
       try {
-        const dvr = await CM().AddDVR(name || addr, addr, port, user, pass);
-        await CM().UpdateDVR(dvr.id, dvr.name, addr, port, user, pass, refresh, quality);
-        dvr.refresh_rate = refresh;
-        dvr.stream_quality = quality;
-        dvrs.push(dvr);
-        hideDVRForm();
-        selectDVR(dvr.id);
+        if (editingDvrId) {
+          // Update existing DVR
+          await CM().UpdateDVR(editingDvrId, name || addr, addr, port, user, pass, refresh, quality);
+          const d = dvrs.find(v => v.id === editingDvrId);
+          if (d) {
+            d.name = name || addr; d.addr = addr; d.port = port;
+            d.username = user; d.password = pass;
+            d.refresh_rate = refresh; d.stream_quality = quality;
+          }
+          setDVRStatus('Updated', '#22c55e');
+          hideDVRForm();
+          renderDVRTabs();
+          selectDVR(editingDvrId);
+        } else {
+          // Add new DVR
+          const dvr = await CM().AddDVR(name || addr, addr, port, user, pass);
+          await CM().UpdateDVR(dvr.id, dvr.name, addr, port, user, pass, refresh, quality);
+          dvr.refresh_rate = refresh;
+          dvr.stream_quality = quality;
+          dvrs.push(dvr);
+          hideDVRForm();
+          selectDVR(dvr.id);
+        }
       } catch(e) {
         setDVRStatus('Error: ' + e, '#ef4444');
       }
@@ -577,9 +631,14 @@
         ghostClass: 'sortable-ghost',
         chosenClass: 'sortable-chosen',
         dragClass: 'sortable-drag',
-        delay: 100,
-        delayOnTouchOnly: true,
+        forceFallback: true,
+        fallbackClass: 'sortable-fallback',
+        delay: 80,
+        delayOnTouchOnly: false,
         swapThreshold: 0.65,
+        filter: '.ch-name',
+        preventOnFilter: false,
+        draggable: '.cctv-cell',
         onEnd: function(evt) {
           if (evt.oldIndex === evt.newIndex) return;
           // Read new order from DOM
