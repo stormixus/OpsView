@@ -31,34 +31,16 @@ document.addEventListener('DOMContentLoaded', () => {
   canvas = document.getElementById('screen');
   ctx = canvas.getContext('2d');
 
-  // Load saved settings
-  const savedUrl = localStorage.getItem('opsview_relay_url');
-  const savedToken = localStorage.getItem('opsview_token');
-  if (savedUrl) document.getElementById('relayUrl').value = savedUrl;
-  if (savedToken) document.getElementById('token').value = savedToken;
-
   // Stats update loop
   setInterval(updateStats, 1000);
 });
 
 // --- Connection ---
-function toggleConnection() {
-  if (connected) {
-    disconnect();
-  } else {
-    connect();
-  }
-}
-
 function connect() {
   const url = document.getElementById('relayUrl').value.trim();
   const token = document.getElementById('token').value.trim();
 
   if (!url) return;
-
-  // Save settings
-  localStorage.setItem('opsview_relay_url', url);
-  localStorage.setItem('opsview_token', token);
 
   setStatus('connecting', 'Connecting...');
 
@@ -71,7 +53,6 @@ function connect() {
   }
 
   ws.onopen = () => {
-    // Send HELLO
     const hello = {
       role: 'watcher',
       client: 'opsview-web',
@@ -81,14 +62,11 @@ function connect() {
     };
     sendOVPMessage(MSG_HELLO, JSON.stringify(hello));
 
-    // Send AUTH
     const auth = { token: token };
     sendOVPMessage(MSG_AUTH, JSON.stringify(auth));
 
     connected = true;
     setStatus('connected', 'Connected');
-    document.getElementById('connectBtn').textContent = 'Disconnect';
-    document.getElementById('connectBtn').classList.add('disconnect');
   };
 
   ws.onmessage = (event) => {
@@ -100,8 +78,6 @@ function connect() {
   ws.onclose = () => {
     connected = false;
     setStatus('error', 'Disconnected');
-    document.getElementById('connectBtn').textContent = 'Connect';
-    document.getElementById('connectBtn').classList.remove('disconnect');
     ws = null;
   };
 
@@ -117,8 +93,6 @@ function disconnect() {
   }
   connected = false;
   setStatus('error', 'Disconnected');
-  document.getElementById('connectBtn').textContent = 'Connect';
-  document.getElementById('connectBtn').classList.remove('disconnect');
 }
 
 // --- OVP Message handling ---
