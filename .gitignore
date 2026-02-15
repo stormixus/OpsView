@@ -1,0 +1,30 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/relay/opsview-relay
+/agent/opsview-agent
+/viewer/build/
+
+# Go
+vendor/
+
+# Web
+web/node_modules/
+web/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config (may contain tokens)
+*.env
+!*.env.example

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>OpsView</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0f;
+      color: #e0e0e0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* Tab bar */
+    .tabs {
+      display: flex;
+      background: #111118;
+      border-bottom: 1px solid #222;
+      flex-shrink: 0;
+    }
+    .tab {
+      padding: 8px 24px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #888;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+    .tab:hover { color: #bbb; }
+    .tab.active {
+      color: #60a5fa;
+      border-bottom-color: #60a5fa;
+    }
+    .tab.disabled {
+      color: #444;
+      cursor: default;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 16px;
+      background: #0d0d14;
+      flex-shrink: 0;
+    }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+    }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #666;
+    }
+    .status-dot.connected { background: #22c55e; }
+    .status-dot.connecting { background: #eab308; animation: pulse 1s infinite; }
+    .status-dot.error { background: #ef4444; }
+    @keyframes pulse { 50% { opacity: 0.5; } }
+
+    .stats { font-size: 12px; color: #666; font-family: monospace; }
+
+    /* Panels */
+    .panel {
+      flex: 1;
+      display: none;
+      overflow: hidden;
+    }
+    .panel.active { display: flex; }
+
+    .canvas-wrap {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+    }
+    canvas {
+      max-width: 100%;
+      max-height: 100%;
+    }
+
+    .placeholder {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #444;
+      font-size: 18px;
+    }
+
+    /* Settings */
+    .settings-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 5px 16px;
+      background: #111118;
+      border-top: 1px solid #222;
+      flex-shrink: 0;
+      font-size: 12px;
+    }
+    .settings-bar label { color: #777; }
+    .settings-bar input {
+      background: #1a1a24;
+      color: #e0e0e0;
+      border: 1px solid #333;
+      border-radius: 3px;
+      padding: 3px 6px;
+      font-size: 11px;
+    }
+    .settings-bar button {
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 3px;
+      padding: 4px 12px;
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .settings-bar button:hover { background: #1d4ed8; }
+    .settings-bar button.off { background: #dc2626; }
+  </style>
+</head>
+<body>
+  <!-- Tabs -->
+  <div class="tabs">
+    <div class="tab active" data-panel="ops" onclick="switchTab(this)">Ops</div>
+    <div class="tab disabled" data-panel="cctv">CCTV</div>
+    <div class="tab disabled" data-panel="mixed">Mixed</div>
+  </div>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="status">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Disconnected</span>
+    </div>
+    <div class="stats" id="stats"></div>
+  </div>
+
+  <!-- Panels -->
+  <div class="panel active" id="panel-ops">
+    <div class="canvas-wrap">
+      <canvas id="screen"></canvas>
+    </div>
+  </div>
+  <div class="panel" id="panel-cctv">
+    <div class="placeholder">CCTV - Coming soon</div>
+  </div>
+  <div class="panel" id="panel-mixed">
+    <div class="placeholder">Mixed View - Coming soon</div>
+  </div>
+
+  <!-- Settings -->
+  <div class="settings-bar">
+    <label>Relay:</label>
+    <input type="text" id="relayUrl" value="ws://127.0.0.1:8080/watch" style="width:220px">
+    <label>Token:</label>
+    <input type="password" id="token" value="dev-watcher-token" style="width:120px">
+    <button id="connectBtn" onclick="toggleConnection()">Connect</button>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/fzstd@0.1.1/umd/index.js"></script>
+  <script src="viewer.js"></script>
+  <script>
+    // Tab switching
+    function switchTab(el) {
+      if (el.classList.contains('disabled')) return;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      el.classList.add('active');
+      document.getElementById('panel-' + el.dataset.panel).classList.add('active');
+    }
+
+    // Load config from Go backend if available
+    if (window.go && window.go.main && window.go.main.App) {
+      window.go.main.App.GetConfig().then(cfg => {
+        if (cfg.url) document.getElementById('relayUrl').value = cfg.url;
+        if (cfg.token) document.getElementById('token').value = cfg.token;
+      });
+    }
+  </script>
+</body>
+</html>

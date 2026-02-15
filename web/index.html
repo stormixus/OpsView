@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpsView</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0f;
+      color: #e0e0e0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 16px;
+      background: #111118;
+      border-bottom: 1px solid #222;
+      flex-shrink: 0;
+    }
+    .header h1 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #60a5fa;
+    }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #666;
+    }
+    .status-dot.connected { background: #22c55e; }
+    .status-dot.connecting { background: #eab308; animation: pulse 1s infinite; }
+    .status-dot.error { background: #ef4444; }
+    @keyframes pulse { 50% { opacity: 0.5; } }
+
+    .stats {
+      font-size: 12px;
+      color: #888;
+      font-family: monospace;
+    }
+
+    /* Canvas area */
+    .canvas-wrap {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+      overflow: hidden;
+    }
+    canvas {
+      max-width: 100%;
+      max-height: 100%;
+      image-rendering: auto;
+    }
+
+    /* Settings panel */
+    .settings {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 6px 16px;
+      background: #111118;
+      border-top: 1px solid #222;
+      flex-shrink: 0;
+      font-size: 13px;
+    }
+    .settings label { color: #999; }
+    .settings input, .settings select {
+      background: #1a1a24;
+      color: #e0e0e0;
+      border: 1px solid #333;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 12px;
+    }
+    .settings button {
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 5px 14px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .settings button:hover { background: #1d4ed8; }
+    .settings button.disconnect { background: #dc2626; }
+    .settings button.disconnect:hover { background: #b91c1c; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>OpsView</h1>
+    <div class="status">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Disconnected</span>
+    </div>
+    <div class="stats" id="stats"></div>
+  </div>
+
+  <div class="canvas-wrap">
+    <canvas id="screen"></canvas>
+  </div>
+
+  <div class="settings">
+    <label>Relay:</label>
+    <input type="text" id="relayUrl" value="ws://127.0.0.1:8080/watch" style="width:260px">
+    <label>Token:</label>
+    <input type="password" id="token" value="dev-watcher-token" style="width:140px">
+    <button id="connectBtn" onclick="toggleConnection()">Connect</button>
+  </div>
+
+  <!-- fzstd: lightweight zstd decompressor for browsers -->
+  <script src="https://cdn.jsdelivr.net/npm/fzstd@0.1.1/umd/index.js"></script>
+  <script src="viewer.js"></script>
+</body>
+</html>
