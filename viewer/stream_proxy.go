@@ -2,99 +2,208 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bluenviron/gohlslib/v2"
+	"github.com/bluenviron/gohlslib/v2/pkg/codecs"
+	"github.com/bluenviron/gortsplib/v5"
+	"github.com/bluenviron/gortsplib/v5/pkg/base"
+	"github.com/bluenviron/gortsplib/v5/pkg/description"
+	"github.com/bluenviron/gortsplib/v5/pkg/format"
+	"github.com/bluenviron/gortsplib/v5/pkg/format/rtph264"
+	"github.com/bluenviron/gortsplib/v5/pkg/format/rtph265"
+	"github.com/pion/rtp"
 )
 
-// StreamProxy converts RTSP (or any ffmpeg-supported URL) to HLS for browser playback.
+// StreamProxy converts RTSP to HLS for browser playback using pure Go (no ffmpeg).
 type StreamProxy struct {
 	mu      sync.Mutex
-	cmd     *exec.Cmd
+	client  *gortsplib.Client
+	muxer   *gohlslib.Muxer
 	cancel  context.CancelFunc
-	hlsDir  string
 	running bool
 }
 
 func NewStreamProxy() *StreamProxy {
-	dir := filepath.Join(os.TempDir(), "opsview-hls")
-	os.MkdirAll(dir, 0755)
-	return &StreamProxy{hlsDir: dir}
+	return &StreamProxy{}
 }
 
-// StartStream begins transcoding the given URL to HLS segments.
-// Returns the local HLS playlist path to play.
-func (p *StreamProxy) StartStream(url string) (string, error) {
+// StartStream connects to an RTSP URL and begins producing HLS segments.
+func (p *StreamProxy) StartStream(rawURL string) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Stop any existing stream
 	p.stopLocked()
 
-	// Clean HLS dir
-	entries, _ := os.ReadDir(p.hlsDir)
-	for _, e := range entries {
-		os.Remove(filepath.Join(p.hlsDir, e.Name()))
+	u, err := base.ParseURL(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid RTSP URL: %w", err)
+	}
+
+	c := &gortsplib.Client{
+		Scheme: u.Scheme,
+		Host:   u.Host,
+	}
+
+	if err := c.Start(); err != nil {
+		return "", fmt.Errorf("RTSP connect: %w", err)
+	}
+
+	desc, _, err := c.Describe(u)
+	if err != nil {
+		c.Close()
+		return "", fmt.Errorf("RTSP describe: %w", err)
+	}
+
+	track, err := p.setupCodec(c, desc)
+	if err != nil {
+		c.Close()
+		return "", err
+	}
+
+	muxer := &gohlslib.Muxer{
+		Variant:            gohlslib.MuxerVariantMPEGTS,
+		SegmentCount:       5,
+		SegmentMinDuration: 1 * time.Second,
+		Tracks:             []*gohlslib.Track{track},
+	}
+	if err := muxer.Start(); err != nil {
+		c.Close()
+		return "", fmt.Errorf("HLS muxer: %w", err)
+	}
+
+	if _, err := c.Play(nil); err != nil {
+		muxer.Close()
+		c.Close()
+		return "", fmt.Errorf("RTSP play: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	p.client = c
+	p.muxer = muxer
 	p.cancel = cancel
-
-	m3u8Path := filepath.Join(p.hlsDir, "stream.m3u8")
-
-	// ffmpeg: RTSP → HLS with low-latency settings
-	args := []string{
-		"-rtsp_transport", "tcp",
-		"-i", url,
-		"-c:v", "copy",
-		"-an",
-		"-f", "hls",
-		"-hls_time", "1",
-		"-hls_list_size", "5",
-		"-hls_flags", "delete_segments+append_list",
-		"-hls_segment_filename", filepath.Join(p.hlsDir, "seg_%03d.ts"),
-		m3u8Path,
-	}
-
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-	cmd.Stdout = nil
-	cmd.Stderr = nil // Suppress ffmpeg output
-
-	if err := cmd.Start(); err != nil {
-		cancel()
-		return "", fmt.Errorf("ffmpeg start: %w", err)
-	}
-
-	p.cmd = cmd
 	p.running = true
 
-	// Wait for m3u8 to appear (up to 8 seconds)
 	go func() {
-		cmd.Wait()
-		p.mu.Lock()
-		p.running = false
-		p.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			c.Close()
+		}
 	}()
 
-	for i := 0; i < 40; i++ {
-		time.Sleep(200 * time.Millisecond)
-		if _, err := os.Stat(m3u8Path); err == nil {
-			log.Printf("[stream] HLS ready: %s", url)
-			return "/ops/hls/stream.m3u8", nil
-		}
-	}
-
-	p.stopLocked()
-	return "", fmt.Errorf("ffmpeg did not produce HLS within timeout")
+	log.Printf("[stream] HLS ready: %s", rawURL)
+	return "/ops/hls/index.m3u8", nil
 }
 
-// StopStream stops the ffmpeg process.
+// setupCodec detects H264/H265 in the RTSP stream and wires up the RTP→HLS pipeline.
+func (p *StreamProxy) setupCodec(c *gortsplib.Client, desc *description.Session) (*gohlslib.Track, error) {
+	// Try H264
+	var formaH264 *format.H264
+	if medi := desc.FindFormat(&formaH264); medi != nil {
+		return p.setupH264(c, desc, medi, formaH264)
+	}
+
+	// Try H265
+	var formaH265 *format.H265
+	if medi := desc.FindFormat(&formaH265); medi != nil {
+		return p.setupH265(c, desc, medi, formaH265)
+	}
+
+	return nil, fmt.Errorf("no H264/H265 track found in RTSP stream")
+}
+
+func (p *StreamProxy) setupH264(c *gortsplib.Client, desc *description.Session, medi *description.Media, forma *format.H264) (*gohlslib.Track, error) {
+	rtpDec, err := forma.CreateDecoder()
+	if err != nil {
+		return nil, fmt.Errorf("H264 decoder: %w", err)
+	}
+
+	if _, err := c.Setup(desc.BaseURL, medi, 0, 0); err != nil {
+		return nil, fmt.Errorf("RTSP setup: %w", err)
+	}
+
+	track := &gohlslib.Track{
+		Codec: &codecs.H264{
+			SPS: formaH264SPS(forma),
+			PPS: formaH264PPS(forma),
+		},
+		ClockRate: 90000,
+	}
+
+	c.OnPacketRTP(medi, forma, func(pkt *rtp.Packet) {
+		pts, ok := c.PacketPTS(medi, pkt)
+		if !ok {
+			return
+		}
+		au, err := rtpDec.Decode(pkt)
+		if err != nil {
+			if !errors.Is(err, rtph264.ErrNonStartingPacketAndNoPrevious) &&
+				!errors.Is(err, rtph264.ErrMorePacketsNeeded) {
+				log.Printf("[stream] H264 decode: %v", err)
+			}
+			return
+		}
+		p.mu.Lock()
+		muxer := p.muxer
+		p.mu.Unlock()
+		if muxer != nil {
+			muxer.WriteH264(track, time.Now(), pts, au)
+		}
+	})
+
+	return track, nil
+}
+
+func (p *StreamProxy) setupH265(c *gortsplib.Client, desc *description.Session, medi *description.Media, forma *format.H265) (*gohlslib.Track, error) {
+	rtpDec, err := forma.CreateDecoder()
+	if err != nil {
+		return nil, fmt.Errorf("H265 decoder: %w", err)
+	}
+
+	if _, err := c.Setup(desc.BaseURL, medi, 0, 0); err != nil {
+		return nil, fmt.Errorf("RTSP setup: %w", err)
+	}
+
+	track := &gohlslib.Track{
+		Codec: &codecs.H265{
+			VPS: formaH265VPS(forma),
+			SPS: formaH265SPS(forma),
+			PPS: formaH265PPS(forma),
+		},
+		ClockRate: 90000,
+	}
+
+	c.OnPacketRTP(medi, forma, func(pkt *rtp.Packet) {
+		pts, ok := c.PacketPTS(medi, pkt)
+		if !ok {
+			return
+		}
+		au, err := rtpDec.Decode(pkt)
+		if err != nil {
+			if !errors.Is(err, rtph265.ErrNonStartingPacketAndNoPrevious) &&
+				!errors.Is(err, rtph265.ErrMorePacketsNeeded) {
+				log.Printf("[stream] H265 decode: %v", err)
+			}
+			return
+		}
+		p.mu.Lock()
+		muxer := p.muxer
+		p.mu.Unlock()
+		if muxer != nil {
+			muxer.WriteH265(track, time.Now(), pts, au)
+		}
+	})
+
+	return track, nil
+}
+
+// StopStream stops the RTSP client and HLS muxer.
 func (p *StreamProxy) StopStream() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -106,42 +215,72 @@ func (p *StreamProxy) stopLocked() {
 		p.cancel()
 		p.cancel = nil
 	}
-	if p.cmd != nil && p.cmd.Process != nil {
-		p.cmd.Process.Kill()
-		p.cmd = nil
+	if p.muxer != nil {
+		p.muxer.Close()
+		p.muxer = nil
+	}
+	if p.client != nil {
+		p.client.Close()
+		p.client = nil
 	}
 	p.running = false
 }
 
-// IsRunning returns whether ffmpeg is currently transcoding.
+// IsRunning returns whether streaming is active.
 func (p *StreamProxy) IsRunning() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.running
 }
 
-// ServeHLS handles HTTP requests for /ops/hls/* files.
+// ServeHLS delegates /ops/hls/* requests to the gohlslib muxer.
 func (p *StreamProxy) ServeHLS(w http.ResponseWriter, r *http.Request) {
-	// /ops/hls/stream.m3u8 or /ops/hls/seg_001.ts
-	filename := strings.TrimPrefix(r.URL.Path, "/ops/hls/")
-	if filename == "" || strings.Contains(filename, "..") {
-		http.Error(w, "not found", 404)
+	p.mu.Lock()
+	muxer := p.muxer
+	p.mu.Unlock()
+
+	if muxer == nil {
+		http.Error(w, "no active stream", 404)
 		return
 	}
 
-	filePath := filepath.Join(p.hlsDir, filename)
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		http.Error(w, "not found", 404)
-		return
-	}
+	// Strip /ops/hls prefix so the muxer sees paths like /index.m3u8
+	r.URL.Path = "/" + strings.TrimPrefix(r.URL.Path, "/ops/hls/")
+	muxer.Handle(w, r)
+}
 
-	if strings.HasSuffix(filename, ".m3u8") {
-		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-	} else if strings.HasSuffix(filename, ".ts") {
-		w.Header().Set("Content-Type", "video/mp2t")
+// Helpers to safely extract codec parameters (may be nil before first keyframe).
+func formaH264SPS(f *format.H264) []byte {
+	if f.SPS != nil {
+		return f.SPS
 	}
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Write(data)
+	return nil
+}
+
+func formaH264PPS(f *format.H264) []byte {
+	if f.PPS != nil {
+		return f.PPS
+	}
+	return nil
+}
+
+func formaH265VPS(f *format.H265) []byte {
+	if f.VPS != nil {
+		return f.VPS
+	}
+	return nil
+}
+
+func formaH265SPS(f *format.H265) []byte {
+	if f.SPS != nil {
+		return f.SPS
+	}
+	return nil
+}
+
+func formaH265PPS(f *format.H265) []byte {
+	if f.PPS != nil {
+		return f.PPS
+	}
+	return nil
 }
