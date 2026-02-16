@@ -48,7 +48,7 @@ jobs:
             goarch: amd64
             artifact: opsview-viewer-windows-amd64
             ext: .exe
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             goos: linux
             goarch: amd64
             artifact: opsview-viewer-linux-amd64
