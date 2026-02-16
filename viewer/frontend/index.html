@@ -68,6 +68,23 @@
     @keyframes pulse { 50% { opacity: 0.5; } }
     .tab-status .label { color: #666; }
     .tab-status .info { color: #555; font-family: monospace; font-size: 10px; }
+    .fullscreen-btn {
+      background: none;
+      border: 1px solid #333;
+      border-radius: 4px;
+      color: #777;
+      font-size: 14px;
+      width: 26px;
+      height: 26px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+      padding: 0;
+      line-height: 1;
+    }
+    .fullscreen-btn:hover { color: #e0e0e0; border-color: #555; background: #222; }
 
     /* Panels */
     .panel {
@@ -373,6 +390,8 @@
       flex-direction: column;
       overflow: hidden;
       min-width: 200px;
+      flex-shrink: 0;
+      flex-grow: 0;
     }
     .mixed-divider {
       width: 5px;
@@ -467,6 +486,7 @@
         <span class="label">CCTV</span>
         <span class="info" id="cctvInfo"></span>
       </div>
+      <button class="fullscreen-btn" id="fullscreenBtn" onclick="toggleFullscreen()" title="Toggle fullscreen (F11)">&#x26F6;</button>
     </div>
   </div>
 
@@ -555,7 +575,7 @@
   <div class="panel" id="panel-mixed" style="flex-direction:column;">
     <div class="mixed-split">
       <!-- Left: CCTV -->
-      <div class="mixed-left" id="mixedLeft" style="width:40%;">
+      <div class="mixed-left" id="mixedLeft" style="flex-basis:40%;">
         <div class="mixed-cctv-grid" id="mixedCctvGrid">
           <div class="cctv-no-channels">No CCTV channels</div>
         </div>
@@ -592,6 +612,25 @@
       document.getElementById('panel-' + panel).classList.add('active');
       localStorage.setItem('opsview_last_tab', panel);
     }
+
+    // Fullscreen toggle via Wails runtime
+    let isFullscreen = false;
+    function toggleFullscreen() {
+      if (!window.runtime) return;
+      if (isFullscreen) {
+        window.runtime.WindowUnfullscreen();
+      } else {
+        window.runtime.WindowFullscreen();
+      }
+      isFullscreen = !isFullscreen;
+    }
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'F11') {
+        e.preventDefault();
+        toggleFullscreen();
+      }
+    });
 
     // Load saved config into form fields
     (function initOpsConfig() {
@@ -1089,7 +1128,7 @@
         const rect = split.getBoundingClientRect();
         const pct = ((e.clientX - rect.left) / rect.width) * 100;
         const clamped = Math.max(15, Math.min(85, pct));
-        left.style.width = clamped + '%';
+        left.style.flexBasis = clamped + '%';
         localStorage.setItem('opsview_mixed_split', clamped);
       });
       document.addEventListener('mouseup', () => {
@@ -1101,7 +1140,7 @@
       });
       // Restore saved split
       const saved = localStorage.getItem('opsview_mixed_split');
-      if (saved) left.style.width = saved + '%';
+      if (saved) left.style.flexBasis = saved + '%';
     })();
 
     // Mixed CCTV grid (read-only, no DND)

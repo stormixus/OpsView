@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
-func main() {
+// runServer starts the HTTP server and returns a stop function
+// that gracefully shuts down the server and hub.
+func runServer() (stop func()) {
 	cfg := loadConfig()
 
 	hub := NewHub(cfg)
@@ -19,18 +23,36 @@ func main() {
 	mux.HandleFunc("/health", hub.HandleHealth)
 	mux.HandleFunc("/metrics", hub.HandleMetrics)
 
-	// Serve web viewer static files
 	webDir := os.Getenv("RELAY_WEB_DIR")
 	if webDir == "" {
 		webDir = "../web"
 	}
 	mux.Handle("/", http.FileServer(http.Dir(webDir)))
 
-	addr := ":" + cfg.Port
-	log.Printf("[relay] listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("[relay] server error: %v", err)
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: mux}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("[relay] server error: %v", err)
+		}
+	}()
+
+	log.Printf("[relay] listening on :%s", cfg.Port)
+
+	return func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(ctx)
+		hub.Stop()
 	}
+}
+
+// getPort returns the configured relay port.
+func getPort() string {
+	port := os.Getenv("RELAY_PORT")
+	if port == "" {
+		port = "8080"
+	}
+	return port
 }
 
 // Config holds relay configuration loaded from environment variables.
@@ -42,10 +64,7 @@ type Config struct {
 }
 
 func loadConfig() Config {
-	port := os.Getenv("RELAY_PORT")
-	if port == "" {
-		port = "8080"
-	}
+	port := getPort()
 
 	pubToken := os.Getenv("RELAY_PUBLISHER_TOKEN")
 	if pubToken == "" {

@@ -320,6 +320,16 @@ func sendError(conn *websocket.Conn, code int, message string) {
 	_ = conn.WriteMessage(websocket.BinaryMessage, msg)
 }
 
+// Stop signals the hub to shut down.
+func (h *Hub) Stop() {
+	select {
+	case <-h.done:
+		// already closed
+	default:
+		close(h.done)
+	}
+}
+
 // HandleHealth returns basic health status.
 func (h *Hub) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	h.mu.RLock()
