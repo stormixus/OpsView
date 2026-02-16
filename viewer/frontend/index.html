@@ -290,6 +290,9 @@
     .dvr-form button:hover { background: #1d4ed8; }
 
     /* CCTV Grid */
+    .cctv-grid, .mixed-cctv-grid {
+      position: relative;
+    }
     .cctv-grid {
       flex: 1;
       display: grid;
@@ -298,6 +301,49 @@
       padding: 4px;
       background: #000;
       overflow-y: auto;
+    }
+
+    /* Expanded cell overlay */
+    .cctv-expand-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      opacity: 0;
+      transform: scale(0.85);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      pointer-events: none;
+    }
+    .cctv-expand-overlay.active {
+      opacity: 1;
+      transform: scale(1);
+      pointer-events: auto;
+    }
+    .cctv-expand-overlay img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .cctv-expand-overlay .expand-label {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(0,0,0,0.7);
+      padding: 8px 14px;
+      font-size: 13px;
+      color: #ccc;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .cctv-expand-overlay .expand-hint {
+      color: #555;
+      font-size: 11px;
     }
     .cctv-cell {
       position: relative;
@@ -634,6 +680,9 @@
       if (e.key === 'F11') {
         e.preventDefault();
         toggleFullscreen();
+      }
+      if (e.key === 'Escape' && expandedOverlay) {
+        collapseCell();
       }
     });
 
@@ -990,6 +1039,50 @@
       el.style.color = color || '#888';
     }
 
+    // --- Cell expand on double-click ---
+    let expandedOverlay = null;
+    let expandedTimer = null;
+
+    function expandCell(chNum, chName, grid) {
+      // Create overlay if not exists for this grid
+      let overlay = grid.querySelector('.cctv-expand-overlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'cctv-expand-overlay';
+        overlay.innerHTML = '<img><div class="expand-label"><span class="expand-name"></span><span class="expand-hint">더블클릭: 돌아가기</span></div>';
+        overlay.addEventListener('dblclick', () => collapseCell());
+        grid.appendChild(overlay);
+      }
+
+      const img = overlay.querySelector('img');
+      img.src = '/cctv/snapshot/' + activeDvrId + '/' + chNum + '?t=' + Date.now();
+      overlay.querySelector('.expand-name').textContent = chName + ' (CH' + chNum + ')';
+
+      // Activate with transition
+      requestAnimationFrame(() => {
+        overlay.classList.add('active');
+      });
+      expandedOverlay = overlay;
+
+      // Refresh the expanded image
+      const dvr = dvrs.find(d => d.id === activeDvrId);
+      const refreshMs = (dvr && dvr.refresh_rate) ? dvr.refresh_rate : 2000;
+      if (expandedTimer) clearInterval(expandedTimer);
+      expandedTimer = setInterval(() => {
+        const preload = new Image();
+        preload.onload = () => { img.src = preload.src; };
+        preload.src = '/cctv/snapshot/' + activeDvrId + '/' + chNum + '?t=' + Date.now();
+      }, refreshMs);
+    }
+
+    function collapseCell() {
+      if (expandedTimer) { clearInterval(expandedTimer); expandedTimer = null; }
+      if (expandedOverlay) {
+        expandedOverlay.classList.remove('active');
+        expandedOverlay = null;
+      }
+    }
+
     // --- Grid rendering with SortableJS + preload (no flicker) ---
     let sortableInstance = null;
 
@@ -997,6 +1090,7 @@
       const grid = document.getElementById('cctvGrid');
       cctvTimers.forEach(t => clearInterval(t));
       cctvTimers = [];
+      collapseCell();
       if (sortableInstance) { sortableInstance.destroy(); sortableInstance = null; }
 
       const enabled = cctvChannels.filter(ch => ch.enabled);
@@ -1057,6 +1151,10 @@
         }
 
         cell.appendChild(label);
+        cell.addEventListener('dblclick', (e) => {
+          if (e.target.classList.contains('ch-name')) return; // Don't expand when editing name
+          expandCell(ch.ch_num, ch.name, grid);
+        });
         grid.appendChild(cell);
 
         // Preloaded snapshot refresh (no flicker)
@@ -1192,6 +1290,9 @@
         label.className = 'ch-label';
         label.innerHTML = '<span style="font-size:11px;color:#ccc;">' + ch.name + '</span><span class="ch-id">CH' + ch.ch_num + '</span>';
         cell.appendChild(label);
+        cell.addEventListener('dblclick', () => {
+          expandCell(ch.ch_num, ch.name, grid);
+        });
         grid.appendChild(cell);
 
         const timer = setInterval(() => {
