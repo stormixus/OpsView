@@ -17,6 +17,7 @@ func main() {
 	app := NewApp()
 	cctv := NewCCTVManager()
 	stream := NewStreamProxy()
+	updater := NewUpdater()
 	proxy := NewAssetProxyMiddleware(cctv, stream)
 
 	err := wails.Run(&options.App{
@@ -32,6 +33,7 @@ func main() {
 		OnStartup: func(ctx context.Context) {
 			app.startup(ctx)
 			cctv.startup(ctx)
+			updater.startup(ctx)
 		},
 		OnShutdown: func(ctx context.Context) {
 			stream.StopStream()
@@ -40,6 +42,7 @@ func main() {
 			app,
 			cctv,
 			stream,
+			updater,
 		},
 	})
 	if err != nil {

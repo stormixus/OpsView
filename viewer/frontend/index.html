@@ -541,6 +541,14 @@
     </div>
   </div>
 
+  <!-- Update banner -->
+  <div id="updateBanner" style="display:none;background:#1e3a5f;border-bottom:1px solid #2563eb;padding:6px 16px;font-size:12px;color:#93c5fd;display:none;align-items:center;gap:10px;flex-shrink:0;">
+    <span id="updateMsg"></span>
+    <button id="updateBtn" onclick="doUpdate()" style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:11px;cursor:pointer;">업데이트</button>
+    <span id="updateProgress" style="display:none;color:#60a5fa;font-size:11px;"></span>
+    <button onclick="dismissUpdate()" style="background:none;border:none;color:#555;cursor:pointer;margin-left:auto;font-size:14px;">&times;</button>
+  </div>
+
   <!-- Panels -->
   <div class="panel active" id="panel-ops" style="position:relative;">
     <!-- Toolbar (visible when playing) -->
@@ -1489,6 +1497,47 @@
         renderMixedCCTV();
       }
     };
+
+    // === Auto-update ===
+    const UPD = () => window.go && window.go.main && window.go.main.Updater;
+    let pendingUpdate = null;
+
+    async function checkUpdate() {
+      if (!UPD()) return;
+      try {
+        const info = await UPD().CheckForUpdate();
+        if (info && info.available) {
+          pendingUpdate = info;
+          document.getElementById('updateMsg').textContent =
+            '새 버전 ' + info.latest_ver + ' 사용 가능 (현재: ' + info.current_ver + ')';
+          document.getElementById('updateBanner').style.display = 'flex';
+        }
+      } catch(e) { console.log('update check:', e); }
+    }
+
+    async function doUpdate() {
+      if (!pendingUpdate || !UPD()) return;
+      const btn = document.getElementById('updateBtn');
+      const prog = document.getElementById('updateProgress');
+      btn.style.display = 'none';
+      prog.style.display = 'inline';
+      prog.textContent = '다운로드 중...';
+      try {
+        const msg = await UPD().DownloadAndInstall(pendingUpdate.download_url);
+        prog.textContent = msg || '완료!';
+      } catch(e) {
+        prog.textContent = '오류: ' + e;
+        prog.style.color = '#ef4444';
+        btn.style.display = 'inline';
+      }
+    }
+
+    function dismissUpdate() {
+      document.getElementById('updateBanner').style.display = 'none';
+    }
+
+    // Check for updates 3s after launch
+    setTimeout(checkUpdate, 3000);
 
     // Init CCTV
     loadDVRs();

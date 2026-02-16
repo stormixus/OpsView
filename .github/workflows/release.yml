@@ -92,7 +92,8 @@ jobs:
       - name: Build viewer
         run: |
           cd viewer
-          wails build ${{ matrix.wails_flags }} -platform ${{ matrix.goos }}/${{ matrix.goarch }}
+          TAG="${GITHUB_REF#refs/tags/}"
+          wails build ${{ matrix.wails_flags }} -platform ${{ matrix.goos }}/${{ matrix.goarch }} -ldflags "-X main.Version=$TAG"
 
       - name: Import signing certificate
         if: matrix.goos == 'darwin' && env.HAS_CERT == 'true'
@@ -142,10 +143,14 @@ jobs:
       - name: Package viewer (macOS)
         if: matrix.goos == 'darwin'
         run: |
+          mkdir -p dmg-stage
+          cp -R viewer/build/bin/opsview-viewer.app dmg-stage/
+          ln -s /Applications dmg-stage/Applications
           hdiutil create -volname "OpsView Viewer" \
-            -srcfolder viewer/build/bin/opsview-viewer.app \
+            -srcfolder dmg-stage \
             -ov -format UDZO \
             ${{ matrix.artifact }}.dmg
+          rm -rf dmg-stage
 
       - name: Package viewer (Linux)
         if: matrix.goos == 'linux'
