@@ -47,22 +47,17 @@ jobs:
             goos: windows
             goarch: amd64
             artifact: opsview-viewer-windows-amd64
-            ext: .exe
+            wails_flags: "-nsis"
           - os: ubuntu-22.04
             goos: linux
             goarch: amd64
             artifact: opsview-viewer-linux-amd64
-            ext: ""
-          - os: macos-latest
-            goos: darwin
-            goarch: amd64
-            artifact: opsview-viewer-darwin-amd64
-            ext: .app
+            wails_flags: ""
           - os: macos-latest
             goos: darwin
             goarch: arm64
             artifact: opsview-viewer-darwin-arm64
-            ext: .app
+            wails_flags: ""
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -87,19 +82,60 @@ jobs:
       - name: Build viewer
         run: |
           cd viewer
-          wails build -platform ${{ matrix.goos }}/${{ matrix.goarch }}
+          wails build ${{ matrix.wails_flags }} -platform ${{ matrix.goos }}/${{ matrix.goarch }}
+
+      - name: Import signing certificate
+        if: matrix.goos == 'darwin' && env.HAS_CERT == 'true'
+        env:
+          HAS_CERT: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 != '' }}
+        run: |
+          echo "${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}" | base64 --decode > cert.p12
+          KEYCHAIN=build.keychain-db
+          security create-keychain -p actions $KEYCHAIN
+          security set-keychain-settings -lut 900 $KEYCHAIN
+          security unlock-keychain -p actions $KEYCHAIN
+          security import cert.p12 -k $KEYCHAIN -P "${{ secrets.APPLE_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions $KEYCHAIN
+          security list-keychains -d user -s $KEYCHAIN login.keychain
+          rm cert.p12
+
+      - name: Sign app
+        if: matrix.goos == 'darwin' && env.HAS_CERT == 'true'
+        env:
+          HAS_CERT: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 != '' }}
+        run: |
+          codesign --deep --force --options runtime \
+            --sign "${{ secrets.APPLE_SIGNING_IDENTITY }}" \
+            --entitlements viewer/build/entitlements.plist \
+            viewer/build/bin/opsview-viewer.app
+
+      - name: Notarize app
+        if: matrix.goos == 'darwin' && env.HAS_CERT == 'true'
+        env:
+          HAS_CERT: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 != '' }}
+        run: |
+          ditto -c -k --keepParent viewer/build/bin/opsview-viewer.app notarize.zip
+          xcrun notarytool submit notarize.zip \
+            --apple-id "${{ secrets.APPLE_ID }}" \
+            --password "${{ secrets.APPLE_ID_PASSWORD }}" \
+            --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+            --wait
+          xcrun stapler staple viewer/build/bin/opsview-viewer.app
+          rm notarize.zip
 
       - name: Package viewer (Windows)
         if: matrix.goos == 'windows'
+        shell: bash
         run: |
-          cd viewer/build/bin
-          7z a -tzip ../../../${{ matrix.artifact }}.zip opsview-viewer${{ matrix.ext }}
+          cp "viewer/build/bin/opsview-viewer-amd64-installer.exe" "${{ matrix.artifact }}-setup.exe"
 
       - name: Package viewer (macOS)
         if: matrix.goos == 'darwin'
         run: |
-          cd viewer/build/bin
-          zip -r ../../../${{ matrix.artifact }}.zip opsview-viewer${{ matrix.ext }}
+          hdiutil create -volname "OpsView Viewer" \
+            -srcfolder viewer/build/bin/opsview-viewer.app \
+            -ov -format UDZO \
+            ${{ matrix.artifact }}.dmg
 
       - name: Package viewer (Linux)
         if: matrix.goos == 'linux'
@@ -111,8 +147,13 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: |
-            ${{ matrix.artifact }}.zip
+            ${{ matrix.artifact }}-setup.exe
+            ${{ matrix.artifact }}.dmg
             ${{ matrix.artifact }}.tar.gz
+
+      - name: Cleanup keychain
+        if: matrix.goos == 'darwin' && always()
+        run: security delete-keychain build.keychain-db 2>/dev/null || true
 
   build-relay-windows:
     runs-on: ubuntu-latest
@@ -184,5 +225,7 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            artifacts/*.zip
+            artifacts/*.dmg
+            artifacts/*-setup.exe
             artifacts/*.tar.gz
+            artifacts/*.zip
