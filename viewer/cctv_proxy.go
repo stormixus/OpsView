@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const defaultUpscale = 2 // 2x bicubic upscale for all snapshots
+
 // AssetProxyMiddleware intercepts /cctv/* and /ops/* paths.
 type AssetProxyMiddleware struct {
 	cctv   *CCTVManager
@@ -56,8 +58,16 @@ func (p *AssetProxyMiddleware) handleSnapshot(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	quality := r.URL.Query().Get("quality")
-	data, err := p.cctv.FetchSnapshot(dvrID, chNum, quality)
+	upscale := defaultUpscale
+	if v := r.URL.Query().Get("upscale"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 4 {
+			upscale = n
+		}
+	}
+	if r.URL.Query().Get("raw") == "1" {
+		upscale = 1
+	}
+	data, err := p.cctv.FetchSnapshot(dvrID, chNum, upscale)
 	if err != nil {
 		http.Error(w, err.Error(), 502)
 		return

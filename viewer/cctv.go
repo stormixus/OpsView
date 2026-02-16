@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/xml"
 	"fmt"
 	"image"
+	"image/jpeg"
 	_ "image/jpeg"
 	"io"
 	"log"
@@ -15,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/image/draw"
 	_ "modernc.org/sqlite"
 )
 
@@ -217,15 +220,15 @@ func (m *CCTVManager) ReorderChannels(dvrID int64, orderedChNums []int) error {
 
 // --- Snapshot fetching with auto resolution detection ---
 
-func (m *CCTVManager) FetchSnapshot(dvrID int64, chNum int, qualityOverride string) ([]byte, error) {
+func (m *CCTVManager) FetchSnapshot(dvrID int64, chNum int, upscale int) ([]byte, error) {
 	dvr, err := m.getDVR(dvrID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Use sub stream for snapshots (less bandwidth) or main based on config
-	streamID := "02" // sub
-	if qualityOverride == "main" || (qualityOverride == "" && dvr.StreamQuality == "main") {
+	// Always use sub stream (less bandwidth, won't overload DVR)
+	streamID := "02"
+	if dvr.StreamQuality == "main" {
 		streamID = "01"
 	}
 
@@ -253,7 +256,37 @@ func (m *CCTVManager) FetchSnapshot(dvrID int64, chNum int, qualityOverride stri
 	// Auto-detect resolution from JPEG and update DB
 	go m.detectAndSaveResolution(dvrID, chNum, data)
 
+	// Upscale with bicubic interpolation if requested
+	if upscale > 1 {
+		data, err = m.upscaleJPEG(data, upscale)
+		if err != nil {
+			log.Printf("[cctv] upscale ch%d: %v", chNum, err)
+			// Return original on error
+		}
+	}
+
 	return data, nil
+}
+
+// upscaleJPEG decodes a JPEG, scales it up by factor using CatmullRom bicubic, and re-encodes.
+func (m *CCTVManager) upscaleJPEG(data []byte, factor int) ([]byte, error) {
+	src, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return data, err
+	}
+
+	bounds := src.Bounds()
+	newW := bounds.Dx() * factor
+	newH := bounds.Dy() * factor
+
+	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
+	draw.CatmullRom.Scale(dst, dst.Bounds(), src, bounds, draw.Over, nil)
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 90}); err != nil {
+		return data, err
+	}
+	return buf.Bytes(), nil
 }
 
 func (m *CCTVManager) detectAndSaveResolution(dvrID int64, chNum int, jpegData []byte) {

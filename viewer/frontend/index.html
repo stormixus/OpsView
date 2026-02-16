@@ -1063,7 +1063,7 @@
       }
 
       const img = overlay.querySelector('img');
-      img.src = '/cctv/snapshot/' + activeDvrId + '/' + chNum + '?quality=main&t=' + Date.now();
+      img.src = '/cctv/snapshot/' + activeDvrId + '/' + chNum + '?upscale=3&t=' + Date.now();
       overlay.querySelector('.expand-name').textContent = chName + ' (CH' + chNum + ')';
 
       // Activate with transition
@@ -1072,14 +1072,14 @@
       });
       expandedOverlay = overlay;
 
-      // Refresh the expanded image with main quality
+      // Refresh the expanded image with 3x upscale
       const dvr = dvrs.find(d => d.id === activeDvrId);
       const refreshMs = (dvr && dvr.refresh_rate) ? dvr.refresh_rate : 2000;
       if (expandedTimer) clearInterval(expandedTimer);
       expandedTimer = setInterval(() => {
         const preload = new Image();
         preload.onload = () => { img.src = preload.src; };
-        preload.src = '/cctv/snapshot/' + activeDvrId + '/' + chNum + '?quality=main&t=' + Date.now();
+        preload.src = '/cctv/snapshot/' + activeDvrId + '/' + chNum + '?upscale=3&t=' + Date.now();
       }, refreshMs);
     }
 
