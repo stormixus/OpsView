@@ -78,8 +78,10 @@ jobs:
 
       - name: Install NSIS
         if: matrix.goos == 'windows'
-        shell: bash
-        run: choco install nsis -y
+        shell: pwsh
+        run: |
+          choco install nsis -y
+          echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Install Linux dependencies
         if: matrix.goos == 'linux'
