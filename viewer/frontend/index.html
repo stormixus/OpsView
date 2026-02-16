@@ -102,8 +102,9 @@
       background: #000;
     }
     canvas {
-      max-width: 100%;
-      max-height: 100%;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
     }
 
     .placeholder {
@@ -292,7 +293,7 @@
     .cctv-grid {
       flex: 1;
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
       gap: 4px;
       padding: 4px;
       background: #000;
@@ -538,7 +539,7 @@
     </div>
     <!-- Video for stream -->
     <div class="canvas-wrap" id="opsStreamWrap" style="display:none;">
-      <video id="streamVideo" autoplay muted playsinline style="max-width:100%;max-height:100%;"></video>
+      <video id="streamVideo" autoplay muted playsinline style="width:100%;height:100%;object-fit:contain;"></video>
     </div>
   </div>
   <div class="panel" id="panel-cctv" style="flex-direction:column;">
