@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"syscall"
 	"unsafe"
 
 	"github.com/klauspost/compress/zstd"
@@ -23,9 +24,10 @@ var (
 
 // GUIDs
 var (
-	IID_IDXGIDevice  = windows.GUID{0x54ec77fa, 0x1377, 0x44e6, [8]byte{0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4c}}
-	IID_IDXGIAdapter = windows.GUID{0x2411e7e1, 0x12ac, 0x4ccf, [8]byte{0xbd, 0x14, 0x97, 0x98, 0xe8, 0x53, 0x4d, 0xc0}}
-	IID_IDXGIOutput1 = windows.GUID{0x00cddea8, 0x939b, 0x4b83, [8]byte{0xa3, 0x40, 0xa6, 0x85, 0x22, 0x66, 0x66, 0xcc}}
+	IID_IDXGIDevice      = windows.GUID{0x54ec77fa, 0x1377, 0x44e6, [8]byte{0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4c}}
+	IID_IDXGIAdapter     = windows.GUID{0x2411e7e1, 0x12ac, 0x4ccf, [8]byte{0xbd, 0x14, 0x97, 0x98, 0xe8, 0x53, 0x4d, 0xc0}}
+	IID_IDXGIOutput1     = windows.GUID{0x00cddea8, 0x939b, 0x4b83, [8]byte{0xa3, 0x40, 0xa6, 0x85, 0x22, 0x66, 0x66, 0xcc}}
+	IID_ID3D11Texture2D  = windows.GUID{0x6f15aaf2, 0xd208, 0x4e89, [8]byte{0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c}}
 )
 
 const (
@@ -39,7 +41,30 @@ const (
 	DXGI_ERROR_WAIT_TIMEOUT        = 0x887A0027
 	DXGI_ERROR_ACCESS_LOST         = 0x887A0026
 	DXGI_ERROR_ACCESS_DENIED       = 0x887A002B
+	D3D11_MAP_READ                 = 1
 )
+
+// d3d11Texture2DDesc matches the C D3D11_TEXTURE2D_DESC layout (44 bytes).
+type d3d11Texture2DDesc struct {
+	Width          uint32
+	Height         uint32
+	MipLevels      uint32
+	ArraySize      uint32
+	Format         uint32
+	SampleCount    uint32 // DXGI_SAMPLE_DESC.Count
+	SampleQuality  uint32 // DXGI_SAMPLE_DESC.Quality
+	Usage          uint32
+	BindFlags      uint32
+	CPUAccessFlags uint32
+	MiscFlags      uint32
+}
+
+// d3d11MappedSubresource matches the C D3D11_MAPPED_SUBRESOURCE layout.
+type d3d11MappedSubresource struct {
+	PData      uintptr
+	RowPitch   uint32
+	DepthPitch uint32
+}
 
 // DXGICapturer captures the screen using DXGI Desktop Duplication.
 type DXGICapturer struct {
@@ -228,16 +253,69 @@ func (c *DXGICapturer) extractTiles(resource uintptr, dirtyRects []rect) []proto
 		}
 	}
 
-	// TODO: Map texture and copy pixel data for each dirty tile
-	// This is a simplified stub - actual implementation would:
-	// 1. QueryInterface resource for ID3D11Texture2D
-	// 2. CopyResource to staging texture
-	// 3. Map staging texture
-	// 4. For each dirty tile, extract BGRA pixels and compress with zstd
+	if len(tileSet) == 0 {
+		return nil
+	}
+
+	// 1. QueryInterface resource → ID3D11Texture2D
+	var tex uintptr
+	hr := comQueryInterface(resource, &IID_ID3D11Texture2D, &tex)
+	if hr != 0 {
+		log.Printf("[capturer] QueryInterface ID3D11Texture2D failed: 0x%X", hr)
+		return nil
+	}
+	defer comRelease(tex)
+
+	// 2. Create staging texture (cached across frames)
+	if c.staging == 0 {
+		desc := d3d11Texture2DDesc{
+			Width:          uint32(c.width),
+			Height:         uint32(c.height),
+			MipLevels:      1,
+			ArraySize:      1,
+			Format:         DXGI_FORMAT_B8G8R8A8_UNORM,
+			SampleCount:    1,
+			SampleQuality:  0,
+			Usage:          D3D11_USAGE_STAGING,
+			BindFlags:      0,
+			CPUAccessFlags: D3D11_CPU_ACCESS_READ,
+			MiscFlags:      0,
+		}
+		var staging uintptr
+		hr = comCall(c.device, 5, // ID3D11Device::CreateTexture2D
+			uintptr(unsafe.Pointer(&desc)),
+			0, // pInitialData (NULL)
+			uintptr(unsafe.Pointer(&staging)),
+		)
+		if hr != 0 {
+			log.Printf("[capturer] CreateTexture2D staging failed: 0x%X", hr)
+			return nil
+		}
+		c.staging = staging
+	}
+
+	// 3. CopyResource: staging ← frame texture
+	comCall(c.ctx, 47, c.staging, tex) // ID3D11DeviceContext::CopyResource
+
+	// 4. Map staging texture for CPU read
+	var mapped d3d11MappedSubresource
+	hr = comCall(c.ctx, 14, // ID3D11DeviceContext::Map
+		c.staging,
+		0,              // Subresource
+		D3D11_MAP_READ, // MapType
+		0,              // MapFlags
+		uintptr(unsafe.Pointer(&mapped)),
+	)
+	if hr != 0 {
+		log.Printf("[capturer] Map staging texture failed: 0x%X", hr)
+		return nil
+	}
+
+	// 5. Extract BGRA pixels for each dirty tile
+	rowPitch := int(mapped.RowPitch)
 	var tiles []proto.Tile
 	for coord := range tileSet {
 		tx, ty := coord[0], coord[1]
-		// Placeholder: in production, actual pixel data would be extracted here
 		tileW := ts
 		tileH := ts
 		if (tx+1)*ts > c.width {
@@ -247,10 +325,15 @@ func (c *DXGICapturer) extractTiles(resource uintptr, dirtyRects []rect) []proto
 			tileH = c.height - ty*ts
 		}
 
-		// Dummy BGRA data for the tile
 		raw := make([]byte, tileW*tileH*4)
-		compressed := c.encoder.EncodeAll(raw, nil)
+		srcBase := mapped.PData + uintptr(ty*ts*rowPitch+tx*ts*4)
+		for row := 0; row < tileH; row++ {
+			src := srcBase + uintptr(row*rowPitch)
+			dst := raw[row*tileW*4 : (row+1)*tileW*4]
+			copy(dst, unsafe.Slice((*byte)(unsafe.Pointer(src)), tileW*4))
+		}
 
+		compressed := c.encoder.EncodeAll(raw, nil)
 		tiles = append(tiles, proto.Tile{
 			TX:      uint16(tx),
 			TY:      uint16(ty),
@@ -259,6 +342,9 @@ func (c *DXGICapturer) extractTiles(resource uintptr, dirtyRects []rect) []proto
 			Data:    compressed,
 		})
 	}
+
+	// 6. Unmap staging texture
+	comCall(c.ctx, 15, c.staging, 0) // ID3D11DeviceContext::Unmap
 
 	return tiles
 }
@@ -293,7 +379,7 @@ func (c *DXGICapturer) Close() {
 
 func comQueryInterface(obj uintptr, iid *windows.GUID, out *uintptr) uintptr {
 	vtable := *(*[1024]uintptr)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(obj))))
-	r, _, _ := windows.SyscallN(vtable[0], obj, uintptr(unsafe.Pointer(iid)), uintptr(unsafe.Pointer(out)))
+	r, _, _ := syscall.SyscallN(vtable[0], obj, uintptr(unsafe.Pointer(iid)), uintptr(unsafe.Pointer(out)))
 	return uintptr(r)
 }
 
@@ -302,12 +388,12 @@ func comRelease(obj uintptr) {
 		return
 	}
 	vtable := *(*[1024]uintptr)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(obj))))
-	windows.SyscallN(vtable[2], obj)
+	syscall.SyscallN(vtable[2], obj)
 }
 
 func comCall(obj uintptr, method int, args ...uintptr) uintptr {
 	vtable := *(*[1024]uintptr)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(obj))))
 	allArgs := append([]uintptr{obj}, args...)
-	r, _, _ := windows.SyscallN(vtable[method], allArgs...)
+	r, _, _ := syscall.SyscallN(vtable[method], allArgs...)
 	return uintptr(r)
 }

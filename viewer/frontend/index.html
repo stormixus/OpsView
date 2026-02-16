@@ -222,7 +222,11 @@
       display: flex;
       gap: 6px;
       z-index: 11;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
     }
+    #panel-ops:hover .ops-toolbar.visible { opacity: 1; pointer-events: auto; }
 
     /* CCTV DVR sub-tabs */
     .dvr-tabs {
@@ -472,9 +476,9 @@
 <body>
   <!-- Tabs -->
   <div class="tabs">
-    <div class="tab active" data-panel="ops" onclick="switchTab(this)">Ops</div>
+    <div class="tab active" data-panel="ops" onclick="switchTab(this)">화면</div>
     <div class="tab" data-panel="cctv" onclick="switchTab(this)">CCTV</div>
-    <div class="tab" data-panel="mixed" onclick="switchTab(this)">Mixed</div>
+    <div class="tab" data-panel="mixed" onclick="switchTab(this)">같이보기</div>
     <div class="tab-status-area">
       <div class="tab-status" id="opsStatus">
         <span class="dot" id="statusDot"></span>
@@ -486,44 +490,44 @@
         <span class="label">CCTV</span>
         <span class="info" id="cctvInfo"></span>
       </div>
-      <button class="fullscreen-btn" id="fullscreenBtn" onclick="toggleFullscreen()" title="Toggle fullscreen (F11)">&#x26F6;</button>
+      <button class="fullscreen-btn" id="fullscreenBtn" onclick="toggleFullscreen()" title="전체 화면 (F11)">&#x26F6;</button>
     </div>
   </div>
 
   <!-- Panels -->
   <div class="panel active" id="panel-ops" style="position:relative;">
     <!-- Toolbar (visible when playing) -->
-    <div class="ops-toolbar" id="opsToolbar" style="display:none;">
-      <button class="ops-setup-btn edit" onclick="showOpsSetup()">Settings</button>
-      <button class="ops-setup-btn disconnect" onclick="opsDisconnect()">Disconnect</button>
+    <div class="ops-toolbar" id="opsToolbar">
+      <button class="ops-setup-btn edit" onclick="showOpsSetup()">설정</button>
+      <button class="ops-setup-btn disconnect" onclick="opsDisconnect()">연결 해제</button>
     </div>
     <!-- Setup: 2 options -->
     <div class="ops-setup" id="opsSetup">
       <div class="ops-form">
-        <h3>Screen Source</h3>
+        <h3>화면 소스</h3>
         <!-- Option 1: Relay -->
-        <div class="ops-option-header">OpsView Relay</div>
+        <div class="ops-option-header">OpsView 릴레이</div>
         <div>
           <label>WebSocket URL</label>
           <input type="text" id="relayUrl" placeholder="ws://127.0.0.1:8080/watch" value="ws://127.0.0.1:8080/watch">
         </div>
         <div>
-          <label>Token</label>
+          <label>토큰</label>
           <input type="password" id="token" placeholder="watcher token" value="dev-watcher-token">
         </div>
         <div class="btn-row">
-          <button onclick="opsConnect()">Connect Relay</button>
+          <button onclick="opsConnect()">릴레이 연결</button>
         </div>
         <div class="status-msg" id="opsRelayStatus"></div>
-        <div class="divider">or</div>
+        <div class="divider">또는</div>
         <!-- Option 2: Stream -->
-        <div class="ops-option-header">Direct Stream</div>
+        <div class="ops-option-header">직접 스트림</div>
         <div>
           <label>RTSP / M3U8 / Video URL</label>
           <input type="text" id="fallbackUrl" placeholder="http://... .m3u8 or rtsp://...">
         </div>
         <div class="btn-row">
-          <button onclick="opsStreamPlay()">Play Stream</button>
+          <button onclick="opsStreamPlay()">스트림 재생</button>
         </div>
         <div class="status-msg" id="opsStreamStatus"></div>
       </div>
@@ -540,36 +544,36 @@
   <div class="panel" id="panel-cctv" style="flex-direction:column;">
     <!-- DVR sub-tabs -->
     <div class="dvr-tabs" id="dvrTabs">
-      <div class="dvr-tab add-dvr" onclick="showAddDVR()">+ Add DVR</div>
+      <div class="dvr-tab add-dvr" onclick="showAddDVR()">+ DVR 추가</div>
     </div>
     <!-- Add DVR form (hidden by default) -->
     <div class="dvr-form" id="dvrForm" style="display:none;">
-      <label>Name:</label>
-      <input type="text" id="dvrName" placeholder="My DVR" style="width:100px">
+      <label>이름:</label>
+      <input type="text" id="dvrName" placeholder="내 DVR" style="width:100px">
       <label>IP:</label>
       <input type="text" id="dvrAddr" placeholder="192.168.1.64" style="width:130px">
-      <label>Port:</label>
+      <label>포트:</label>
       <input type="number" id="dvrPort" value="80" style="width:50px">
-      <label>User:</label>
+      <label>계정:</label>
       <input type="text" id="dvrUser" value="admin" style="width:70px">
-      <label>Pass:</label>
+      <label>비밀번호:</label>
       <input type="password" id="dvrPass" style="width:80px">
-      <label>Quality:</label>
-      <select id="dvrQuality"><option value="sub">Sub</option><option value="main">Main</option></select>
-      <label>Refresh:</label>
+      <label>화질:</label>
+      <select id="dvrQuality"><option value="sub">보조</option><option value="main">메인</option></select>
+      <label>갱신:</label>
       <select id="dvrRefresh">
         <option value="1000">1s</option>
         <option value="2000" selected>2s</option>
         <option value="3000">3s</option>
         <option value="5000">5s</option>
       </select>
-      <button id="dvrSaveBtn" onclick="saveDVR()">Save & Connect</button>
-      <button onclick="hideDVRForm()" style="background:#666;">Cancel</button>
+      <button id="dvrSaveBtn" onclick="saveDVR()">저장 후 연결</button>
+      <button onclick="hideDVRForm()" style="background:#666;">취소</button>
       <span id="dvrStatus" style="color:#888;margin-left:8px;"></span>
     </div>
     <!-- Channel grid -->
     <div class="cctv-grid" id="cctvGrid">
-      <div class="cctv-no-channels">Add a DVR to view channels</div>
+      <div class="cctv-no-channels">채널을 보려면 DVR을 추가하세요</div>
     </div>
   </div>
   <div class="panel" id="panel-mixed" style="flex-direction:column;">
@@ -577,7 +581,7 @@
       <!-- Left: CCTV -->
       <div class="mixed-left" id="mixedLeft" style="flex-basis:40%;">
         <div class="mixed-cctv-grid" id="mixedCctvGrid">
-          <div class="cctv-no-channels">No CCTV channels</div>
+          <div class="cctv-no-channels">CCTV 채널 없음</div>
         </div>
       </div>
       <!-- Divider -->
@@ -585,8 +589,8 @@
       <!-- Right: Ops -->
       <div class="mixed-right" id="mixedRight">
         <div class="region-toolbar" id="regionToolbar">
-          <button class="region-btn" id="regionSelectBtn" onclick="toggleRegionSelect()">Select Region</button>
-          <button class="region-btn" id="regionResetBtn" onclick="resetRegion()" style="display:none;">Reset</button>
+          <button class="region-btn" id="regionSelectBtn" onclick="toggleRegionSelect()">영역 선택</button>
+          <button class="region-btn" id="regionResetBtn" onclick="resetRegion()" style="display:none;">초기화</button>
         </div>
         <div class="region-select-overlay" id="regionOverlay">
           <div class="region-rect" id="regionRect"></div>
@@ -677,14 +681,14 @@
       const url = document.getElementById('relayUrl').value.trim();
       const token = document.getElementById('token').value.trim();
       if (!url) {
-        document.getElementById('opsRelayStatus').textContent = 'Enter relay URL';
+        document.getElementById('opsRelayStatus').textContent = '릴레이 URL을 입력하세요';
         document.getElementById('opsRelayStatus').style.color = '#ef4444';
         return;
       }
       localStorage.setItem('opsview_relay_url', url);
       localStorage.setItem('opsview_token', token);
       localStorage.setItem('opsview_ops_mode', 'relay');
-      document.getElementById('opsRelayStatus').textContent = 'Connecting...';
+      document.getElementById('opsRelayStatus').textContent = '연결 중...';
       document.getElementById('opsRelayStatus').style.color = '#eab308';
 
       stopStream();
@@ -701,10 +705,10 @@
           clearInterval(checker);
           document.getElementById('opsRelayStatus').textContent = '';
           document.getElementById('opsSetup').style.display = 'none';
-          document.getElementById('opsToolbar').style.display = 'flex';
+          document.getElementById('opsToolbar').classList.add('visible');
         } else if (checks > 30) {
           clearInterval(checker);
-          document.getElementById('opsRelayStatus').textContent = 'Connection failed';
+          document.getElementById('opsRelayStatus').textContent = '연결 실패';
           document.getElementById('opsRelayStatus').style.color = '#ef4444';
         }
       }, 200);
@@ -715,7 +719,7 @@
       stopStream();
       streamMode = false;
       localStorage.removeItem('opsview_ops_mode');
-      document.getElementById('opsToolbar').style.display = 'none';
+      document.getElementById('opsToolbar').classList.remove('visible');
       document.getElementById('opsSetup').style.display = 'flex';
       document.getElementById('opsCanvasWrap').style.display = 'none';
       document.getElementById('opsStreamWrap').style.display = 'none';
@@ -726,13 +730,13 @@
     async function opsStreamPlay() {
       const url = document.getElementById('fallbackUrl').value.trim();
       if (!url) {
-        document.getElementById('opsStreamStatus').textContent = 'Enter stream URL';
+        document.getElementById('opsStreamStatus').textContent = '스트림 URL을 입력하세요';
         document.getElementById('opsStreamStatus').style.color = '#ef4444';
         return;
       }
       localStorage.setItem('opsview_fallback_url', url);
       localStorage.setItem('opsview_ops_mode', 'stream');
-      document.getElementById('opsStreamStatus').textContent = 'Loading...';
+      document.getElementById('opsStreamStatus').textContent = '로딩 중...';
       document.getElementById('opsStreamStatus').style.color = '#eab308';
 
       if (connected) disconnect();
@@ -746,7 +750,7 @@
       function onPlaying() {
         document.getElementById('opsStreamStatus').textContent = '';
         document.getElementById('opsSetup').style.display = 'none';
-        document.getElementById('opsToolbar').style.display = 'flex';
+        document.getElementById('opsToolbar').classList.add('visible');
       }
       function onError(msg) {
         document.getElementById('opsStreamStatus').textContent = msg;
@@ -755,13 +759,13 @@
 
       // RTSP: use Go backend ffmpeg proxy → HLS
       if (url.startsWith('rtsp://')) {
-        if (!SP()) { onError('Stream proxy not available'); return; }
+        if (!SP()) { onError('스트림 프록시를 사용할 수 없음'); return; }
         try {
-          document.getElementById('opsStreamStatus').textContent = 'Starting RTSP transcoder...';
+          document.getElementById('opsStreamStatus').textContent = 'RTSP 변환 시작 중...';
           const hlsUrl = await SP().StartStream(url);
           playHLS(hlsUrl, video, onPlaying, onError);
         } catch(e) {
-          onError('RTSP error: ' + e);
+          onError('RTSP 오류: ' + e);
         }
         return;
       }
@@ -775,7 +779,7 @@
       // Direct video URL (mp4, etc)
       video.src = url;
       video.onloadeddata = () => onPlaying();
-      video.onerror = () => onError('Failed to load stream');
+      video.onerror = () => onError('스트림 로드 실패');
       video.play().catch(() => {});
     }
 
@@ -785,13 +789,13 @@
         hlsInstance.loadSource(url);
         hlsInstance.attachMedia(video);
         hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => { video.play(); onPlaying(); });
-        hlsInstance.on(Hls.Events.ERROR, (e, data) => { if (data.fatal) onError('HLS error: ' + data.type); });
+        hlsInstance.on(Hls.Events.ERROR, (e, data) => { if (data.fatal) onError('HLS 오류: ' + data.type); });
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = url;
         video.addEventListener('loadedmetadata', () => { video.play(); onPlaying(); });
-        video.onerror = () => onError('Failed to load HLS');
+        video.onerror = () => onError('HLS 로드 실패');
       } else {
-        onError('HLS not supported');
+        onError('HLS 미지원');
       }
     }
 
@@ -839,7 +843,7 @@
       });
       const addTab = document.createElement('div');
       addTab.className = 'dvr-tab add-dvr';
-      addTab.textContent = '+ Add DVR';
+      addTab.textContent = '+ DVR 추가';
       addTab.onclick = showAddDVR;
       bar.appendChild(addTab);
     }
@@ -870,12 +874,13 @@
       try {
         cctvChannels = await CM().ListChannels(id) || [];
         if (cctvChannels.length === 0) {
-          setDVRStatus('Discovering channels...', '#eab308');
+          setDVRStatus('채널 탐색 중...', '#eab308');
           cctvChannels = await CM().DiscoverChannels(id) || [];
-          setDVRStatus(cctvChannels.length + ' channels', '#22c55e');
+          setDVRStatus(cctvChannels.length + '개 채널', '#22c55e');
         }
         const dvr = dvrs.find(d => d.id === id);
         renderCCTVGrid(dvr);
+        renderMixedCCTV();
         updateCCTVStatus();
       } catch(e) {
         setDVRStatus('Error: ' + e, '#ef4444');
@@ -894,7 +899,7 @@
       document.getElementById('dvrPass').value = '';
       document.getElementById('dvrQuality').value = 'sub';
       document.getElementById('dvrRefresh').value = '2000';
-      document.getElementById('dvrSaveBtn').textContent = 'Save & Connect';
+      document.getElementById('dvrSaveBtn').textContent = '저장 후 연결';
       setDVRStatus('', '');
       document.getElementById('dvrAddr').focus();
     }
@@ -911,7 +916,7 @@
       document.getElementById('dvrPass').value = d.password || '';
       document.getElementById('dvrQuality').value = d.stream_quality || 'sub';
       document.getElementById('dvrRefresh').value = d.refresh_rate || 2000;
-      document.getElementById('dvrSaveBtn').textContent = 'Update';
+      document.getElementById('dvrSaveBtn').textContent = '업데이트';
       setDVRStatus('', '');
       document.getElementById('dvrName').focus();
     }
@@ -931,8 +936,8 @@
       const quality = document.getElementById('dvrQuality').value;
       const refresh = parseInt(document.getElementById('dvrRefresh').value) || 2000;
 
-      if (!addr) { setDVRStatus('Enter DVR address', '#ef4444'); return; }
-      setDVRStatus('Saving...', '#eab308');
+      if (!addr) { setDVRStatus('DVR 주소를 입력하세요', '#ef4444'); return; }
+      setDVRStatus('저장 중...', '#eab308');
 
       try {
         if (editingDvrId) {
@@ -944,7 +949,7 @@
             d.username = user; d.password = pass;
             d.refresh_rate = refresh; d.stream_quality = quality;
           }
-          setDVRStatus('Updated', '#22c55e');
+          setDVRStatus('업데이트 완료', '#22c55e');
           hideDVRForm();
           renderDVRTabs();
           selectDVR(editingDvrId);
@@ -965,7 +970,7 @@
 
     async function deleteDVR(id) {
       if (!CM()) return;
-      if (!confirm('Delete this DVR and all its channels?')) return;
+      if (!confirm('이 DVR과 모든 채널을 삭제하시겠습니까?')) return;
       try {
         await CM().DeleteDVR(id);
         dvrs = dvrs.filter(d => d.id !== id);
@@ -997,7 +1002,7 @@
       enabled.sort((a, b) => a.order - b.order);
 
       if (enabled.length === 0) {
-        grid.innerHTML = '<div class="cctv-no-channels">No channels found</div>';
+        grid.innerHTML = '<div class="cctv-no-channels">채널을 찾을 수 없음</div>';
         return;
       }
 
@@ -1154,7 +1159,7 @@
       enabled.sort((a, b) => a.order - b.order);
 
       if (enabled.length === 0 || !activeDvrId) {
-        grid.innerHTML = '<div class="cctv-no-channels">No CCTV channels</div>';
+        grid.innerHTML = '<div class="cctv-no-channels">CCTV 채널 없음</div>';
         grid.classList.remove('cols-3', 'cols-4');
         return;
       }
@@ -1246,11 +1251,11 @@
       const overlay = document.getElementById('regionOverlay');
       if (regionSelectActive) {
         btn.classList.add('active');
-        btn.textContent = 'Selecting...';
+        btn.textContent = '선택 중...';
         overlay.style.display = 'block';
       } else {
         btn.classList.remove('active');
-        btn.textContent = 'Select Region';
+        btn.textContent = '영역 선택';
         overlay.style.display = 'none';
       }
     }
