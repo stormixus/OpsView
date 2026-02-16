@@ -56,7 +56,8 @@ func (p *AssetProxyMiddleware) handleSnapshot(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	data, err := p.cctv.FetchSnapshot(dvrID, chNum)
+	quality := r.URL.Query().Get("quality")
+	data, err := p.cctv.FetchSnapshot(dvrID, chNum, quality)
 	if err != nil {
 		http.Error(w, err.Error(), 502)
 		return

@@ -217,7 +217,7 @@ func (m *CCTVManager) ReorderChannels(dvrID int64, orderedChNums []int) error {
 
 // --- Snapshot fetching with auto resolution detection ---
 
-func (m *CCTVManager) FetchSnapshot(dvrID int64, chNum int) ([]byte, error) {
+func (m *CCTVManager) FetchSnapshot(dvrID int64, chNum int, qualityOverride string) ([]byte, error) {
 	dvr, err := m.getDVR(dvrID)
 	if err != nil {
 		return nil, err
@@ -225,7 +225,7 @@ func (m *CCTVManager) FetchSnapshot(dvrID int64, chNum int) ([]byte, error) {
 
 	// Use sub stream for snapshots (less bandwidth) or main based on config
 	streamID := "02" // sub
-	if dvr.StreamQuality == "main" {
+	if qualityOverride == "main" || (qualityOverride == "" && dvr.StreamQuality == "main") {
 		streamID = "01"
 	}
 
