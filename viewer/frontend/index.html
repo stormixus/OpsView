@@ -296,34 +296,76 @@
     .cctv-grid {
       flex: 1;
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
       gap: 4px;
       padding: 4px;
       background: #000;
       overflow-y: auto;
+      align-content: start;
+    }
+    .cctv-grid.grid-2 { grid-template-columns: repeat(2, 1fr); }
+    .cctv-grid.grid-3 { grid-template-columns: repeat(3, 1fr); }
+    .cctv-grid.grid-4 { grid-template-columns: repeat(4, 1fr); }
+
+    /* Grid layout selector */
+    .grid-layout-bar {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      background: #0d0d14;
+      border-bottom: 1px solid #1a1a24;
+      flex-shrink: 0;
+    }
+    .grid-layout-bar span { color: #555; font-size: 10px; margin-right: 2px; }
+    .grid-btn {
+      background: #1a1a24;
+      border: 1px solid #333;
+      border-radius: 3px;
+      color: #888;
+      font-size: 10px;
+      padding: 2px 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .grid-btn:hover { color: #ccc; border-color: #555; }
+    .grid-btn.active { color: #60a5fa; border-color: #60a5fa; background: rgba(96,165,250,0.1); }
+
+    /* Cell expand/collapse motion tween */
+    .cctv-cell {
+      transition: transform 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+                  opacity 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .cctv-cell.cell-shrink {
+      transform: scale(0.3);
+      opacity: 0;
+      pointer-events: none;
     }
 
-    /* Expanded cell overlay */
+    /* Expanded overlay - animates from cell position to full grid */
     .cctv-expand-overlay {
       position: absolute;
-      inset: 0;
       z-index: 20;
       background: #000;
-      display: flex;
+      display: none;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      opacity: 0;
-      transform: scale(0.85);
-      transition: opacity 0.3s ease, transform 0.3s ease;
-      pointer-events: none;
+      overflow: hidden;
+      border-radius: 4px;
+      transition: left 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+                  top 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+                  width 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+                  height 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+                  border-radius 0.45s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .cctv-expand-overlay.active {
-      opacity: 1;
-      transform: scale(1);
-      pointer-events: auto;
+      left: 0 !important;
+      top: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      border-radius: 0;
     }
-    .cctv-expand-overlay img {
+    .cctv-expand-overlay img, .cctv-expand-overlay video {
       width: 100%;
       height: 100%;
       object-fit: contain;
@@ -376,7 +418,7 @@
       border-color: #60a5fa;
       box-shadow: 0 12px 40px rgba(59,130,246,0.5);
     }
-    .cctv-cell img {
+    .cctv-cell img, .cctv-cell video {
       width: 100%;
       height: 100%;
       object-fit: contain;
@@ -493,6 +535,13 @@
       display: flex;
       gap: 4px;
       z-index: 12;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+    }
+    .mixed-right:hover .region-toolbar {
+      opacity: 1;
+      pointer-events: auto;
     }
     .region-btn {
       background: rgba(37,99,235,0.7);
@@ -526,6 +575,7 @@
     <div class="tab active" data-panel="ops" onclick="switchTab(this)">화면</div>
     <div class="tab" data-panel="cctv" onclick="switchTab(this)">CCTV</div>
     <div class="tab" data-panel="mixed" onclick="switchTab(this)">같이보기</div>
+    <button class="fullscreen-btn" onclick="refreshCurrentTab()" title="새로고침" style="margin-left:8px;">&#x21BB;</button>
     <div class="tab-status-area">
       <div class="tab-status" id="opsStatus">
         <span class="dot" id="statusDot"></span>
@@ -613,6 +663,11 @@
       <input type="text" id="dvrUser" value="admin" style="width:70px">
       <label>비밀번호:</label>
       <input type="password" id="dvrPass" style="width:80px">
+      <label>프로토콜:</label>
+      <select id="dvrProtocol" onchange="onProtocolChange()">
+        <option value="isapi">ISAPI</option>
+        <option value="rtsp">RTSP</option>
+      </select>
       <label>화질:</label>
       <select id="dvrQuality"><option value="sub">보조</option><option value="main">메인</option></select>
       <label>갱신:</label>
@@ -624,10 +679,18 @@
       </select>
       <button id="dvrSaveBtn" onclick="saveDVR()">저장 후 연결</button>
       <button onclick="hideDVRForm()" style="background:#666;">취소</button>
+      <button id="dvrTestBtn" onclick="testDVRConn()" style="background:#334155;">RTSP 테스트</button>
       <span id="dvrStatus" style="color:#888;margin-left:8px;"></span>
     </div>
+    <!-- Grid layout selector -->
+    <div class="grid-layout-bar" id="gridLayoutBar">
+      <span>그리드:</span>
+      <button class="grid-btn" data-cols="2" onclick="setGridLayout(2)">2x2</button>
+      <button class="grid-btn active" data-cols="3" onclick="setGridLayout(3)">3x3</button>
+      <button class="grid-btn" data-cols="4" onclick="setGridLayout(4)">4x4</button>
+    </div>
     <!-- Channel grid -->
-    <div class="cctv-grid" id="cctvGrid">
+    <div class="cctv-grid grid-3" id="cctvGrid">
       <div class="cctv-no-channels">채널을 보려면 DVR을 추가하세요</div>
     </div>
   </div>
@@ -674,6 +737,21 @@
 
     // Fullscreen toggle via Wails runtime
     let isFullscreen = false;
+    function refreshCurrentTab() {
+      const activePanel = document.querySelector('.panel.active');
+      if (!activePanel) return;
+      if (activePanel.id === 'panel-cctv' && activeDvrId) {
+        cleanupAllStreams();
+        if (CM()) CM().StopDVRStreams(activeDvrId).catch(() => {});
+        const dvr = dvrs.find(d => d.id === activeDvrId);
+        if (dvr) renderCCTVGrid(dvr);
+      } else if (activePanel.id === 'panel-mixed') {
+        cleanupMixedPCs();
+        if (activeDvrId && CM()) CM().StopDVRStreams(activeDvrId).catch(() => {});
+        renderMixedCCTV();
+      }
+    }
+
     function toggleFullscreen() {
       if (!window.runtime) return;
       if (isFullscreen) {
@@ -871,6 +949,176 @@
     let activeDvrId = null;
     let cctvChannels = [];
     let cctvTimers = [];
+    // Shared map of active WebRTC streams: key "dvrID_chNum" → { pc, stream }
+    let channelStreams = {};
+    let channelPeerConns = [];
+    let mixedPeerConns = [];
+
+    function cleanupChannelPCs() {
+      channelPeerConns.forEach(pc => { try { pc.close(); } catch(e) {} });
+      channelPeerConns = [];
+    }
+    function cleanupMixedPCs() {
+      mixedPeerConns.forEach(pc => { try { pc.close(); } catch(e) {} });
+      mixedPeerConns = [];
+    }
+    function cleanupAllStreams() {
+      cleanupChannelPCs();
+      cleanupMixedPCs();
+      channelStreams = {};
+    }
+
+    const MAX_RETRIES = 5;
+    const MAX_CONCURRENT = 4;
+
+    async function startRTSPChannel(dvrID, chNum, video, instanceArr) {
+      const key = dvrID + '_' + chNum;
+      const cell = video.parentElement;
+      let retries = 0;
+
+      // Reuse existing stream if available
+      if (channelStreams[key] && channelStreams[key].stream) {
+        video.srcObject = channelStreams[key].stream;
+        video.play().catch(() => {});
+        return;
+      }
+
+      // Status element
+      let statusEl = cell.querySelector('.ch-status');
+      if (!statusEl) {
+        statusEl = document.createElement('div');
+        statusEl.className = 'ch-status';
+        statusEl.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#888;font-size:11px;text-align:center;padding:8px;pointer-events:none;z-index:1;';
+        cell.appendChild(statusEl);
+      }
+
+      async function attempt() {
+        if (!CM()) return;
+        statusEl.style.color = '#888';
+        statusEl.textContent = 'CH' + chNum + ' 연결 중...' + (retries > 0 ? ' (재시도 ' + retries + '/' + MAX_RETRIES + ')' : '');
+
+        // Clean up previous PC for this channel
+        if (channelStreams[key] && channelStreams[key].pc) {
+          try { channelStreams[key].pc.close(); } catch(e) {}
+          delete channelStreams[key];
+        }
+
+        try {
+          console.log('[cctv] ch' + chNum + ': attempt ' + (retries + 1));
+          const pc = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+          });
+          pc.addTransceiver('video', { direction: 'recvonly' });
+
+          pc.ontrack = e => {
+            console.log('[cctv] ch' + chNum + ': ontrack fired');
+            const stream = e.streams && e.streams[0] ? e.streams[0] : new MediaStream([e.track]);
+            channelStreams[key] = { pc: pc, stream: stream };
+            video.srcObject = stream;
+            video.style.display = '';
+            video.play().catch(() => {});
+            if (statusEl && statusEl.parentElement) statusEl.remove();
+          };
+
+          // Auto-retry on WebRTC connection failure
+          pc.onconnectionstatechange = () => {
+            console.log('[cctv] ch' + chNum + ': state=' + pc.connectionState);
+            if (pc.connectionState === 'failed') {
+              retries++;
+              if (retries < MAX_RETRIES) {
+                console.log('[cctv] ch' + chNum + ': WebRTC failed, retrying ' + retries + '/' + MAX_RETRIES);
+                // Re-add status element if removed
+                if (!cell.querySelector('.ch-status')) {
+                  statusEl = document.createElement('div');
+                  statusEl.className = 'ch-status';
+                  statusEl.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#eab308;font-size:11px;text-align:center;padding:8px;pointer-events:none;z-index:1;';
+                  cell.appendChild(statusEl);
+                }
+                setTimeout(() => attempt(), 2000);
+              } else {
+                console.log('[cctv] ch' + chNum + ': all retries exhausted, switching to snapshot');
+                switchToSnapshot(dvrID, chNum, cell);
+              }
+            }
+          };
+
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+
+          await new Promise((resolve) => {
+            if (pc.iceGatheringState === 'complete') { resolve(); return; }
+            const t = setTimeout(resolve, 3000);
+            pc.onicegatheringstatechange = () => {
+              if (pc.iceGatheringState === 'complete') { clearTimeout(t); resolve(); }
+            };
+          });
+
+          const result = await CM().StartChannelStream(dvrID, chNum, pc.localDescription.sdp);
+          console.log('[cctv] ch' + chNum + ': WebRTC answer received');
+          await pc.setRemoteDescription({ type: 'answer', sdp: result.sdp });
+          instanceArr.push(pc);
+          video._pc = pc;
+        } catch(e) {
+          const errMsg = (e && e.message) ? e.message : String(e);
+          console.error('[cctv] ch' + chNum + ' attempt failed:', errMsg);
+          retries++;
+          if (retries < MAX_RETRIES) {
+            statusEl.style.color = '#eab308';
+            statusEl.textContent = 'CH' + chNum + ' 재시도 ' + retries + '/' + MAX_RETRIES;
+            await new Promise(r => setTimeout(r, 2000));
+            return attempt();
+          } else {
+            console.log('[cctv] ch' + chNum + ': all retries exhausted, switching to snapshot');
+            switchToSnapshot(dvrID, chNum, cell);
+          }
+        }
+      }
+
+      await attempt();
+    }
+
+    // Switch a failed WebRTC channel to ISAPI-style snapshot polling
+    function switchToSnapshot(dvrID, chNum, cell) {
+      // Remove video and status
+      const video = cell.querySelector('video');
+      if (video) video.remove();
+      const status = cell.querySelector('.ch-status');
+      if (status) status.remove();
+
+      // Add img element
+      const img = document.createElement('img');
+      img.alt = 'CH' + chNum;
+      img.src = '/cctv/snapshot/' + dvrID + '/' + chNum + '?t=' + Date.now();
+      img.onerror = function() { this.style.opacity = '0.3'; };
+      img.onload = function() { this.style.opacity = '1'; };
+      cell.insertBefore(img, cell.firstChild);
+
+      // Snapshot polling at 2s intervals
+      const timer = setInterval(() => {
+        const preload = new Image();
+        preload.onload = () => { img.src = preload.src; img.style.opacity = '1'; };
+        preload.src = '/cctv/snapshot/' + dvrID + '/' + chNum + '?t=' + Date.now();
+      }, 2000);
+      cctvTimers.push(timer);
+      console.log('[cctv] ch' + chNum + ': switched to snapshot polling');
+    }
+
+    // Concurrent channel connections (4 at a time), all channels attempted
+    async function startRTSPChannelsStaggered(dvrID, channels, getVideo, instanceArr) {
+      const queue = channels.slice();
+
+      function next() {
+        if (queue.length === 0) return;
+        const ch = queue.shift();
+        const video = getVideo(ch.ch_num);
+        if (!video || !CM()) { next(); return; }
+        startRTSPChannel(dvrID, ch.ch_num, video, instanceArr).finally(() => next());
+      }
+
+      for (let i = 0; i < Math.min(MAX_CONCURRENT, queue.length); i++) {
+        next();
+      }
+    }
     async function loadDVRs() {
       if (!CM()) return;
       try {
@@ -925,6 +1173,14 @@
     }
 
     async function selectDVR(id) {
+      // Stop previous RTSP streams when switching DVRs
+      if (activeDvrId && activeDvrId !== id) {
+        const prevDvr = dvrs.find(d => d.id === activeDvrId);
+        if (prevDvr && prevDvr.protocol === 'rtsp' && CM()) {
+          cleanupAllStreams();
+          CM().StopDVRStreams(activeDvrId).catch(() => {});
+        }
+      }
       activeDvrId = id;
       renderDVRTabs();
       hideDVRForm();
@@ -947,6 +1203,16 @@
 
     let editingDvrId = null; // null = add mode, number = edit mode
 
+    function onProtocolChange() {
+      const proto = document.getElementById('dvrProtocol').value;
+      const portEl = document.getElementById('dvrPort');
+      if (proto === 'rtsp' && (portEl.value === '80' || portEl.value === '')) {
+        portEl.value = '554';
+      } else if (proto === 'isapi' && portEl.value === '554') {
+        portEl.value = '80';
+      }
+    }
+
     function showAddDVR() {
       editingDvrId = null;
       document.getElementById('dvrForm').style.display = 'flex';
@@ -955,6 +1221,7 @@
       document.getElementById('dvrPort').value = '80';
       document.getElementById('dvrUser').value = 'admin';
       document.getElementById('dvrPass').value = '';
+      document.getElementById('dvrProtocol').value = 'isapi';
       document.getElementById('dvrQuality').value = 'sub';
       document.getElementById('dvrRefresh').value = '2000';
       document.getElementById('dvrSaveBtn').textContent = '저장 후 연결';
@@ -972,6 +1239,7 @@
       document.getElementById('dvrPort').value = d.port || 80;
       document.getElementById('dvrUser').value = d.username || 'admin';
       document.getElementById('dvrPass').value = d.password || '';
+      document.getElementById('dvrProtocol').value = d.protocol || 'isapi';
       document.getElementById('dvrQuality').value = d.stream_quality || 'sub';
       document.getElementById('dvrRefresh').value = d.refresh_rate || 2000;
       document.getElementById('dvrSaveBtn').textContent = '업데이트';
@@ -991,6 +1259,7 @@
       const port = parseInt(document.getElementById('dvrPort').value) || 80;
       const user = document.getElementById('dvrUser').value.trim();
       const pass = document.getElementById('dvrPass').value;
+      const protocol = document.getElementById('dvrProtocol').value;
       const quality = document.getElementById('dvrQuality').value;
       const refresh = parseInt(document.getElementById('dvrRefresh').value) || 2000;
 
@@ -1000,12 +1269,13 @@
       try {
         if (editingDvrId) {
           // Update existing DVR
-          await CM().UpdateDVR(editingDvrId, name || addr, addr, port, user, pass, refresh, quality);
+          await CM().UpdateDVR(editingDvrId, name || addr, addr, port, user, pass, refresh, quality, protocol);
           const d = dvrs.find(v => v.id === editingDvrId);
           if (d) {
             d.name = name || addr; d.addr = addr; d.port = port;
             d.username = user; d.password = pass;
             d.refresh_rate = refresh; d.stream_quality = quality;
+            d.protocol = protocol;
           }
           setDVRStatus('업데이트 완료', '#22c55e');
           hideDVRForm();
@@ -1013,10 +1283,11 @@
           selectDVR(editingDvrId);
         } else {
           // Add new DVR
-          const dvr = await CM().AddDVR(name || addr, addr, port, user, pass);
-          await CM().UpdateDVR(dvr.id, dvr.name, addr, port, user, pass, refresh, quality);
+          const dvr = await CM().AddDVR(name || addr, addr, port, user, pass, protocol);
+          await CM().UpdateDVR(dvr.id, dvr.name, addr, port, user, pass, refresh, quality, protocol);
           dvr.refresh_rate = refresh;
           dvr.stream_quality = quality;
+          dvr.protocol = protocol;
           dvrs.push(dvr);
           hideDVRForm();
           selectDVR(dvr.id);
@@ -1047,49 +1318,161 @@
       el.style.color = color || '#888';
     }
 
-    // --- Cell expand on double-click ---
-    let expandedOverlay = null;
-    let expandedTimer = null;
+    async function testDVRConn() {
+      if (!CM()) { setDVRStatus('Wails not ready', '#ef4444'); return; }
+      const dvrId = editingDvrId || activeDvrId;
+      if (!dvrId) { setDVRStatus('DVR을 먼저 선택하세요', '#ef4444'); return; }
+      setDVRStatus('RTSP 테스트 중...', '#eab308');
+      try {
+        const report = await CM().TestDVRConnection(dvrId);
+        console.log('[cctv] TestDVRConnection:\n' + report);
+        setDVRStatus(report.replace(/\n/g, ' | '), report.includes('H264 OK') ? '#22c55e' : '#ef4444');
+      } catch(e) {
+        setDVRStatus('Test error: ' + e, '#ef4444');
+      }
+    }
 
-    function expandCell(chNum, chName, grid) {
-      // Create overlay if not exists for this grid
+    // --- Cell expand on double-click (motion tween) ---
+    let expandedOverlay = null;
+    let expandedSourceCell = null;
+    let expandedTimer = null;
+    let expandedVideoOriginalParent = null;
+
+    function expandCell(chNum, chName, grid, cellEl) {
+      collapseCell(true); // instant collapse if already expanded
+
+      // Shrink all other cells
+      grid.querySelectorAll('.cctv-cell').forEach(c => {
+        if (c !== cellEl) c.classList.add('cell-shrink');
+      });
+
+      // Create/reuse overlay
       let overlay = grid.querySelector('.cctv-expand-overlay');
       if (!overlay) {
         overlay = document.createElement('div');
         overlay.className = 'cctv-expand-overlay';
-        overlay.innerHTML = '<img><div class="expand-label"><span class="expand-name"></span><span class="expand-hint">더블클릭: 돌아가기</span></div>';
         overlay.addEventListener('dblclick', () => collapseCell());
         grid.appendChild(overlay);
       }
 
-      const img = overlay.querySelector('img');
-      img.src = '/cctv/snapshot/' + activeDvrId + '/' + chNum + '?upscale=3&t=' + Date.now();
-      overlay.querySelector('.expand-name').textContent = chName + ' (CH' + chNum + ')';
+      // Position overlay exactly at the cell's current position
+      const gridRect = grid.getBoundingClientRect();
+      const cellRect = cellEl.getBoundingClientRect();
+      overlay.style.transition = 'none';
+      overlay.style.left = (cellRect.left - gridRect.left) + 'px';
+      overlay.style.top = (cellRect.top - gridRect.top + grid.scrollTop) + 'px';
+      overlay.style.width = cellRect.width + 'px';
+      overlay.style.height = cellRect.height + 'px';
+      overlay.style.display = 'flex';
+      overlay.classList.remove('active');
 
-      // Activate with transition
+      const isRTSP = !!cellEl.querySelector('video');
+
+      if (isRTSP) {
+        // Move live video to overlay (keeps HLS connection alive)
+        const video = cellEl.querySelector('video');
+        expandedVideoOriginalParent = cellEl;
+        overlay.innerHTML = '';
+        overlay.appendChild(video);
+        const label = document.createElement('div');
+        label.className = 'expand-label';
+        label.innerHTML = '<span class="expand-name">' + chName + ' (CH' + chNum + ')</span><span class="expand-hint">더블클릭: 돌아가기 (ESC)</span>';
+        overlay.appendChild(label);
+      } else {
+        // ISAPI: snapshot image with refresh
+        expandedVideoOriginalParent = null;
+        overlay.innerHTML = '<img><div class="expand-label"><span class="expand-name"></span><span class="expand-hint">더블클릭: 돌아가기 (ESC)</span></div>';
+        const img = overlay.querySelector('img');
+        img.src = '/cctv/snapshot/' + activeDvrId + '/' + chNum + '?upscale=2&ai=1&t=' + Date.now();
+        overlay.querySelector('.expand-name').textContent = chName + ' (CH' + chNum + ')';
+
+        const dvr = dvrs.find(d => d.id === activeDvrId);
+        const refreshMs = (dvr && dvr.refresh_rate) ? dvr.refresh_rate : 2000;
+        if (expandedTimer) clearInterval(expandedTimer);
+        expandedTimer = setInterval(() => {
+          const preload = new Image();
+          preload.onload = () => { img.src = preload.src; };
+          preload.src = '/cctv/snapshot/' + activeDvrId + '/' + chNum + '?upscale=2&ai=1&t=' + Date.now();
+        }, refreshMs);
+      }
+
+      // Animate to full grid on next frame
       requestAnimationFrame(() => {
+        overlay.style.transition = '';
         overlay.classList.add('active');
       });
+
       expandedOverlay = overlay;
-
-      // Refresh the expanded image with 3x upscale
-      const dvr = dvrs.find(d => d.id === activeDvrId);
-      const refreshMs = (dvr && dvr.refresh_rate) ? dvr.refresh_rate : 2000;
-      if (expandedTimer) clearInterval(expandedTimer);
-      expandedTimer = setInterval(() => {
-        const preload = new Image();
-        preload.onload = () => { img.src = preload.src; };
-        preload.src = '/cctv/snapshot/' + activeDvrId + '/' + chNum + '?upscale=3&t=' + Date.now();
-      }, refreshMs);
+      expandedSourceCell = cellEl;
     }
 
-    function collapseCell() {
+    function collapseCell(instant) {
       if (expandedTimer) { clearInterval(expandedTimer); expandedTimer = null; }
-      if (expandedOverlay) {
-        expandedOverlay.classList.remove('active');
-        expandedOverlay = null;
+      if (!expandedOverlay) return;
+
+      const overlay = expandedOverlay;
+      const cellEl = expandedSourceCell;
+      const grid = overlay.parentElement;
+
+      // Un-shrink other cells
+      grid.querySelectorAll('.cctv-cell.cell-shrink').forEach(c => {
+        c.classList.remove('cell-shrink');
+      });
+
+      // Move video back to original cell if RTSP
+      if (expandedVideoOriginalParent) {
+        const video = overlay.querySelector('video');
+        if (video && expandedVideoOriginalParent.isConnected) {
+          const label = expandedVideoOriginalParent.querySelector('.ch-label');
+          expandedVideoOriginalParent.insertBefore(video, label);
+        }
+        expandedVideoOriginalParent = null;
       }
+
+      if (instant || !cellEl) {
+        overlay.style.display = 'none';
+        overlay.classList.remove('active');
+        expandedOverlay = null;
+        expandedSourceCell = null;
+        return;
+      }
+
+      // Animate back to cell position
+      const gridRect = grid.getBoundingClientRect();
+      const cellRect = cellEl.getBoundingClientRect();
+      overlay.classList.remove('active');
+      overlay.style.left = (cellRect.left - gridRect.left) + 'px';
+      overlay.style.top = (cellRect.top - gridRect.top + grid.scrollTop) + 'px';
+      overlay.style.width = cellRect.width + 'px';
+      overlay.style.height = cellRect.height + 'px';
+
+      // Hide after animation completes
+      setTimeout(() => {
+        overlay.style.display = 'none';
+      }, 480);
+
+      expandedOverlay = null;
+      expandedSourceCell = null;
     }
+
+    // --- Grid layout ---
+    let currentGridCols = parseInt(localStorage.getItem('opsview_grid_cols')) || 3;
+
+    function setGridLayout(cols) {
+      currentGridCols = cols;
+      localStorage.setItem('opsview_grid_cols', cols);
+      const grid = document.getElementById('cctvGrid');
+      grid.classList.remove('grid-2', 'grid-3', 'grid-4');
+      grid.classList.add('grid-' + cols);
+      document.querySelectorAll('#gridLayoutBar .grid-btn').forEach(b => {
+        b.classList.toggle('active', parseInt(b.dataset.cols) === cols);
+      });
+    }
+
+    // Restore saved grid layout
+    (function initGridLayout() {
+      setGridLayout(currentGridCols);
+    })();
 
     // --- Grid rendering with SortableJS + preload (no flicker) ---
     let sortableInstance = null;
@@ -1098,7 +1481,8 @@
       const grid = document.getElementById('cctvGrid');
       cctvTimers.forEach(t => clearInterval(t));
       cctvTimers = [];
-      collapseCell();
+      collapseCell(true);
+      cleanupAllStreams();
       if (sortableInstance) { sortableInstance.destroy(); sortableInstance = null; }
 
       const enabled = cctvChannels.filter(ch => ch.enabled);
@@ -1110,33 +1494,56 @@
       }
 
       grid.innerHTML = '';
+      // Ensure grid layout class is applied
+      grid.classList.remove('grid-2', 'grid-3', 'grid-4');
+      grid.classList.add('grid-' + currentGridCols);
+      const isRTSP = dvr && dvr.protocol === 'rtsp';
       const refreshMs = (dvr && dvr.refresh_rate) ? dvr.refresh_rate : 2000;
 
       enabled.forEach(ch => {
         const cell = document.createElement('div');
         cell.className = 'cctv-cell';
         cell.dataset.chnum = ch.ch_num;
+        cell.style.aspectRatio = '16/9';
 
-        // Set aspect ratio from detected resolution
-        if (ch.width > 0 && ch.height > 0) {
-          cell.style.aspectRatio = ch.width + '/' + ch.height;
+        if (isRTSP) {
+          // RTSP: <video> (WebRTC or HLS depending on codec)
+          const video = document.createElement('video');
+          video.autoplay = true;
+          video.muted = true;
+          video.playsInline = true;
+          video.id = 'cctv-video-' + ch.ch_num;
+          cell.appendChild(video);
+          // Connections started via staggered function after grid is built
         } else {
-          cell.style.aspectRatio = '16/9';
+          // ISAPI: <img> + snapshot polling
+          const img = document.createElement('img');
+          img.alt = ch.name;
+          img.src = '/cctv/snapshot/' + activeDvrId + '/' + ch.ch_num + '?t=' + Date.now();
+          img.onerror = function() { this.style.opacity = '0.3'; };
+          img.onload = function() {
+            this.style.opacity = '1';
+            if (this.naturalWidth > 0 && this.naturalHeight > 0 && ch.width === 0) {
+              cell.style.aspectRatio = this.naturalWidth + '/' + this.naturalHeight;
+            }
+          };
+          cell.appendChild(img);
+
+          const timer = setInterval(() => {
+            const preload = new Image();
+            preload.onload = () => {
+              img.src = preload.src;
+              img.style.opacity = '1';
+              if (preload.naturalWidth > 0 && ch.width === 0) {
+                cell.style.aspectRatio = preload.naturalWidth + '/' + preload.naturalHeight;
+              }
+            };
+            preload.src = '/cctv/snapshot/' + activeDvrId + '/' + ch.ch_num + '?t=' + Date.now();
+          }, refreshMs);
+          cctvTimers.push(timer);
         }
 
-        const img = document.createElement('img');
-        img.alt = ch.name;
-        img.src = '/cctv/snapshot/' + activeDvrId + '/' + ch.ch_num + '?t=' + Date.now();
-        img.onerror = function() { this.style.opacity = '0.3'; };
-        img.onload = function() {
-          this.style.opacity = '1';
-          if (this.naturalWidth > 0 && this.naturalHeight > 0 && ch.width === 0) {
-            cell.style.aspectRatio = this.naturalWidth + '/' + this.naturalHeight;
-          }
-        };
-        cell.appendChild(img);
-
-        // Label
+        // Label (common)
         const label = document.createElement('div');
         label.className = 'ch-label';
         const nameInput = document.createElement('input');
@@ -1160,25 +1567,19 @@
 
         cell.appendChild(label);
         cell.addEventListener('dblclick', (e) => {
-          if (e.target.classList.contains('ch-name')) return; // Don't expand when editing name
-          expandCell(ch.ch_num, ch.name, grid);
+          if (e.target.classList.contains('ch-name')) return;
+          expandCell(ch.ch_num, ch.name, grid, cell);
         });
         grid.appendChild(cell);
-
-        // Preloaded snapshot refresh (no flicker)
-        const timer = setInterval(() => {
-          const preload = new Image();
-          preload.onload = () => {
-            img.src = preload.src;
-            img.style.opacity = '1';
-            if (preload.naturalWidth > 0 && ch.width === 0) {
-              cell.style.aspectRatio = preload.naturalWidth + '/' + preload.naturalHeight;
-            }
-          };
-          preload.src = '/cctv/snapshot/' + activeDvrId + '/' + ch.ch_num + '?t=' + Date.now();
-        }, refreshMs);
-        cctvTimers.push(timer);
       });
+
+      // Start RTSP streams with staggered connections (after grid is built)
+      if (isRTSP && CM()) {
+        startRTSPChannelsStaggered(dvr.id, enabled,
+          (chNum) => document.getElementById('cctv-video-' + chNum),
+          channelPeerConns
+        );
+      }
 
       // Initialize SortableJS on the grid
       sortableInstance = new Sortable(grid, {
@@ -1197,15 +1598,12 @@
         draggable: '.cctv-cell',
         onEnd: function(evt) {
           if (evt.oldIndex === evt.newIndex) return;
-          // Read new order from DOM
           const cells = grid.querySelectorAll('.cctv-cell');
           const newOrder = Array.from(cells).map(c => parseInt(c.dataset.chnum));
-          // Update local state
           newOrder.forEach((num, i) => {
             const ch = cctvChannels.find(c => c.ch_num === num);
             if (ch) ch.order = i;
           });
-          // Persist to backend
           if (CM() && activeDvrId) {
             CM().ReorderChannels(activeDvrId, newOrder).catch(e => console.error('reorder:', e));
           }
@@ -1261,6 +1659,7 @@
       const grid = document.getElementById('mixedCctvGrid');
       mixedCctvTimers.forEach(t => clearInterval(t));
       mixedCctvTimers = [];
+      cleanupMixedPCs();
 
       const enabled = cctvChannels.filter(ch => ch.enabled);
       enabled.sort((a, b) => a.order - b.order);
@@ -1272,10 +1671,11 @@
       }
 
       grid.innerHTML = '';
-      // Fixed grid: <=9 channels → 3x3, >9 → 4x4
       grid.classList.remove('cols-3', 'cols-4');
       grid.classList.add(enabled.length <= 9 ? 'cols-3' : 'cols-4');
+      // Mixed grid always uses auto cols based on channel count
       const dvr = dvrs.find(d => d.id === activeDvrId);
+      const isRTSP = dvr && dvr.protocol === 'rtsp';
       const refreshMs = (dvr && dvr.refresh_rate) ? dvr.refresh_rate : 2000;
 
       enabled.forEach(ch => {
@@ -1287,29 +1687,47 @@
           cell.style.aspectRatio = '16/9';
         }
 
-        const img = document.createElement('img');
-        img.alt = ch.name;
-        img.src = '/cctv/snapshot/' + activeDvrId + '/' + ch.ch_num + '?t=' + Date.now();
-        img.onerror = function() { this.style.opacity = '0.3'; };
-        img.onload = function() { this.style.opacity = '1'; };
-        cell.appendChild(img);
+        if (isRTSP) {
+          const video = document.createElement('video');
+          video.autoplay = true;
+          video.muted = true;
+          video.playsInline = true;
+          video.id = 'mixed-video-' + ch.ch_num;
+          cell.appendChild(video);
+          // Connections started via staggered function after grid is built
+        } else {
+          const img = document.createElement('img');
+          img.alt = ch.name;
+          img.src = '/cctv/snapshot/' + activeDvrId + '/' + ch.ch_num + '?t=' + Date.now();
+          img.onerror = function() { this.style.opacity = '0.3'; };
+          img.onload = function() { this.style.opacity = '1'; };
+          cell.appendChild(img);
+
+          const timer = setInterval(() => {
+            const preload = new Image();
+            preload.onload = () => { img.src = preload.src; img.style.opacity = '1'; };
+            preload.src = '/cctv/snapshot/' + activeDvrId + '/' + ch.ch_num + '?t=' + Date.now();
+          }, refreshMs);
+          mixedCctvTimers.push(timer);
+        }
 
         const label = document.createElement('div');
         label.className = 'ch-label';
         label.innerHTML = '<span style="font-size:11px;color:#ccc;">' + ch.name + '</span><span class="ch-id">CH' + ch.ch_num + '</span>';
         cell.appendChild(label);
         cell.addEventListener('dblclick', () => {
-          expandCell(ch.ch_num, ch.name, grid);
+          expandCell(ch.ch_num, ch.name, grid, cell);
         });
         grid.appendChild(cell);
-
-        const timer = setInterval(() => {
-          const preload = new Image();
-          preload.onload = () => { img.src = preload.src; img.style.opacity = '1'; };
-          preload.src = '/cctv/snapshot/' + activeDvrId + '/' + ch.ch_num + '?t=' + Date.now();
-        }, refreshMs);
-        mixedCctvTimers.push(timer);
       });
+
+      // Start RTSP streams with staggered connections (after grid is built)
+      if (isRTSP && CM()) {
+        startRTSPChannelsStaggered(dvr.id, enabled,
+          (chNum) => document.getElementById('mixed-video-' + chNum),
+          mixedPeerConns
+        );
+      }
     }
 
     // Mixed Ops canvas (mirrors the main canvas region)
@@ -1492,9 +1910,26 @@
     // Update mixed CCTV when tab switches to mixed
     const origSwitchTab = switchTab;
     switchTab = function(el) {
+      const prevPanel = document.querySelector('.panel.active');
+      // Clean up streams when leaving a tab
+      if (prevPanel) {
+        if (prevPanel.id === 'panel-mixed') {
+          cleanupMixedPCs();
+          if (activeDvrId && CM()) CM().StopDVRStreams(activeDvrId).catch(() => {});
+        }
+        if (prevPanel.id === 'panel-cctv') {
+          cleanupChannelPCs();
+          if (activeDvrId && CM()) CM().StopDVRStreams(activeDvrId).catch(() => {});
+        }
+      }
       origSwitchTab(el);
+      // Reconnect streams on entering a tab
       if (el.dataset.panel === 'mixed') {
         renderMixedCCTV();
+      }
+      if (el.dataset.panel === 'cctv' && activeDvrId) {
+        const dvr = dvrs.find(d => d.id === activeDvrId);
+        if (dvr) renderCCTVGrid(dvr);
       }
     };
 

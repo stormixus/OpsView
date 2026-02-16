@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
@@ -32,6 +33,7 @@ type DVRConfig struct {
 	Password      string `json:"password"`
 	RefreshRate   int    `json:"refresh_rate"`  // snapshot interval in ms (default 2000)
 	StreamQuality string `json:"stream_quality"` // "main" or "sub"
+	Protocol      string `json:"protocol"`       // "isapi" or "rtsp"
 	CreatedAt     string `json:"created_at"`
 }
 
@@ -48,11 +50,15 @@ type ChannelConfig struct {
 
 // CCTVManager handles multiple DVR connections and channel configuration via SQLite.
 type CCTVManager struct {
-	ctx    context.Context
-	mu     sync.RWMutex
-	db     *sql.DB
-	dbPath string
-	client *http.Client
+	ctx        context.Context
+	mu         sync.RWMutex
+	db         *sql.DB
+	dbPath     string
+	client     *http.Client
+	esrganPath string
+	esrganSem  chan struct{}           // limits concurrent ESRGAN to 1
+	streams    map[string]*channelStream // key: "{dvrID}_{chNum}"
+	streamsMu  sync.Mutex
 }
 
 func NewCCTVManager() *CCTVManager {
@@ -67,11 +73,14 @@ func NewCCTVManager() *CCTVManager {
 	}
 
 	m := &CCTVManager{
-		db:     db,
-		dbPath: dbPath,
-		client: &http.Client{Timeout: 10 * time.Second},
+		db:        db,
+		dbPath:    dbPath,
+		client:    &http.Client{Timeout: 10 * time.Second},
+		esrganSem: make(chan struct{}, 1),
+		streams:   make(map[string]*channelStream),
 	}
 	m.migrate()
+	m.initESRGAN()
 	return m
 }
 
@@ -90,6 +99,7 @@ func (m *CCTVManager) migrate() {
 			password TEXT NOT NULL DEFAULT '',
 			refresh_rate INTEGER NOT NULL DEFAULT 2000,
 			stream_quality TEXT NOT NULL DEFAULT 'sub',
+			protocol TEXT NOT NULL DEFAULT 'isapi',
 			created_at TEXT NOT NULL DEFAULT (datetime('now'))
 		)`,
 		`CREATE TABLE IF NOT EXISTS channels (
@@ -109,12 +119,14 @@ func (m *CCTVManager) migrate() {
 			log.Printf("[cctv] migrate: %v", err)
 		}
 	}
+	// Add protocol column for existing databases
+	m.db.Exec(`ALTER TABLE dvrs ADD COLUMN protocol TEXT NOT NULL DEFAULT 'isapi'`)
 }
 
 // --- DVR CRUD ---
 
 func (m *CCTVManager) ListDVRs() ([]DVRConfig, error) {
-	rows, err := m.db.Query(`SELECT id, name, addr, port, username, password, refresh_rate, stream_quality, created_at FROM dvrs ORDER BY id`)
+	rows, err := m.db.Query(`SELECT id, name, addr, port, username, password, refresh_rate, stream_quality, protocol, created_at FROM dvrs ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -123,28 +135,34 @@ func (m *CCTVManager) ListDVRs() ([]DVRConfig, error) {
 	var dvrs []DVRConfig
 	for rows.Next() {
 		var d DVRConfig
-		rows.Scan(&d.ID, &d.Name, &d.Addr, &d.Port, &d.Username, &d.Password, &d.RefreshRate, &d.StreamQuality, &d.CreatedAt)
+		rows.Scan(&d.ID, &d.Name, &d.Addr, &d.Port, &d.Username, &d.Password, &d.RefreshRate, &d.StreamQuality, &d.Protocol, &d.CreatedAt)
 		dvrs = append(dvrs, d)
 	}
 	return dvrs, nil
 }
 
-func (m *CCTVManager) AddDVR(name, addr string, port int, username, password string) (DVRConfig, error) {
+func (m *CCTVManager) AddDVR(name, addr string, port int, username, password, protocol string) (DVRConfig, error) {
 	if name == "" {
 		name = addr
 	}
-	res, err := m.db.Exec(`INSERT INTO dvrs (name, addr, port, username, password) VALUES (?, ?, ?, ?, ?)`,
-		name, addr, port, username, password)
+	if protocol == "" {
+		protocol = "isapi"
+	}
+	res, err := m.db.Exec(`INSERT INTO dvrs (name, addr, port, username, password, protocol) VALUES (?, ?, ?, ?, ?, ?)`,
+		name, addr, port, username, password, protocol)
 	if err != nil {
 		return DVRConfig{}, err
 	}
 	id, _ := res.LastInsertId()
-	return DVRConfig{ID: id, Name: name, Addr: addr, Port: port, Username: username, Password: password, RefreshRate: 2000, StreamQuality: "sub"}, nil
+	return DVRConfig{ID: id, Name: name, Addr: addr, Port: port, Username: username, Password: password, RefreshRate: 2000, StreamQuality: "sub", Protocol: protocol}, nil
 }
 
-func (m *CCTVManager) UpdateDVR(id int64, name, addr string, port int, username, password string, refreshRate int, streamQuality string) error {
-	_, err := m.db.Exec(`UPDATE dvrs SET name=?, addr=?, port=?, username=?, password=?, refresh_rate=?, stream_quality=? WHERE id=?`,
-		name, addr, port, username, password, refreshRate, streamQuality, id)
+func (m *CCTVManager) UpdateDVR(id int64, name, addr string, port int, username, password string, refreshRate int, streamQuality, protocol string) error {
+	if protocol == "" {
+		protocol = "isapi"
+	}
+	_, err := m.db.Exec(`UPDATE dvrs SET name=?, addr=?, port=?, username=?, password=?, refresh_rate=?, stream_quality=?, protocol=? WHERE id=?`,
+		name, addr, port, username, password, refreshRate, streamQuality, protocol, id)
 	return err
 }
 
@@ -179,7 +197,13 @@ func (m *CCTVManager) DiscoverChannels(dvrID int64) ([]ChannelConfig, error) {
 		return nil, err
 	}
 
-	discovered, err := m.discoverFromDVR(dvr)
+	var discovered []ChannelConfig
+	switch dvr.Protocol {
+	case "rtsp":
+		discovered, err = m.discoverFromDVRRTSP(dvr)
+	default: // "isapi"
+		discovered, err = m.discoverFromDVRISAPI(dvr)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -220,13 +244,57 @@ func (m *CCTVManager) ReorderChannels(dvrID int64, orderedChNums []int) error {
 
 // --- Snapshot fetching with auto resolution detection ---
 
-func (m *CCTVManager) FetchSnapshot(dvrID int64, chNum int, upscale int) ([]byte, error) {
+func (m *CCTVManager) FetchSnapshot(dvrID int64, chNum int, upscale int, aiUpscale bool) ([]byte, error) {
 	dvr, err := m.getDVR(dvrID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Always use sub stream (less bandwidth, won't overload DVR)
+	var data []byte
+	switch dvr.Protocol {
+	case "rtsp":
+		// Try ISAPI first (faster, no ffmpeg needed) — Hikvision DVRs support both
+		data, err = m.fetchSnapshotISAPIOnPort(dvr, chNum, 80)
+		if err != nil {
+			data, err = m.fetchSnapshotRTSP(dvr, chNum)
+		}
+	default: // "isapi"
+		data, err = m.fetchSnapshotISAPI(dvr, chNum)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Auto-detect resolution from JPEG and update DB
+	go m.detectAndSaveResolution(dvrID, chNum, data)
+
+	// Upscale if requested
+	if upscale > 1 {
+		if aiUpscale && m.hasESRGAN() {
+			// Try to acquire semaphore (non-blocking); fall back to bicubic if busy
+			select {
+			case m.esrganSem <- struct{}{}:
+				scaled, esrErr := m.upscaleESRGAN(data, upscale)
+				<-m.esrganSem
+				if esrErr == nil {
+					return scaled, nil
+				}
+				log.Printf("[cctv] esrgan ch%d: %v, falling back to bicubic", chNum, esrErr)
+			default:
+				log.Printf("[cctv] esrgan busy, ch%d using bicubic", chNum)
+			}
+		}
+		data, err = m.upscaleBicubic(data, upscale)
+		if err != nil {
+			log.Printf("[cctv] upscale ch%d: %v", chNum, err)
+		}
+	}
+
+	return data, nil
+}
+
+// fetchSnapshotISAPI fetches a snapshot via Hikvision ISAPI HTTP REST.
+func (m *CCTVManager) fetchSnapshotISAPI(dvr DVRConfig, chNum int) ([]byte, error) {
 	streamID := "02"
 	if dvr.StreamQuality == "main" {
 		streamID = "01"
@@ -248,28 +316,35 @@ func (m *CCTVManager) FetchSnapshot(dvrID int64, chNum int, upscale int) ([]byte
 		return nil, fmt.Errorf("DVR returned %d", resp.StatusCode)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	return io.ReadAll(resp.Body)
+}
+
+// fetchSnapshotISAPIOnPort tries ISAPI snapshot on a specific port (for RTSP DVRs that also have ISAPI).
+func (m *CCTVManager) fetchSnapshotISAPIOnPort(dvr DVRConfig, chNum int, port int) ([]byte, error) {
+	streamID := "02"
+	if dvr.StreamQuality == "main" {
+		streamID = "01"
+	}
+	url := fmt.Sprintf("http://%s:%d/ISAPI/Streaming/channels/%d%s/picture",
+		dvr.Addr, port, chNum, streamID)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.SetBasicAuth(dvr.Username, dvr.Password)
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
-	// Auto-detect resolution from JPEG and update DB
-	go m.detectAndSaveResolution(dvrID, chNum, data)
-
-	// Upscale with bicubic interpolation if requested
-	if upscale > 1 {
-		data, err = m.upscaleJPEG(data, upscale)
-		if err != nil {
-			log.Printf("[cctv] upscale ch%d: %v", chNum, err)
-			// Return original on error
-		}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("ISAPI port %d returned %d", port, resp.StatusCode)
 	}
-
-	return data, nil
+	return io.ReadAll(resp.Body)
 }
 
-// upscaleJPEG decodes a JPEG, scales it up by factor using CatmullRom bicubic, and re-encodes.
-func (m *CCTVManager) upscaleJPEG(data []byte, factor int) ([]byte, error) {
+// upscaleBicubic scales up using CatmullRom bicubic interpolation (fast fallback).
+func (m *CCTVManager) upscaleBicubic(data []byte, factor int) ([]byte, error) {
 	src, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return data, err
@@ -287,6 +362,103 @@ func (m *CCTVManager) upscaleJPEG(data []byte, factor int) ([]byte, error) {
 		return data, err
 	}
 	return buf.Bytes(), nil
+}
+
+// hasESRGAN checks if realesrgan-ncnn-vulkan is available.
+func (m *CCTVManager) hasESRGAN() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.esrganPath != ""
+}
+
+// initESRGAN detects the realesrgan-ncnn-vulkan binary at startup.
+func (m *CCTVManager) initESRGAN() {
+	// Check common locations
+	candidates := []string{
+		"realesrgan-ncnn-vulkan",
+	}
+	// Check bundled path next to the executable
+	if execPath, err := os.Executable(); err == nil {
+		dir := filepath.Dir(execPath)
+		candidates = append(candidates,
+			filepath.Join(dir, "realesrgan-ncnn-vulkan"),
+			filepath.Join(dir, "esrgan", "realesrgan-ncnn-vulkan"),
+			// macOS .app bundle: Contents/MacOS/../Resources/esrgan/
+			filepath.Join(dir, "..", "Resources", "esrgan", "realesrgan-ncnn-vulkan"),
+		)
+	}
+	// Check user data dir
+	home, _ := os.UserHomeDir()
+	candidates = append(candidates,
+		filepath.Join(home, ".opsview", "realesrgan-ncnn-vulkan"),
+	)
+
+	for _, c := range candidates {
+		if p, err := exec.LookPath(c); err == nil {
+			m.mu.Lock()
+			m.esrganPath = p
+			m.mu.Unlock()
+			log.Printf("[cctv] Real-ESRGAN found: %s", p)
+			return
+		}
+	}
+	log.Printf("[cctv] Real-ESRGAN not found, using bicubic upscaling")
+}
+
+// upscaleESRGAN uses realesrgan-ncnn-vulkan for AI super-resolution.
+func (m *CCTVManager) upscaleESRGAN(data []byte, scale int) ([]byte, error) {
+	m.mu.RLock()
+	esrganPath := m.esrganPath
+	m.mu.RUnlock()
+
+	if esrganPath == "" {
+		return nil, fmt.Errorf("esrgan not available")
+	}
+
+	// Clamp scale to supported values (2, 3, 4)
+	if scale < 2 {
+		scale = 2
+	}
+	if scale > 4 {
+		scale = 4
+	}
+
+	// Write input to temp file
+	tmpIn := filepath.Join(os.TempDir(), fmt.Sprintf("opsview-esrgan-in-%d.jpg", time.Now().UnixNano()))
+	tmpOut := filepath.Join(os.TempDir(), fmt.Sprintf("opsview-esrgan-out-%d.jpg", time.Now().UnixNano()))
+	defer os.Remove(tmpIn)
+	defer os.Remove(tmpOut)
+
+	if err := os.WriteFile(tmpIn, data, 0644); err != nil {
+		return nil, err
+	}
+
+	// Models directory is next to the binary
+	modelsDir := filepath.Join(filepath.Dir(esrganPath), "models")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, esrganPath,
+		"-i", tmpIn,
+		"-o", tmpOut,
+		"-s", fmt.Sprintf("%d", scale),
+		"-n", "realesrgan-x4plus",
+		"-m", modelsDir,
+		"-f", "jpg",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("esrgan timeout (10s)")
+		}
+		return nil, fmt.Errorf("%w: %s", err, string(out))
+	}
+
+	result, err := os.ReadFile(tmpOut)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (m *CCTVManager) detectAndSaveResolution(dvrID int64, chNum int, jpegData []byte) {
@@ -318,7 +490,7 @@ type isAPIVideoInfo struct {
 	Height int `xml:"videoResolutionHeight"`
 }
 
-func (m *CCTVManager) discoverFromDVR(dvr DVRConfig) ([]ChannelConfig, error) {
+func (m *CCTVManager) discoverFromDVRISAPI(dvr DVRConfig) ([]ChannelConfig, error) {
 	url := fmt.Sprintf("http://%s:%d/ISAPI/Streaming/channels", dvr.Addr, dvr.Port)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.SetBasicAuth(dvr.Username, dvr.Password)
@@ -389,8 +561,11 @@ func (m *CCTVManager) fetchChannelResolution(dvr DVRConfig, chNum int) (int, int
 
 func (m *CCTVManager) getDVR(id int64) (DVRConfig, error) {
 	var d DVRConfig
-	err := m.db.QueryRow(`SELECT id, name, addr, port, username, password, refresh_rate, stream_quality FROM dvrs WHERE id=?`, id).
-		Scan(&d.ID, &d.Name, &d.Addr, &d.Port, &d.Username, &d.Password, &d.RefreshRate, &d.StreamQuality)
+	err := m.db.QueryRow(`SELECT id, name, addr, port, username, password, refresh_rate, stream_quality, protocol FROM dvrs WHERE id=?`, id).
+		Scan(&d.ID, &d.Name, &d.Addr, &d.Port, &d.Username, &d.Password, &d.RefreshRate, &d.StreamQuality, &d.Protocol)
+	if d.Protocol == "" {
+		d.Protocol = "isapi"
+	}
 	return d, err
 }
 

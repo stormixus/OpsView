@@ -135,11 +135,30 @@ jobs:
           xcrun stapler staple viewer/build/bin/opsview-viewer.app
           rm notarize.zip
 
+      - name: Download Real-ESRGAN
+        shell: bash
+        run: |
+          ESRGAN_VER="20220424"
+          case "${{ matrix.goos }}" in
+            darwin)  ESRGAN_OS="macos" ;;
+            windows) ESRGAN_OS="windows" ;;
+            linux)   ESRGAN_OS="ubuntu" ;;
+          esac
+          curl -L "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-${ESRGAN_VER}-${ESRGAN_OS}.zip" -o esrgan.zip
+          mkdir -p esrgan
+          unzip -o esrgan.zip -d esrgan-tmp
+          cp esrgan-tmp/realesrgan-ncnn-vulkan* esrgan/ || true
+          cp -r esrgan-tmp/models esrgan/
+          rm -rf esrgan-tmp esrgan.zip
+
       - name: Package viewer (Windows)
         if: matrix.goos == 'windows'
         shell: bash
         run: |
           cp "viewer/build/bin/opsview-viewer-amd64-installer.exe" "${{ matrix.artifact }}-setup.exe"
+          mkdir -p dist-esrgan
+          cp -r esrgan dist-esrgan/
+          cd dist-esrgan && zip -r ../${{ matrix.artifact }}-esrgan.zip esrgan/
 
       - name: Package viewer (macOS)
         if: matrix.goos == 'darwin'
@@ -147,6 +166,9 @@ jobs:
           mkdir -p dmg-stage
           cp -R viewer/build/bin/opsview-viewer.app dmg-stage/
           ln -s /Applications dmg-stage/Applications
+          mkdir -p "dmg-stage/opsview-viewer.app/Contents/Resources/esrgan"
+          cp esrgan/realesrgan-ncnn-vulkan "dmg-stage/opsview-viewer.app/Contents/Resources/esrgan/"
+          cp -r esrgan/models "dmg-stage/opsview-viewer.app/Contents/Resources/esrgan/"
           hdiutil create -volname "OpsView Viewer" \
             -srcfolder dmg-stage \
             -ov -format UDZO \
@@ -157,13 +179,18 @@ jobs:
         if: matrix.goos == 'linux'
         run: |
           cd viewer/build/bin
-          tar czf ../../../${{ matrix.artifact }}.tar.gz opsview-viewer
+          mkdir -p esrgan
+          cp ../../../esrgan/realesrgan-ncnn-vulkan esrgan/
+          chmod +x esrgan/realesrgan-ncnn-vulkan
+          cp -r ../../../esrgan/models esrgan/
+          tar czf ../../../${{ matrix.artifact }}.tar.gz opsview-viewer esrgan/
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: |
             ${{ matrix.artifact }}-setup.exe
+            ${{ matrix.artifact }}-esrgan.zip
             ${{ matrix.artifact }}.dmg
             ${{ matrix.artifact }}.tar.gz
 
