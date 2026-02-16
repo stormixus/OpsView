@@ -738,18 +738,7 @@
     // Fullscreen toggle via Wails runtime
     let isFullscreen = false;
     function refreshCurrentTab() {
-      const activePanel = document.querySelector('.panel.active');
-      if (!activePanel) return;
-      if (activePanel.id === 'panel-cctv' && activeDvrId) {
-        cleanupAllStreams();
-        if (CM()) CM().StopDVRStreams(activeDvrId).catch(() => {});
-        const dvr = dvrs.find(d => d.id === activeDvrId);
-        if (dvr) renderCCTVGrid(dvr);
-      } else if (activePanel.id === 'panel-mixed') {
-        cleanupMixedPCs();
-        if (activeDvrId && CM()) CM().StopDVRStreams(activeDvrId).catch(() => {});
-        renderMixedCCTV();
-      }
+      window.location.reload();
     }
 
     function toggleFullscreen() {
@@ -968,7 +957,7 @@
       channelStreams = {};
     }
 
-    const MAX_RETRIES = 5;
+    const MAX_RETRIES = 9;
     const MAX_CONCURRENT = 4;
 
     async function startRTSPChannel(dvrID, chNum, video, instanceArr) {
@@ -1574,7 +1563,9 @@
       });
 
       // Start RTSP streams with staggered connections (after grid is built)
+      console.log('[cctv] renderCCTVGrid: isRTSP=' + isRTSP + ' CM=' + !!CM() + ' enabled=' + enabled.length);
       if (isRTSP && CM()) {
+        console.log('[cctv] renderCCTVGrid: starting staggered connections for ' + enabled.length + ' channels');
         startRTSPChannelsStaggered(dvr.id, enabled,
           (chNum) => document.getElementById('cctv-video-' + chNum),
           channelPeerConns
@@ -1911,23 +1902,19 @@
     const origSwitchTab = switchTab;
     switchTab = function(el) {
       const prevPanel = document.querySelector('.panel.active');
-      // Clean up streams when leaving a tab
+      const targetPanel = el.dataset.panel;
+      // Clean up frontend PCs when leaving a streaming tab
+      // Backend cleanup is handled by StartChannelStream (per-channel) and renderXXX
       if (prevPanel) {
-        if (prevPanel.id === 'panel-mixed') {
-          cleanupMixedPCs();
-          if (activeDvrId && CM()) CM().StopDVRStreams(activeDvrId).catch(() => {});
-        }
-        if (prevPanel.id === 'panel-cctv') {
-          cleanupChannelPCs();
-          if (activeDvrId && CM()) CM().StopDVRStreams(activeDvrId).catch(() => {});
-        }
+        if (prevPanel.id === 'panel-mixed') cleanupMixedPCs();
+        if (prevPanel.id === 'panel-cctv') cleanupChannelPCs();
       }
       origSwitchTab(el);
-      // Reconnect streams on entering a tab
-      if (el.dataset.panel === 'mixed') {
+      // Reconnect streams on entering a streaming tab
+      if (targetPanel === 'mixed') {
         renderMixedCCTV();
       }
-      if (el.dataset.panel === 'cctv' && activeDvrId) {
+      if (targetPanel === 'cctv' && activeDvrId) {
         const dvr = dvrs.find(d => d.id === activeDvrId);
         if (dvr) renderCCTVGrid(dvr);
       }
