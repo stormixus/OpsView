@@ -11,7 +11,26 @@ import (
 	"strings"
 )
 
+// logPath returns the log file path next to the config directory.
+func logPath() string {
+	appData := os.Getenv("APPDATA")
+	if appData == "" {
+		home, _ := os.UserHomeDir()
+		appData = filepath.Join(home, "AppData", "Roaming")
+	}
+	return filepath.Join(appData, "opsview-agent", "agent.log")
+}
+
 func main() {
+	// Set up file logging
+	lp := logPath()
+	os.MkdirAll(filepath.Dir(lp), 0755)
+	logFile, err := os.OpenFile(lp, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err == nil {
+		log.SetOutput(logFile)
+		defer logFile.Close()
+	}
+
 	cfg := loadConfig()
 	log.Printf("[agent] relay=%s profile=%d", cfg.RelayURL, cfg.Profile)
 	runTray(cfg)

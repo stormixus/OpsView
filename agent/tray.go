@@ -5,6 +5,7 @@ package main
 import (
 	_ "embed"
 	"log"
+	"os/exec"
 	"sync"
 
 	"github.com/getlantern/systray"
@@ -45,14 +46,18 @@ func onTrayReady(cfg Config) {
 
 	systray.AddSeparator()
 
-	trayStartItem = systray.AddMenuItem("스타트", "Start agent")
-	trayPauseItem = systray.AddMenuItem("포즈", "Pause agent")
-	trayRestartItem = systray.AddMenuItem("리스타트", "Restart agent")
+	trayStartItem = systray.AddMenuItem("시작", "Start agent")
+	trayPauseItem = systray.AddMenuItem("일시정지", "Pause agent")
+	trayRestartItem = systray.AddMenuItem("재시작", "Restart agent")
 	updateTrayControlMenu(false)
 
 	systray.AddSeparator()
 
-	mQuit := systray.AddMenuItem("엑시트", "Quit OpsView Agent")
+	mViewLog := systray.AddMenuItem("로그 보기", "Open log file")
+
+	systray.AddSeparator()
+
+	mQuit := systray.AddMenuItem("종료", "Quit OpsView Agent")
 
 	// Start agent
 	startAgent(cfg)
@@ -80,6 +85,8 @@ func onTrayReady(cfg Config) {
 						log.Printf("[tray] save auto-start config failed: %v", err)
 					}
 				}
+			case <-mViewLog.ClickedCh:
+				exec.Command("notepad.exe", logPath()).Start()
 			case <-trayStartItem.ClickedCh:
 				startAgent(loadConfig())
 			case <-trayPauseItem.ClickedCh:
