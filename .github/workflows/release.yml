@@ -153,12 +153,12 @@ jobs:
 
       - name: Package viewer (Windows)
         if: matrix.goos == 'windows'
-        shell: bash
+        shell: pwsh
         run: |
-          cp "viewer/build/bin/opsview-viewer-amd64-installer.exe" "${{ matrix.artifact }}-setup.exe"
-          mkdir -p dist-esrgan
-          cp -r esrgan dist-esrgan/
-          cd dist-esrgan && zip -r ../${{ matrix.artifact }}-esrgan.zip esrgan/
+          Copy-Item "viewer/build/bin/opsview-viewer-amd64-installer.exe" "${{ matrix.artifact }}-setup.exe"
+          New-Item -ItemType Directory -Force -Path dist-esrgan/esrgan | Out-Null
+          Copy-Item -Recurse esrgan/* dist-esrgan/esrgan/
+          Compress-Archive -Path dist-esrgan/esrgan -DestinationPath "${{ matrix.artifact }}-esrgan.zip"
 
       - name: Package viewer (macOS)
         if: matrix.goos == 'darwin'
