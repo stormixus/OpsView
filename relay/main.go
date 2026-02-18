@@ -23,12 +23,6 @@ func runServer() (stop func()) {
 	mux.HandleFunc("/health", hub.HandleHealth)
 	mux.HandleFunc("/metrics", hub.HandleMetrics)
 
-	webDir := os.Getenv("RELAY_WEB_DIR")
-	if webDir == "" {
-		webDir = "../web"
-	}
-	mux.Handle("/", http.FileServer(http.Dir(webDir)))
-
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: mux}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

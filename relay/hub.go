@@ -35,8 +35,9 @@ type Hub struct {
 	bytesOut      atomic.Int64
 	watcherCount  atomic.Int32
 
-	broadcast chan []byte
-	done      chan struct{}
+	broadcast   chan []byte
+	done        chan struct{}
+	testPattern *TestPattern
 }
 
 // Watcher wraps a viewer WebSocket connection with a send queue.
@@ -47,16 +48,21 @@ type Watcher struct {
 }
 
 func NewHub(cfg Config) *Hub {
-	return &Hub{
+	h := &Hub{
 		cfg:       cfg,
 		watchers:  make(map[*Watcher]struct{}),
 		broadcast: make(chan []byte, 64),
 		done:      make(chan struct{}),
 	}
+	h.testPattern = NewTestPattern(h)
+	return h
 }
 
 // Run is the main hub loop that fans out messages to watchers.
 func (h *Hub) Run() {
+	// Start test pattern immediately (no publisher yet)
+	h.testPattern.Start()
+
 	for {
 		select {
 		case msg := <-h.broadcast:
@@ -117,6 +123,9 @@ func (h *Hub) HandlePublish(w http.ResponseWriter, r *http.Request) {
 	h.publisher = conn
 	h.mu.Unlock()
 
+	// Stop test pattern now that a real publisher is connected
+	h.testPattern.Stop()
+
 	log.Printf("[relay] publisher authenticated from %s", ip)
 
 	defer func() {
@@ -127,6 +136,8 @@ func (h *Hub) HandlePublish(w http.ResponseWriter, r *http.Request) {
 		h.mu.Unlock()
 		conn.Close()
 		log.Printf("[relay] publisher disconnected: %s", ip)
+		// Resume test pattern since publisher is gone
+		h.testPattern.Start()
 	}()
 
 	// Read loop: receive frames and broadcast
@@ -332,6 +343,7 @@ func sendError(conn *websocket.Conn, code int, message string) {
 
 // Stop signals the hub to shut down.
 func (h *Hub) Stop() {
+	h.testPattern.Stop()
 	select {
 	case <-h.done:
 		// already closed
