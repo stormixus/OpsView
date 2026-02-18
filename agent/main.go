@@ -1,10 +1,16 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -47,8 +53,13 @@ func loadAgentConfig() AgentConfig {
 
 	token := os.Getenv("AGENT_TOKEN")
 	if token == "" {
-		token = "dev-publisher-token"
-		log.Println("[agent] WARNING: using default token (set AGENT_TOKEN)")
+		var err error
+		token, err = loadOrCreateAgentToken()
+		if err != nil {
+			token = "dev-publisher-token"
+			log.Printf("[agent] WARNING: token auto-generation failed: %v", err)
+			log.Println("[agent] WARNING: falling back to default token (set AGENT_TOKEN)")
+		}
 	}
 
 	profile := 1080
@@ -59,6 +70,22 @@ func loadAgentConfig() AgentConfig {
 	fpsMin := envInt("AGENT_FPS_MIN", 5)
 	fpsMax := envInt("AGENT_FPS_MAX", 10)
 	tileSize := envInt("AGENT_TILE_SIZE", 128)
+	if fpsMin < 1 {
+		log.Printf("[agent] WARNING: invalid AGENT_FPS_MIN=%d, using 1", fpsMin)
+		fpsMin = 1
+	}
+	if fpsMax < 1 {
+		log.Printf("[agent] WARNING: invalid AGENT_FPS_MAX=%d, using 10", fpsMax)
+		fpsMax = 10
+	}
+	if fpsMin > fpsMax {
+		log.Printf("[agent] WARNING: AGENT_FPS_MIN(%d) > AGENT_FPS_MAX(%d), clamping min", fpsMin, fpsMax)
+		fpsMin = fpsMax
+	}
+	if tileSize < 16 || tileSize > 512 {
+		log.Printf("[agent] WARNING: invalid AGENT_TILE_SIZE=%d, using 128", tileSize)
+		tileSize = 128
+	}
 
 	return AgentConfig{
 		RelayURL: relayURL,
@@ -77,4 +104,66 @@ func envInt(key string, def int) int {
 		}
 	}
 	return def
+}
+
+func loadOrCreateAgentToken() (string, error) {
+	tokenPath := strings.TrimSpace(os.Getenv("AGENT_TOKEN_FILE"))
+	if tokenPath == "" {
+		tokenPath = defaultAgentTokenPath()
+	}
+
+	token, created, err := readOrCreateToken(tokenPath)
+	if err != nil {
+		return "", err
+	}
+	if created {
+		log.Printf("[agent] generated AGENT_TOKEN at %s (set RELAY_PUBLISHER_TOKEN to match)", tokenPath)
+	} else {
+		log.Printf("[agent] loaded AGENT_TOKEN from %s", tokenPath)
+	}
+	return token, nil
+}
+
+func defaultAgentTokenPath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "agent_token.txt"
+	}
+	return filepath.Join(filepath.Dir(exe), "agent_token.txt")
+}
+
+func readOrCreateToken(path string) (token string, created bool, err error) {
+	if b, readErr := os.ReadFile(path); readErr == nil {
+		t := strings.TrimSpace(string(b))
+		if t == "" {
+			return "", false, fmt.Errorf("token file is empty: %s", path)
+		}
+		return t, false, nil
+	} else if !errors.Is(readErr, os.ErrNotExist) {
+		return "", false, readErr
+	}
+
+	dir := filepath.Dir(path)
+	if dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return "", false, err
+		}
+	}
+
+	t, err := generateToken(32)
+	if err != nil {
+		return "", false, err
+	}
+	if err := os.WriteFile(path, []byte(t+"\n"), 0o600); err != nil {
+		return "", false, err
+	}
+	return t, true, nil
+}
+
+func generateToken(size int) (string, error) {
+	buf := make([]byte, size)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }

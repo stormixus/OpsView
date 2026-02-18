@@ -198,32 +198,6 @@ jobs:
         if: matrix.goos == 'darwin' && always()
         run: security delete-keychain build.keychain-db 2>/dev/null || true
 
-  build-relay-windows:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: relay/go.sum
-
-      - name: Build relay (windows/amd64)
-        run: |
-          cd relay
-          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -H windowsgui" -o opsview-relay.exe .
-
-      - name: Package relay
-        run: |
-          mkdir -p dist/relay
-          cp relay/opsview-relay.exe dist/relay/
-          cd dist && zip -r ../opsview-relay-windows-amd64.zip relay/
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: opsview-relay-windows-amd64
-          path: opsview-relay-windows-amd64.zip
-
   build-relay-docker:
     runs-on: ubuntu-latest
     steps:
@@ -255,7 +229,7 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/opsview-relay:latest
 
   release:
-    needs: [build-agent, build-viewer, build-relay-windows]
+    needs: [build-agent, build-viewer]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

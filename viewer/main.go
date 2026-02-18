@@ -36,7 +36,7 @@ func main() {
 			updater.startup(ctx)
 		},
 		OnShutdown: func(ctx context.Context) {
-			cctv.StopAllStreams()
+			cctv.Shutdown()
 			stream.StopStream()
 		},
 		Bind: []interface{}{

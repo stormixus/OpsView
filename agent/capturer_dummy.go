@@ -61,8 +61,8 @@ func (c *DummyCapturer) CaptureFrame() ([]proto.Tile, int, int, error) {
 
 	// Simulate partial screen changes: 2-8 random dirty tiles per frame
 	numDirty := 2 + rand.Intn(7)
-	tilesX := c.width / c.tileSize
-	tilesY := c.height / c.tileSize
+	tilesX := (c.width + c.tileSize - 1) / c.tileSize
+	tilesY := (c.height + c.tileSize - 1) / c.tileSize
 
 	tiles := make([]proto.Tile, 0, numDirty)
 
@@ -89,9 +89,9 @@ func (c *DummyCapturer) CaptureFrame() ([]proto.Tile, int, int, error) {
 		for py := 0; py < tileH; py++ {
 			for px := 0; px < tileW; px++ {
 				off := (py*tileW + px) * 4
-				raw[off+0] = b // B
-				raw[off+1] = g // G
-				raw[off+2] = r // R
+				raw[off+0] = b   // B
+				raw[off+1] = g   // G
+				raw[off+2] = r   // R
 				raw[off+3] = 255 // A
 			}
 		}

@@ -23,9 +23,10 @@ var upgrader = websocket.Upgrader{
 type Hub struct {
 	cfg Config
 
-	mu        sync.RWMutex
-	publisher *websocket.Conn
-	watchers  map[*Watcher]struct{}
+	mu         sync.RWMutex
+	publisher  *websocket.Conn
+	pubWriteMu sync.Mutex
+	watchers   map[*Watcher]struct{}
 
 	// Metrics
 	publishCount  atomic.Int64
@@ -47,10 +48,10 @@ type Watcher struct {
 
 func NewHub(cfg Config) *Hub {
 	return &Hub{
-		cfg:      cfg,
-		watchers: make(map[*Watcher]struct{}),
+		cfg:       cfg,
+		watchers:  make(map[*Watcher]struct{}),
 		broadcast: make(chan []byte, 64),
-		done:     make(chan struct{}),
+		done:      make(chan struct{}),
 	}
 }
 
@@ -197,16 +198,25 @@ func (h *Hub) HandleWatch(w http.ResponseWriter, r *http.Request) {
 		if msgType == websocket.BinaryMessage && len(data) >= proto.HeaderSize {
 			hdr, hdrErr := proto.DecodeHeader(data)
 			if hdrErr == nil && hdr.Type == proto.MsgControl {
-				// Forward control message to publisher
-				h.mu.RLock()
-				pub := h.publisher
-				h.mu.RUnlock()
-				if pub != nil {
-					_ = pub.WriteMessage(websocket.BinaryMessage, data)
-				}
+				// Forward control message to publisher.
+				h.sendControlToPublisher(data)
 			}
 		}
 	}
+}
+
+func (h *Hub) sendControlToPublisher(data []byte) {
+	h.mu.RLock()
+	pub := h.publisher
+	h.mu.RUnlock()
+	if pub == nil {
+		return
+	}
+
+	// Gorilla WebSocket requires application-level write serialization per connection.
+	h.pubWriteMu.Lock()
+	defer h.pubWriteMu.Unlock()
+	_ = pub.WriteMessage(websocket.BinaryMessage, data)
 }
 
 func (h *Hub) watcherWritePump(w *Watcher) {
@@ -359,10 +369,10 @@ func (h *Hub) HandleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"publish_count":    h.publishCount.Load(),
-		"last_publish_at":  lastPubStr,
-		"bytes_in":         h.bytesIn.Load(),
-		"bytes_out":        h.bytesOut.Load(),
-		"watcher_count":    h.watcherCount.Load(),
+		"publish_count":   h.publishCount.Load(),
+		"last_publish_at": lastPubStr,
+		"bytes_in":        h.bytesIn.Load(),
+		"bytes_out":       h.bytesOut.Load(),
+		"watcher_count":   h.watcherCount.Load(),
 	})
 }

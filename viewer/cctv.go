@@ -54,8 +54,9 @@ type CCTVManager struct {
 	mu         sync.RWMutex
 	db         *sql.DB
 	dbPath     string
-	client     *http.Client
-	esrganPath string
+	client      *http.Client
+	shortClient *http.Client // short timeout for fallback ISAPI probes
+	esrganPath  string
 	esrganSem  chan struct{}           // limits concurrent ESRGAN to 1
 	streams    map[string]*channelStream // key: "{dvrID}_{chNum}"
 	streamsMu  sync.Mutex
@@ -73,11 +74,12 @@ func NewCCTVManager() *CCTVManager {
 	}
 
 	m := &CCTVManager{
-		db:        db,
-		dbPath:    dbPath,
-		client:    &http.Client{Timeout: 10 * time.Second},
-		esrganSem: make(chan struct{}, 1),
-		streams:   make(map[string]*channelStream),
+		db:          db,
+		dbPath:      dbPath,
+		client:      &http.Client{Timeout: 10 * time.Second},
+		shortClient: &http.Client{Timeout: 3 * time.Second},
+		esrganSem:   make(chan struct{}, 1),
+		streams:     make(map[string]*channelStream),
 	}
 	m.migrate()
 	m.initESRGAN()
@@ -265,8 +267,8 @@ func (m *CCTVManager) FetchSnapshot(dvrID int64, chNum int, upscale int, aiUpsca
 		return nil, err
 	}
 
-	// Auto-detect resolution from JPEG and update DB
-	go m.detectAndSaveResolution(dvrID, chNum, data)
+	// Auto-detect resolution from JPEG and update DB (only if not yet known)
+	m.maybeDetectResolution(dvrID, chNum, data)
 
 	// Upscale if requested
 	if upscale > 1 {
@@ -330,8 +332,7 @@ func (m *CCTVManager) fetchSnapshotISAPIOnPort(dvr DVRConfig, chNum int, port in
 	req, _ := http.NewRequest("GET", url, nil)
 	req.SetBasicAuth(dvr.Username, dvr.Password)
 
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := m.shortClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -461,8 +462,14 @@ func (m *CCTVManager) upscaleESRGAN(data []byte, scale int) ([]byte, error) {
 	return result, nil
 }
 
-func (m *CCTVManager) detectAndSaveResolution(dvrID int64, chNum int, jpegData []byte) {
-	cfg, _, err := image.DecodeConfig(bytesReader(jpegData))
+// maybeDetectResolution checks resolution only when DB has no value yet, avoiding goroutine spam.
+func (m *CCTVManager) maybeDetectResolution(dvrID int64, chNum int, jpegData []byte) {
+	var w, h int
+	m.db.QueryRow(`SELECT width, height FROM channels WHERE dvr_id=? AND ch_num=?`, dvrID, chNum).Scan(&w, &h)
+	if w > 0 && h > 0 {
+		return // already known
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(jpegData))
 	if err != nil {
 		return
 	}
@@ -569,9 +576,10 @@ func (m *CCTVManager) getDVR(id int64) (DVRConfig, error) {
 	return d, err
 }
 
-type bytesReaderType struct{ b []byte; i int }
-func (r *bytesReaderType) Read(p []byte) (int, error) {
-	if r.i >= len(r.b) { return 0, io.EOF }
-	n := copy(p, r.b[r.i:]); r.i += n; return n, nil
+// Shutdown closes the database and releases resources.
+func (m *CCTVManager) Shutdown() {
+	m.StopAllStreams()
+	if m.db != nil {
+		m.db.Close()
+	}
 }
-func bytesReader(b []byte) io.Reader { return &bytesReaderType{b: b} }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -16,7 +15,6 @@ import (
 	"github.com/bluenviron/gortsplib/v5/pkg/base"
 	"github.com/bluenviron/gortsplib/v5/pkg/description"
 	"github.com/bluenviron/gortsplib/v5/pkg/format"
-	"github.com/bluenviron/gortsplib/v5/pkg/format/rtph264"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )
@@ -41,6 +39,11 @@ func (cs *channelStream) stop() {
 		cs.pc.Close()
 		cs.pc = nil
 	}
+	if cs.client != nil {
+		cs.client.Close()
+		cs.client = nil
+	}
+	cs.track = nil
 }
 
 // StreamResult is returned to the frontend.
@@ -53,26 +56,10 @@ type StreamResult struct {
 func (m *CCTVManager) StartChannelStream(dvrID int64, chNum int, offerSDP string) (*StreamResult, error) {
 	key := fmt.Sprintf("%d_%d", dvrID, chNum)
 
-	// Reuse existing stream if alive
+	// Always replace existing stream for this key.
+	// Reusing an old PeerConnection across page refreshes can return stale SDP.
 	m.streamsMu.Lock()
 	if cs, ok := m.streams[key]; ok {
-		cs.mu.Lock()
-		if cs.pc != nil {
-			state := cs.pc.ConnectionState()
-			alive := state != webrtc.PeerConnectionStateFailed && state != webrtc.PeerConnectionStateClosed
-			if alive {
-				ld := cs.pc.LocalDescription()
-				cs.mu.Unlock()
-				if ld != nil {
-					m.streamsMu.Unlock()
-					return &StreamResult{Method: "webrtc", SDP: ld.SDP}, nil
-				}
-			} else {
-				cs.mu.Unlock()
-			}
-		} else {
-			cs.mu.Unlock()
-		}
 		cs.stop()
 		delete(m.streams, key)
 	}
@@ -83,7 +70,7 @@ func (m *CCTVManager) StartChannelStream(dvrID int64, chNum int, offerSDP string
 		return nil, fmt.Errorf("get DVR: %w", err)
 	}
 
-	// Try sub-stream first ("02"), fall back to main stream ("01") if sub is not H264
+	// Use DVR quality preference first, then fallback to the other stream.
 	c, formaH264, baseURL, medi, err := m.connectH264(dvr, chNum)
 	if err != nil {
 		return nil, err
@@ -91,26 +78,13 @@ func (m *CCTVManager) StartChannelStream(dvrID int64, chNum int, offerSDP string
 
 	cs := &channelStream{client: c}
 
-	rtpDec, err := formaH264.CreateDecoder()
-	if err != nil {
-		c.Close()
-		return nil, fmt.Errorf("H264 decoder: %w", err)
-	}
 	if _, err := c.Setup(baseURL, medi, 0, 0); err != nil {
 		c.Close()
 		return nil, fmt.Errorf("RTSP setup: %w", err)
 	}
-	encoder, err := formaH264.CreateEncoder()
-	if err != nil {
-		c.Close()
-		return nil, fmt.Errorf("H264 encoder: %w", err)
-	}
 
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{
-		ICEServers: []webrtc.ICEServer{
-			{URLs: []string{"stun:stun.l.google.com:19302"}},
-		},
-	})
+	// Desktop app runs local frontend+backend, so host ICE candidates are enough.
+	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
 		c.Close()
 		return nil, fmt.Errorf("WebRTC peer: %w", err)
@@ -155,36 +129,28 @@ func (m *CCTVManager) StartChannelStream(dvrID int64, chNum int, offerSDP string
 	}
 	select {
 	case <-gatherDone:
-	case <-time.After(5 * time.Second):
+	case <-time.After(1200 * time.Millisecond):
+		log.Printf("[cctv] DVR%d CH%d: ICE gather partial, continue", dvrID, chNum)
+	}
+	if pc.LocalDescription() == nil {
 		pc.Close()
 		c.Close()
-		return nil, fmt.Errorf("ICE gathering timeout")
+		return nil, fmt.Errorf("missing local description")
 	}
 
-	// Wire RTP forwarding: RTSP → decode AU → re-encode → WebRTC track
+	// Fast path: forward camera RTP directly to WebRTC track (no decode/re-encode).
 	c.OnPacketRTP(medi, formaH264, func(pkt *rtp.Packet) {
-		au, err := rtpDec.Decode(pkt)
-		if err != nil {
-			if !errors.Is(err, rtph264.ErrNonStartingPacketAndNoPrevious) &&
-				!errors.Is(err, rtph264.ErrMorePacketsNeeded) {
-				log.Printf("[cctv] H264 decode: %v", err)
-			}
-			return
-		}
 		cs.mu.Lock()
 		t := cs.track
 		cs.mu.Unlock()
 		if t == nil {
 			return
 		}
-		pkts, err := encoder.Encode(au)
-		if err != nil {
+		outPkt := pkt.Clone()
+		if outPkt == nil {
 			return
 		}
-		for _, outPkt := range pkts {
-			outPkt.Header.PayloadType = 96
-			t.WriteRTP(outPkt)
-		}
+		_ = t.WriteRTP(outPkt)
 	})
 
 	if _, err := c.Play(nil); err != nil {
@@ -239,12 +205,17 @@ func (m *CCTVManager) StopAllStreams() {
 	log.Printf("[cctv] all channel streams stopped")
 }
 
-// connectH264 tries sub-stream ("02") then main-stream ("01") to find an H264 track.
-// Uses gortsplib auto protocol (UDP with TCP fallback).
+// connectH264 tries preferred stream first to find an H264 track.
+// Uses TCP interleaved transport for better stability on lossy LANs.
 func (m *CCTVManager) connectH264(dvr DVRConfig, chNum int) (*gortsplib.Client, *format.H264, *base.URL, *description.Media, error) {
 	var lastErr error
 
-	for _, streamID := range []string{"02", "01"} {
+	streamOrder := []string{"02", "01"} // default: sub then main
+	if dvr.StreamQuality == "main" {
+		streamOrder = []string{"01", "02"}
+	}
+
+	for _, streamID := range streamOrder {
 		rtspURL := buildRTSPURL(dvr.Username, dvr.Password, dvr.Addr, dvr.Port,
 			fmt.Sprintf("/Streaming/Channels/%d%s", chNum, streamID))
 
@@ -255,9 +226,11 @@ func (m *CCTVManager) connectH264(dvr DVRConfig, chNum int) (*gortsplib.Client, 
 			continue
 		}
 
+		protocol := gortsplib.ProtocolTCP
 		c := &gortsplib.Client{
 			Scheme:       u.Scheme,
 			Host:         u.Host,
+			Protocol:     &protocol,
 			ReadTimeout:  10 * time.Second,
 			WriteTimeout: 10 * time.Second,
 		}

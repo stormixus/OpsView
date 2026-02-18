@@ -17,31 +17,31 @@ import (
 // --- Direct3D 11 / DXGI COM interfaces via syscall ---
 
 var (
-	d3d11              = windows.NewLazySystemDLL("d3d11.dll")
-	procCreateDevice   = d3d11.NewProc("D3D11CreateDevice")
-	dxgi               = windows.NewLazySystemDLL("dxgi.dll")
+	d3d11            = windows.NewLazySystemDLL("d3d11.dll")
+	procCreateDevice = d3d11.NewProc("D3D11CreateDevice")
+	dxgi             = windows.NewLazySystemDLL("dxgi.dll")
 )
 
 // GUIDs
 var (
-	IID_IDXGIDevice      = windows.GUID{0x54ec77fa, 0x1377, 0x44e6, [8]byte{0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4c}}
-	IID_IDXGIAdapter     = windows.GUID{0x2411e7e1, 0x12ac, 0x4ccf, [8]byte{0xbd, 0x14, 0x97, 0x98, 0xe8, 0x53, 0x4d, 0xc0}}
-	IID_IDXGIOutput1     = windows.GUID{0x00cddea8, 0x939b, 0x4b83, [8]byte{0xa3, 0x40, 0xa6, 0x85, 0x22, 0x66, 0x66, 0xcc}}
-	IID_ID3D11Texture2D  = windows.GUID{0x6f15aaf2, 0xd208, 0x4e89, [8]byte{0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c}}
+	IID_IDXGIDevice     = windows.GUID{0x54ec77fa, 0x1377, 0x44e6, [8]byte{0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4c}}
+	IID_IDXGIAdapter    = windows.GUID{0x2411e7e1, 0x12ac, 0x4ccf, [8]byte{0xbd, 0x14, 0x97, 0x98, 0xe8, 0x53, 0x4d, 0xc0}}
+	IID_IDXGIOutput1    = windows.GUID{0x00cddea8, 0x939b, 0x4b83, [8]byte{0xa3, 0x40, 0xa6, 0x85, 0x22, 0x66, 0x66, 0xcc}}
+	IID_ID3D11Texture2D = windows.GUID{0x6f15aaf2, 0xd208, 0x4e89, [8]byte{0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c}}
 )
 
 const (
-	DXGI_FORMAT_B8G8R8A8_UNORM     = 87
-	D3D11_SDK_VERSION              = 7
-	D3D_DRIVER_TYPE_HARDWARE       = 1
-	D3D11_CREATE_DEVICE_BGRA       = 0x20
-	D3D11_USAGE_STAGING            = 3
-	D3D11_CPU_ACCESS_READ          = 0x20000
-	DXGI_MAP_READ                  = 1
-	DXGI_ERROR_WAIT_TIMEOUT        = 0x887A0027
-	DXGI_ERROR_ACCESS_LOST         = 0x887A0026
-	DXGI_ERROR_ACCESS_DENIED       = 0x887A002B
-	D3D11_MAP_READ                 = 1
+	DXGI_FORMAT_B8G8R8A8_UNORM = 87
+	D3D11_SDK_VERSION          = 7
+	D3D_DRIVER_TYPE_HARDWARE   = 1
+	D3D11_CREATE_DEVICE_BGRA   = 0x20
+	D3D11_USAGE_STAGING        = 3
+	D3D11_CPU_ACCESS_READ      = 0x20000
+	DXGI_MAP_READ              = 1
+	DXGI_ERROR_WAIT_TIMEOUT    = 0x887A0027
+	DXGI_ERROR_ACCESS_LOST     = 0x887A0026
+	DXGI_ERROR_ACCESS_DENIED   = 0x887A002B
+	D3D11_MAP_READ             = 1
 )
 
 // d3d11Texture2DDesc matches the C D3D11_TEXTURE2D_DESC layout (44 bytes).
@@ -68,17 +68,20 @@ type d3d11MappedSubresource struct {
 
 // DXGICapturer captures the screen using DXGI Desktop Duplication.
 type DXGICapturer struct {
-	cfg      AgentConfig
-	device   uintptr // *ID3D11Device
-	ctx      uintptr // *ID3D11DeviceContext
-	dup      uintptr // *IDXGIOutputDuplication
-	staging  uintptr // *ID3D11Texture2D
-	width    int
-	height   int
-	tileSize int
-	encoder  *zstd.Encoder
-	prevFrame []byte // previous full frame for delta detection
-	mu       sync.Mutex
+	cfg           AgentConfig
+	device        uintptr // *ID3D11Device
+	ctx           uintptr // *ID3D11DeviceContext
+	dup           uintptr // *IDXGIOutputDuplication
+	staging       uintptr // *ID3D11Texture2D
+	stagingWidth  int
+	stagingHeight int
+	stagingFormat uint32
+	width         int
+	height        int
+	tileSize      int
+	encoder       *zstd.Encoder
+	prevFrame     []byte // previous full frame for delta detection
+	mu            sync.Mutex
 }
 
 func NewCapturer(cfg AgentConfig) (Capturer, error) {
@@ -197,11 +200,8 @@ func (c *DXGICapturer) CaptureFrame() ([]proto.Tile, int, int, error) {
 	defer comCall(c.dup, 11) // ReleaseFrame
 	defer comRelease(resource)
 
-	// Get dirty rects
-	dirtyRects := c.getDirtyRects()
-
-	// Map the frame texture and extract changed tiles
-	tiles := c.extractTiles(resource, dirtyRects)
+	// Map the frame texture and extract changed tiles.
+	tiles := c.extractTiles(resource)
 
 	return tiles, c.width, c.height, nil
 }
@@ -237,8 +237,34 @@ func (c *DXGICapturer) getDirtyRects() []rect {
 	return rects
 }
 
-func (c *DXGICapturer) extractTiles(resource uintptr, dirtyRects []rect) []proto.Tile {
-	// Build set of dirty tile coordinates
+func (c *DXGICapturer) extractTiles(resource uintptr) []proto.Tile {
+	// 1. QueryInterface resource → ID3D11Texture2D
+	var tex uintptr
+	hr := comQueryInterface(resource, &IID_ID3D11Texture2D, &tex)
+	if hr != 0 {
+		log.Printf("[capturer] QueryInterface ID3D11Texture2D failed: 0x%X", hr)
+		return nil
+	}
+	defer comRelease(tex)
+
+	// 2. Read source texture dimensions and ensure staging matches.
+	var srcDesc d3d11Texture2DDesc
+	comCall(tex, 10, uintptr(unsafe.Pointer(&srcDesc))) // ID3D11Texture2D::GetDesc
+	if srcDesc.Width == 0 || srcDesc.Height == 0 {
+		log.Printf("[capturer] invalid source texture size %dx%d", srcDesc.Width, srcDesc.Height)
+		return nil
+	}
+	if c.width != int(srcDesc.Width) || c.height != int(srcDesc.Height) {
+		c.width = int(srcDesc.Width)
+		c.height = int(srcDesc.Height)
+		log.Printf("[capturer] source resolution %dx%d", c.width, c.height)
+	}
+	if !c.ensureStagingTexture(srcDesc) {
+		return nil
+	}
+
+	// Build set of dirty tile coordinates.
+	dirtyRects := c.getDirtyRects()
 	tileSet := make(map[[2]int]bool)
 	ts := c.tileSize
 	for _, r := range dirtyRects {
@@ -252,46 +278,8 @@ func (c *DXGICapturer) extractTiles(resource uintptr, dirtyRects []rect) []proto
 			}
 		}
 	}
-
 	if len(tileSet) == 0 {
 		return nil
-	}
-
-	// 1. QueryInterface resource → ID3D11Texture2D
-	var tex uintptr
-	hr := comQueryInterface(resource, &IID_ID3D11Texture2D, &tex)
-	if hr != 0 {
-		log.Printf("[capturer] QueryInterface ID3D11Texture2D failed: 0x%X", hr)
-		return nil
-	}
-	defer comRelease(tex)
-
-	// 2. Create staging texture (cached across frames)
-	if c.staging == 0 {
-		desc := d3d11Texture2DDesc{
-			Width:          uint32(c.width),
-			Height:         uint32(c.height),
-			MipLevels:      1,
-			ArraySize:      1,
-			Format:         DXGI_FORMAT_B8G8R8A8_UNORM,
-			SampleCount:    1,
-			SampleQuality:  0,
-			Usage:          D3D11_USAGE_STAGING,
-			BindFlags:      0,
-			CPUAccessFlags: D3D11_CPU_ACCESS_READ,
-			MiscFlags:      0,
-		}
-		var staging uintptr
-		hr = comCall(c.device, 5, // ID3D11Device::CreateTexture2D
-			uintptr(unsafe.Pointer(&desc)),
-			0, // pInitialData (NULL)
-			uintptr(unsafe.Pointer(&staging)),
-		)
-		if hr != 0 {
-			log.Printf("[capturer] CreateTexture2D staging failed: 0x%X", hr)
-			return nil
-		}
-		c.staging = staging
 	}
 
 	// 3. CopyResource: staging ← frame texture
@@ -324,6 +312,9 @@ func (c *DXGICapturer) extractTiles(resource uintptr, dirtyRects []rect) []proto
 		if (ty+1)*ts > c.height {
 			tileH = c.height - ty*ts
 		}
+		if tileW <= 0 || tileH <= 0 {
+			continue
+		}
 
 		raw := make([]byte, tileW*tileH*4)
 		srcBase := mapped.PData + uintptr(ty*ts*rowPitch+tx*ts*4)
@@ -347,6 +338,50 @@ func (c *DXGICapturer) extractTiles(resource uintptr, dirtyRects []rect) []proto
 	comCall(c.ctx, 15, c.staging, 0) // ID3D11DeviceContext::Unmap
 
 	return tiles
+}
+
+func (c *DXGICapturer) ensureStagingTexture(src d3d11Texture2DDesc) bool {
+	w := int(src.Width)
+	h := int(src.Height)
+	needNew := c.staging == 0 || c.stagingWidth != w || c.stagingHeight != h || c.stagingFormat != src.Format
+	if !needNew {
+		return true
+	}
+	if c.staging != 0 {
+		comRelease(c.staging)
+		c.staging = 0
+	}
+
+	desc := d3d11Texture2DDesc{
+		Width:          src.Width,
+		Height:         src.Height,
+		MipLevels:      1,
+		ArraySize:      1,
+		Format:         src.Format,
+		SampleCount:    1,
+		SampleQuality:  0,
+		Usage:          D3D11_USAGE_STAGING,
+		BindFlags:      0,
+		CPUAccessFlags: D3D11_CPU_ACCESS_READ,
+		MiscFlags:      0,
+	}
+
+	var staging uintptr
+	hr := comCall(c.device, 5, // ID3D11Device::CreateTexture2D
+		uintptr(unsafe.Pointer(&desc)),
+		0, // pInitialData (NULL)
+		uintptr(unsafe.Pointer(&staging)),
+	)
+	if hr != 0 {
+		log.Printf("[capturer] CreateTexture2D staging failed: 0x%X", hr)
+		return false
+	}
+
+	c.staging = staging
+	c.stagingWidth = w
+	c.stagingHeight = h
+	c.stagingFormat = src.Format
+	return true
 }
 
 func (c *DXGICapturer) Close() {

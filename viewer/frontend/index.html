@@ -3,640 +3,288 @@
 <head>
   <meta charset="UTF-8">
   <title>OpsView</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface: { 50: '#050c16', 100: '#0a1422', 200: '#101c2f', 300: '#15263f', 400: '#213656' },
+          }
+        }
+      }
+    }
+  </script>
+  <script src="https://unpkg.com/lucide@latest"></script>
   <style>
+    /* === Base === */
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --accent: #22d3ee;
+      --accent-strong: #0ea5e9;
+      --line-soft: rgba(148, 163, 184, 0.16);
+      --panel-glass: rgba(10, 20, 36, 0.82);
+    }
     body {
-      background: #0a0a0f;
-      color: #e0e0e0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-      overflow: hidden;
       user-select: none;
+      font-family: 'Pretendard Variable', 'SUIT Variable', 'Noto Sans KR', 'Apple SD Gothic Neo', -apple-system, BlinkMacSystemFont, sans-serif;
+      background:
+        radial-gradient(110% 80% at 10% -10%, rgba(34, 211, 238, 0.16), transparent 52%),
+        radial-gradient(90% 90% at 90% -20%, rgba(14, 165, 233, 0.14), transparent 50%),
+        #050c16;
+      color: #dce7f9;
     }
 
-    /* Tab bar */
-    .tabs {
-      display: flex;
-      background: #111118;
-      border-bottom: 1px solid #222;
-      flex-shrink: 0;
-    }
-    .tab {
-      padding: 8px 24px;
-      font-size: 13px;
-      font-weight: 500;
-      color: #888;
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-      transition: all 0.15s;
-    }
-    .tab:hover { color: #bbb; }
-    .tab.active {
-      color: #60a5fa;
-      border-bottom-color: #60a5fa;
-    }
-    .tab.disabled {
-      color: #444;
-      cursor: default;
-    }
+    /* === Animations === */
+    @keyframes pulse-glow { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    @keyframes fade-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+    @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
 
-    /* Tab status indicators (right side of tab bar) */
-    .tab-status-area {
-      margin-left: auto;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding-right: 12px;
-      font-size: 11px;
-    }
-    .tab-status {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      color: #555;
-    }
-    .tab-status .dot {
-      width: 6px; height: 6px;
-      border-radius: 50%;
-      background: #444;
-    }
-    .tab-status .dot.on { background: #22c55e; }
-    .tab-status .dot.warn { background: #eab308; animation: pulse 1s infinite; }
-    .tab-status .dot.err { background: #ef4444; }
-    @keyframes pulse { 50% { opacity: 0.5; } }
-    .tab-status .label { color: #666; }
-    .tab-status .info { color: #555; font-family: monospace; font-size: 10px; }
-    .fullscreen-btn {
-      background: none;
-      border: 1px solid #333;
-      border-radius: 4px;
-      color: #777;
-      font-size: 14px;
-      width: 26px;
-      height: 26px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.15s;
-      padding: 0;
-      line-height: 1;
-    }
-    .fullscreen-btn:hover { color: #e0e0e0; border-color: #555; background: #222; }
-
-    /* Panels */
-    .panel {
-      flex: 1;
-      display: none;
-      overflow: hidden;
-    }
+    /* === Panel system (JS toggles .active) === */
+    .panel { flex: 1; display: none; overflow: hidden; }
     .panel.active { display: flex; }
 
-    .canvas-wrap {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #000;
-    }
-    canvas {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-    }
+    /* === Tab active state (JS toggles) === */
+    .tab.active { color: #67e8f9; border-image: linear-gradient(90deg, #22d3ee, #38bdf8) 1; border-bottom-width: 2px; }
+    .tab.active .tab-icon { color: #67e8f9; }
 
-    .placeholder {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #444;
-      font-size: 18px;
-    }
+    /* === Status dots (JS toggles .on / .warn / .err) === */
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #334155; transition: all 0.3s; }
+    .dot.on { background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,0.6); }
+    .dot.warn { background: #f59e0b; animation: pulse-glow 1.2s infinite; }
+    .dot.err { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.4); }
 
-    /* Ops setup overlay */
-    .ops-setup {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: rgba(0,0,0,0.85);
-      z-index: 10;
+    /* === Ops toolbar (JS toggles .visible) === */
+    .tabs {
+      background: linear-gradient(180deg, rgba(7, 14, 25, 0.9), rgba(7, 14, 25, 0.72));
+      border-bottom-color: var(--line-soft);
+      backdrop-filter: blur(10px);
     }
-    .ops-setup.hidden { display: none; }
-    .ops-setup-btn {
-      background: #2563eb;
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      padding: 14px 32px;
-      font-size: 15px;
-      cursor: pointer;
-      transition: background 0.15s;
-    }
-    .ops-setup-btn:hover { background: #1d4ed8; }
-    .ops-setup-btn.edit {
-      padding: 4px 12px;
-      font-size: 11px;
-      border-radius: 4px;
-      background: rgba(37,99,235,0.6);
-    }
-    .ops-setup-btn.edit:hover { background: #2563eb; }
-    .ops-setup-btn.disconnect {
-      background: #dc2626;
-      padding: 4px 12px;
-      font-size: 11px;
-      border-radius: 4px;
-    }
-    .ops-setup-btn.disconnect:hover { background: #b91c1c; }
-    .ops-form {
-      background: #111118;
-      border: 1px solid #333;
-      border-radius: 8px;
-      padding: 20px 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      width: 380px;
-    }
-    .ops-form h3 {
-      font-size: 14px;
-      color: #e0e0e0;
-      margin-bottom: 4px;
-    }
-    .ops-form label { color: #777; font-size: 11px; }
-    .ops-form input {
-      background: #1a1a24;
-      color: #e0e0e0;
-      border: 1px solid #333;
-      border-radius: 4px;
-      padding: 6px 10px;
-      font-size: 12px;
-      width: 100%;
-    }
-    .ops-form input:focus { border-color: #2563eb; outline: none; }
-    .ops-form .form-row {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-    }
-    .ops-form .form-row > div { flex: 1; display: flex; flex-direction: column; gap: 3px; }
-    .ops-form button {
-      background: #2563eb;
-      color: #fff;
-      border: none;
-      border-radius: 4px;
-      padding: 8px 16px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    .ops-form button:hover { background: #1d4ed8; }
-    .ops-form button.secondary { background: #333; }
-    .ops-form button.secondary:hover { background: #444; }
-    .ops-form .btn-row { display: flex; gap: 8px; margin-top: 4px; }
-    .ops-form .divider {
-      text-align: center;
-      color: #444;
-      font-size: 11px;
-      margin: 6px 0;
-      border-top: 1px solid #222;
-      padding-top: 10px;
-    }
-    .ops-option-header {
-      font-size: 12px;
-      font-weight: 600;
-      color: #60a5fa;
-      margin-bottom: 2px;
-    }
-    .ops-form .status-msg {
-      font-size: 11px;
-      text-align: center;
-    }
-    .ops-toolbar {
-      position: absolute;
-      top: 6px;
-      right: 6px;
-      display: flex;
-      gap: 6px;
-      z-index: 11;
-      opacity: 0;
-      transition: opacity 0.2s;
-      pointer-events: none;
-    }
+    .ops-toolbar { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; z-index: 11; opacity: 0; transition: opacity 0.25s; pointer-events: none; }
     #panel-ops:hover .ops-toolbar.visible { opacity: 1; pointer-events: auto; }
 
-    /* CCTV DVR sub-tabs */
-    .dvr-tabs {
-      display: flex;
-      background: #0d0d14;
-      border-bottom: 1px solid #1a1a24;
-      flex-shrink: 0;
-      overflow-x: auto;
-    }
-    .dvr-tab {
-      padding: 5px 16px;
-      font-size: 11px;
-      color: #777;
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-      white-space: nowrap;
-      transition: all 0.15s;
-    }
-    .dvr-tab:hover { color: #bbb; }
-    .dvr-tab.active { color: #60a5fa; border-bottom-color: #60a5fa; }
-    .dvr-tab.add-dvr { color: #22c55e; }
-    .dvr-tab .edit-btn, .dvr-tab .del-btn {
-      margin-left: 6px;
-      color: #555;
-      font-size: 10px;
-      cursor: pointer;
-    }
-    .dvr-tab .edit-btn:hover { color: #60a5fa; }
-    .dvr-tab .del-btn:hover { color: #ef4444; }
-
-    .dvr-form {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 16px;
-      background: #111118;
-      border-bottom: 1px solid #222;
-      font-size: 11px;
-      flex-shrink: 0;
-      flex-wrap: wrap;
-    }
-    .dvr-form label { color: #777; }
-    .dvr-form input, .dvr-form select {
-      background: #1a1a24;
-      color: #e0e0e0;
-      border: 1px solid #333;
-      border-radius: 3px;
-      padding: 3px 6px;
-      font-size: 11px;
-    }
-    .dvr-form button {
-      background: #2563eb;
-      color: #fff;
-      border: none;
-      border-radius: 3px;
-      padding: 4px 12px;
-      cursor: pointer;
-      font-size: 11px;
-    }
-    .dvr-form button:hover { background: #1d4ed8; }
-
-    /* CCTV Grid */
-    .cctv-grid, .mixed-cctv-grid {
-      position: relative;
-    }
-    .cctv-grid {
-      flex: 1;
-      display: grid;
-      gap: 4px;
-      padding: 4px;
-      background: #000;
-      overflow-y: auto;
-      align-content: start;
-    }
+    /* === CCTV Grid columns (JS toggles .grid-2/3/4) === */
+    .cctv-grid { flex: 1; display: grid; gap: 6px; padding: 6px; background: rgba(2, 6, 12, 0.88); overflow-y: auto; align-content: start; }
     .cctv-grid.grid-2 { grid-template-columns: repeat(2, 1fr); }
     .cctv-grid.grid-3 { grid-template-columns: repeat(3, 1fr); }
     .cctv-grid.grid-4 { grid-template-columns: repeat(4, 1fr); }
 
-    /* Grid layout selector */
-    .grid-layout-bar {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      padding: 4px 8px;
-      background: #0d0d14;
-      border-bottom: 1px solid #1a1a24;
-      flex-shrink: 0;
-    }
-    .grid-layout-bar span { color: #555; font-size: 10px; margin-right: 2px; }
-    .grid-btn {
-      background: #1a1a24;
-      border: 1px solid #333;
-      border-radius: 3px;
-      color: #888;
-      font-size: 10px;
-      padding: 2px 8px;
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-    .grid-btn:hover { color: #ccc; border-color: #555; }
-    .grid-btn.active { color: #60a5fa; border-color: #60a5fa; background: rgba(96,165,250,0.1); }
-
-    /* Cell expand/collapse motion tween */
+    /* === CCTV Cell === */
     .cctv-cell {
-      transition: transform 0.45s cubic-bezier(0.4, 0, 0.2, 1),
-                  opacity 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative; background: #071021; border: 1px solid var(--line-soft);
+      border-radius: 6px; overflow: hidden; cursor: grab;
+      transition: transform 0.45s cubic-bezier(0.4,0,0.2,1), opacity 0.45s cubic-bezier(0.4,0,0.2,1), border-color 0.25s, box-shadow 0.25s;
+      content-visibility: auto;
     }
-    .cctv-cell.cell-shrink {
-      transform: scale(0.3);
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    /* Expanded overlay - animates from cell position to full grid */
-    .cctv-expand-overlay {
-      position: absolute;
-      z-index: 20;
-      background: #000;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      overflow: hidden;
-      border-radius: 4px;
-      transition: left 0.45s cubic-bezier(0.4, 0, 0.2, 1),
-                  top 0.45s cubic-bezier(0.4, 0, 0.2, 1),
-                  width 0.45s cubic-bezier(0.4, 0, 0.2, 1),
-                  height 0.45s cubic-bezier(0.4, 0, 0.2, 1),
-                  border-radius 0.45s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    .cctv-expand-overlay.active {
-      left: 0 !important;
-      top: 0 !important;
-      width: 100% !important;
-      height: 100% !important;
-      border-radius: 0;
-    }
-    .cctv-expand-overlay img, .cctv-expand-overlay video {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-    }
-    .cctv-expand-overlay .expand-label {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      background: rgba(0,0,0,0.7);
-      padding: 8px 14px;
-      font-size: 13px;
-      color: #ccc;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .cctv-expand-overlay .expand-hint {
-      color: #555;
-      font-size: 11px;
-    }
-    .cctv-cell {
-      position: relative;
-      background: #0a0a14;
-      border: 2px solid #222;
-      border-radius: 4px;
-      overflow: hidden;
-      cursor: grab;
-      transition: border-color 0.2s ease;
-    }
+    .cctv-cell:hover { border-color: rgba(34, 211, 238, 0.35); box-shadow: 0 0 22px rgba(14, 165, 233, 0.17); }
     .cctv-cell:active { cursor: grabbing; }
-    .sortable-ghost {
-      opacity: 0.3;
-      border-color: #3b82f6;
-      box-shadow: 0 0 20px rgba(59,130,246,0.3);
-    }
-    .sortable-chosen {
-      border-color: #60a5fa;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-    }
-    .sortable-drag {
-      opacity: 0.9;
-      transform: scale(1.02);
-      border-color: #3b82f6;
-      box-shadow: 0 8px 30px rgba(59,130,246,0.4);
-    }
-    .sortable-fallback {
-      opacity: 0.85;
-      transform: scale(1.05);
-      border-color: #60a5fa;
-      box-shadow: 0 12px 40px rgba(59,130,246,0.5);
-    }
-    .cctv-cell img, .cctv-cell video {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      background: #000;
-      display: block;
-    }
+    .cctv-cell img, .cctv-cell video { width: 100%; height: 100%; object-fit: cover; background: #000; display: block; }
     .cctv-cell .ch-label {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      background: rgba(0,0,0,0.75);
-      padding: 3px 8px;
-      font-size: 11px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(transparent, rgba(0,0,0,0.85));
+      padding: 16px 10px 5px; font-size: 11px;
+      display: flex; align-items: center; justify-content: space-between;
     }
-    .cctv-cell .ch-name {
-      border: none;
-      background: transparent;
-      font-size: 11px;
-      color: #e0e0e0;
-      width: 100%;
-      outline: none;
-      cursor: text;
-    }
-    .cctv-cell .ch-name:focus {
-      background: #1a1a24;
-      border-radius: 2px;
-      padding: 1px 4px;
-    }
-    .cctv-cell .ch-id {
-      color: #555;
-      font-size: 10px;
-      margin-left: 6px;
-      white-space: nowrap;
-    }
-    .cctv-cell .ch-res {
-      color: #444;
-      font-size: 9px;
-      margin-left: 4px;
-    }
-    .cctv-no-channels {
-      grid-column: 1 / -1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #444;
-      font-size: 16px;
-      min-height: 200px;
-    }
+    .cctv-cell .ch-name { border: none; background: transparent; font-size: 11px; color: #d1d5db; width: 100%; outline: none; cursor: text; font-family: inherit; }
+    .cctv-cell .ch-name:focus { background: rgba(255,255,255,0.08); border-radius: 3px; padding: 1px 5px; }
+    .cctv-cell .ch-id { color: #6b7280; font-size: 10px; margin-left: 6px; white-space: nowrap; font-family: ui-monospace, monospace; }
+    .cctv-cell .ch-res { color: #4b5563; font-size: 9px; margin-left: 4px; }
+    .cctv-cell.cell-shrink { transform: scale(0.3); opacity: 0; pointer-events: none; }
 
-    /* Mixed split pane */
-    .mixed-split {
-      display: flex;
-      flex: 1;
-      overflow: hidden;
+    /* === Sortable states === */
+    .sortable-ghost { opacity: 0.25; border-color: #22d3ee; box-shadow: 0 0 24px rgba(14, 165, 233, 0.35); }
+    .sortable-chosen { border-color: #67e8f9; box-shadow: 0 4px 24px rgba(0,0,0,0.5); }
+    .sortable-drag { opacity: 0.9; transform: scale(1.03); border-color: #22d3ee; box-shadow: 0 8px 32px rgba(14, 165, 233, 0.45); }
+    .sortable-fallback { opacity: 0.85; transform: scale(1.05); border-color: #67e8f9; box-shadow: 0 12px 40px rgba(14, 165, 233, 0.5); }
+
+    /* === Expand overlay === */
+    .cctv-expand-overlay {
+      position: absolute; z-index: 20; background: #000; display: none;
+      align-items: center; justify-content: center; cursor: pointer; overflow: hidden; border-radius: 6px;
+      transition: left 0.45s cubic-bezier(0.4,0,0.2,1), top 0.45s cubic-bezier(0.4,0,0.2,1),
+                  width 0.45s cubic-bezier(0.4,0,0.2,1), height 0.45s cubic-bezier(0.4,0,0.2,1),
+                  border-radius 0.45s cubic-bezier(0.4,0,0.2,1);
     }
-    .mixed-left {
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      min-width: 200px;
-      flex-shrink: 0;
-      flex-grow: 0;
+    .cctv-expand-overlay.active { left: 0!important; top: 0!important; width: 100%!important; height: 100%!important; border-radius: 0; }
+    .cctv-expand-overlay img, .cctv-expand-overlay video { width: 100%; height: 100%; object-fit: contain; }
+    .cctv-expand-overlay .expand-label {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(transparent, rgba(0,0,0,0.9)); padding: 20px 16px 10px;
+      font-size: 13px; color: #d1d5db; display: flex; align-items: center; justify-content: space-between;
     }
-    .mixed-divider {
-      width: 5px;
-      background: #222;
-      cursor: col-resize;
-      flex-shrink: 0;
-      transition: background 0.15s;
-    }
-    .mixed-divider:hover, .mixed-divider.dragging { background: #3b82f6; }
-    .mixed-right {
-      flex: 1;
-      display: flex;
-      position: relative;
-      overflow: hidden;
-      min-width: 200px;
-      background: #000;
-    }
-    .mixed-right .canvas-wrap {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .mixed-right canvas {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-    }
-    .mixed-cctv-grid {
-      flex: 1;
-      display: grid;
-      gap: 3px;
-      padding: 3px;
-      background: #000;
-      overflow-y: auto;
-      align-content: center;
-      width: 100%;
-    }
+    .cctv-expand-overlay .expand-hint { color: #6b7280; font-size: 11px; }
+
+    /* === Mixed view === */
+    .mixed-split { display: flex; flex: 1; overflow: hidden; }
+    .mixed-left { display: flex; flex-direction: column; overflow: hidden; min-width: 200px; flex-shrink: 0; flex-grow: 0; }
+    .mixed-divider { width: 4px; background: #1f2f49; cursor: col-resize; flex-shrink: 0; transition: all 0.2s; }
+    .mixed-divider:hover, .mixed-divider.dragging { background: linear-gradient(180deg, #22d3ee, #0284c7); box-shadow: 0 0 8px rgba(14, 165, 233, 0.35); }
+    .mixed-right { flex: 1; display: flex; position: relative; overflow: hidden; min-width: 200px; background: #000; }
+    .mixed-right .canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; }
+    .mixed-right canvas { width: 100%; height: 100%; object-fit: contain; }
+    .mixed-cctv-grid, .cctv-grid { position: relative; }
+    .mixed-cctv-grid { flex: 1; display: grid; gap: 2px; padding: 2px; background: #000; overflow-y: auto; align-content: center; width: 100%; }
     .mixed-cctv-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
     .mixed-cctv-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
     .mixed-cctv-grid .cctv-cell { cursor: default; }
+    .mixed-cctv-grid .cctv-cell img,
+    .mixed-cctv-grid .cctv-cell video { object-fit: contain; }
 
-    /* Region select */
-    .region-toolbar {
-      position: absolute;
-      top: 6px;
-      left: 6px;
-      display: flex;
-      gap: 4px;
-      z-index: 12;
-      opacity: 0;
-      transition: opacity 0.2s;
-      pointer-events: none;
-    }
-    .mixed-right:hover .region-toolbar {
-      opacity: 1;
-      pointer-events: auto;
-    }
+    /* === Region select === */
+    .region-toolbar { position: absolute; top: 8px; left: 8px; display: flex; gap: 4px; z-index: 12; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+    .mixed-right:hover .region-toolbar { opacity: 1; pointer-events: auto; }
     .region-btn {
-      background: rgba(37,99,235,0.7);
-      color: #fff;
-      border: none;
-      border-radius: 4px;
-      padding: 4px 10px;
-      font-size: 10px;
-      cursor: pointer;
+      background: rgba(14, 165, 233, 0.72); color: #fff; border: none; border-radius: 6px;
+      padding: 5px 12px; font-size: 10px; cursor: pointer; backdrop-filter: blur(8px);
+      transition: all 0.15s; font-family: inherit;
+      display: inline-flex !important; flex-direction: row !important; justify-content: center; align-items: center; gap: 4px;
+      white-space: nowrap; word-break: keep-all; line-height: 1;
     }
-    .region-btn:hover { background: #2563eb; }
+    .region-btn:hover { background: #0284c7; }
     .region-btn.active { background: #22c55e; }
-    .region-select-overlay {
-      position: absolute;
-      inset: 0;
-      cursor: crosshair;
-      z-index: 11;
-      display: none;
-    }
-    .region-rect {
-      position: absolute;
-      border: 2px dashed #60a5fa;
-      background: rgba(96,165,250,0.1);
-      pointer-events: none;
+    .region-btn svg { flex-shrink: 0; }
+    .region-btn-label { white-space: nowrap; }
+    .region-select-overlay { position: absolute; inset: 0; cursor: crosshair; z-index: 11; display: none; }
+    .region-rect { position: absolute; border: 2px dashed #67e8f9; background: rgba(14, 165, 233, 0.15); pointer-events: none; }
+
+    /* === Canvas wrap === */
+    .canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; background: #000; }
+    canvas { width: 100%; height: 100%; object-fit: contain; }
+
+    /* === No channels placeholder === */
+    .cctv-no-channels { grid-column: 1/-1; display: flex; align-items: center; justify-content: center; color: #4b5563; font-size: 14px; min-height: 200px; gap: 8px; }
+
+    /* === Scrollbar === */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #294468; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3b5e8c; }
+
+    @media (max-width: 900px) {
+      .tab { padding-left: 12px !important; padding-right: 12px !important; }
+      .tab-status-area { gap: 8px !important; padding-right: 8px !important; }
+      .dvr-form { padding: 8px 10px !important; }
+      .cctv-grid { gap: 4px; padding: 4px; }
     }
   </style>
 </head>
-<body>
-  <!-- Tabs -->
-  <div class="tabs">
-    <div class="tab active" data-panel="ops" onclick="switchTab(this)">화면</div>
-    <div class="tab" data-panel="cctv" onclick="switchTab(this)">CCTV</div>
-    <div class="tab" data-panel="mixed" onclick="switchTab(this)">같이보기</div>
-    <button class="fullscreen-btn" onclick="refreshCurrentTab()" title="새로고침" style="margin-left:8px;">&#x21BB;</button>
-    <div class="tab-status-area">
-      <div class="tab-status" id="opsStatus">
+<body class="flex flex-col h-screen overflow-hidden">
+
+  <!-- === Tab Bar === -->
+  <div class="tabs flex items-center bg-surface-100/80 backdrop-blur-md border-b border-white/[0.04] flex-shrink-0">
+    <div class="tab flex items-center gap-2 px-5 py-2.5 text-[13px] font-medium text-gray-500 cursor-pointer border-b-2 border-transparent transition-all duration-200 hover:text-gray-300 active" data-panel="ops" onclick="switchTab(this)">
+      <i data-lucide="monitor" class="tab-icon w-3.5 h-3.5 text-gray-600 transition-colors"></i>
+      <span>화면</span>
+    </div>
+    <div class="tab flex items-center gap-2 px-5 py-2.5 text-[13px] font-medium text-gray-500 cursor-pointer border-b-2 border-transparent transition-all duration-200 hover:text-gray-300" data-panel="cctv" onclick="switchTab(this)">
+      <i data-lucide="camera" class="tab-icon w-3.5 h-3.5 text-gray-600 transition-colors"></i>
+      <span>CCTV</span>
+    </div>
+    <div class="tab flex items-center gap-2 px-5 py-2.5 text-[13px] font-medium text-gray-500 cursor-pointer border-b-2 border-transparent transition-all duration-200 hover:text-gray-300" data-panel="mixed" onclick="switchTab(this)">
+      <i data-lucide="columns-2" class="tab-icon w-3.5 h-3.5 text-gray-600 transition-colors"></i>
+      <span>같이보기</span>
+    </div>
+
+    <button onclick="refreshCurrentTab()" title="새로고침"
+      class="fullscreen-btn ml-2 w-7 h-7 flex items-center justify-center rounded-md border border-white/[0.06] text-gray-500 hover:text-gray-200 hover:bg-white/[0.05] hover:border-white/10 transition-all">
+      <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+    </button>
+
+    <div class="tab-status-area ml-auto flex items-center gap-3 pr-3 text-[11px]">
+      <div class="tab-status flex items-center gap-1.5" id="opsStatus">
         <span class="dot" id="statusDot"></span>
-        <span class="label">Ops</span>
-        <span class="info" id="stats"></span>
+        <span class="label text-gray-600">Ops</span>
+        <span class="info text-gray-500 font-mono text-[10px]" id="stats"></span>
       </div>
-      <div class="tab-status" id="cctvStatus">
+      <div class="tab-status flex items-center gap-1.5" id="cctvStatus">
         <span class="dot" id="cctvDot"></span>
-        <span class="label">CCTV</span>
-        <span class="info" id="cctvInfo"></span>
+        <span class="label text-gray-600">CCTV</span>
+        <span class="info text-gray-500 font-mono text-[10px]" id="cctvInfo"></span>
       </div>
-      <button class="fullscreen-btn" id="fullscreenBtn" onclick="toggleFullscreen()" title="전체 화면 (F11)">&#x26F6;</button>
+      <button class="fullscreen-btn w-7 h-7 flex items-center justify-center rounded-md border border-white/[0.06] text-gray-500 hover:text-gray-200 hover:bg-white/[0.05] hover:border-white/10 transition-all"
+        id="fullscreenBtn" onclick="toggleFullscreen()" title="전체 화면 (F11)">
+        <i data-lucide="maximize" class="w-3.5 h-3.5"></i>
+      </button>
     </div>
   </div>
 
-  <!-- Update banner -->
-  <div id="updateBanner" style="display:none;background:#1e3a5f;border-bottom:1px solid #2563eb;padding:6px 16px;font-size:12px;color:#93c5fd;display:none;align-items:center;gap:10px;flex-shrink:0;">
+  <!-- === Update Banner === -->
+  <div id="updateBanner" style="display:none" class="flex items-center gap-3 px-4 py-2 bg-gradient-to-r from-cyan-950/80 to-sky-950/80 border-b border-cyan-500/20 text-[12px] text-cyan-300 flex-shrink-0 backdrop-blur-sm">
+    <i data-lucide="download" class="w-4 h-4 text-cyan-400"></i>
     <span id="updateMsg"></span>
-    <button id="updateBtn" onclick="doUpdate()" style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:11px;cursor:pointer;">업데이트</button>
-    <span id="updateProgress" style="display:none;color:#60a5fa;font-size:11px;"></span>
-    <button onclick="dismissUpdate()" style="background:none;border:none;color:#555;cursor:pointer;margin-left:auto;font-size:14px;">&times;</button>
+    <button id="updateBtn" onclick="doUpdate()"
+      class="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] rounded-md transition-colors font-medium">업데이트</button>
+    <span id="updateProgress" style="display:none" class="text-cyan-400 text-[11px]"></span>
+    <button onclick="dismissUpdate()" class="ml-auto text-gray-500 hover:text-gray-300 transition-colors p-1">
+      <i data-lucide="x" class="w-3.5 h-3.5"></i>
+    </button>
   </div>
 
-  <!-- Panels -->
+  <!-- ============= PANELS ============= -->
+
+  <!-- === Ops Panel === -->
   <div class="panel active" id="panel-ops" style="position:relative;">
     <!-- Toolbar (visible when playing) -->
     <div class="ops-toolbar" id="opsToolbar">
-      <button class="ops-setup-btn edit" onclick="showOpsSetup()">설정</button>
-      <button class="ops-setup-btn disconnect" onclick="opsDisconnect()">연결 해제</button>
+      <button class="ops-setup-btn edit flex items-center gap-1.5 px-3 py-1.5 text-[11px] rounded-md bg-cyan-600/60 hover:bg-cyan-600 text-white/90 border-none cursor-pointer transition-all backdrop-blur-sm font-medium" onclick="showOpsSetup()">
+        <i data-lucide="settings" class="w-3 h-3"></i> 설정
+      </button>
+      <button class="ops-setup-btn disconnect flex items-center gap-1.5 px-3 py-1.5 text-[11px] rounded-md bg-red-600/70 hover:bg-red-600 text-white/90 border-none cursor-pointer transition-all backdrop-blur-sm font-medium" onclick="opsDisconnect()">
+        <i data-lucide="unplug" class="w-3 h-3"></i> 연결 해제
+      </button>
     </div>
-    <!-- Setup: 2 options -->
-    <div class="ops-setup" id="opsSetup">
-      <div class="ops-form">
-        <h3>화면 소스</h3>
-        <!-- Option 1: Relay -->
-        <div class="ops-option-header">OpsView 릴레이</div>
-        <div>
-          <label>WebSocket URL</label>
-          <input type="text" id="relayUrl" placeholder="ws://127.0.0.1:8080/watch" value="ws://127.0.0.1:8080/watch">
+
+    <!-- Setup overlay -->
+    <div class="ops-setup absolute inset-0 flex flex-col items-center justify-center bg-black/85 backdrop-blur-sm z-10" id="opsSetup">
+      <div class="ops-form w-[400px] bg-surface-200/90 backdrop-blur-xl border border-white/[0.06] rounded-xl p-6 flex flex-col gap-3 shadow-2xl shadow-black/50">
+        <h3 class="text-[15px] font-semibold text-gray-100 flex items-center gap-2 mb-1">
+          <i data-lucide="monitor-play" class="w-4 h-4 text-cyan-400"></i>
+          화면 소스
+        </h3>
+
+        <!-- Relay option -->
+        <div class="ops-option-header text-[12px] font-semibold text-cyan-400 flex items-center gap-1.5">
+          <i data-lucide="radio" class="w-3.5 h-3.5"></i> OpsView 릴레이
         </div>
-        <div>
-          <label>토큰</label>
-          <input type="password" id="token" placeholder="watcher token" value="dev-watcher-token">
+        <div class="flex flex-col gap-1">
+          <label class="text-gray-500 text-[11px]">WebSocket URL</label>
+          <input type="text" id="relayUrl" placeholder="ws://127.0.0.1:8080/watch" value="ws://127.0.0.1:8080/watch"
+            class="w-full bg-surface-50/80 text-gray-200 border border-white/[0.06] rounded-lg px-3 py-2 text-[12px] focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 outline-none transition-all placeholder-gray-600">
         </div>
-        <div class="btn-row">
-          <button onclick="opsConnect()">릴레이 연결</button>
+        <div class="flex flex-col gap-1">
+          <label class="text-gray-500 text-[11px]">토큰</label>
+          <input type="password" id="token" placeholder="watcher token" value="dev-watcher-token"
+            class="w-full bg-surface-50/80 text-gray-200 border border-white/[0.06] rounded-lg px-3 py-2 text-[12px] focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 outline-none transition-all placeholder-gray-600">
         </div>
-        <div class="status-msg" id="opsRelayStatus"></div>
-        <div class="divider">또는</div>
-        <!-- Option 2: Stream -->
-        <div class="ops-option-header">직접 스트림</div>
-        <div>
-          <label>RTSP / M3U8 / Video URL</label>
-          <input type="text" id="fallbackUrl" placeholder="http://... .m3u8 or rtsp://...">
+        <div class="btn-row flex gap-2 mt-1">
+          <button onclick="opsConnect()"
+            class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-600 to-sky-600 hover:from-cyan-500 hover:to-sky-500 text-white text-[12px] font-medium rounded-lg border-none cursor-pointer transition-all shadow-lg shadow-cyan-900/30">
+            <i data-lucide="plug" class="w-3.5 h-3.5"></i> 릴레이 연결
+          </button>
         </div>
-        <div class="btn-row">
-          <button onclick="opsStreamPlay()">스트림 재생</button>
+        <div class="status-msg text-[11px] text-center" id="opsRelayStatus"></div>
+
+        <div class="divider text-center text-gray-600 text-[11px] my-1 border-t border-white/[0.04] pt-3">또는</div>
+
+        <!-- Stream option -->
+        <div class="ops-option-header text-[12px] font-semibold text-sky-400 flex items-center gap-1.5">
+          <i data-lucide="video" class="w-3.5 h-3.5"></i> 직접 스트림
         </div>
-        <div class="status-msg" id="opsStreamStatus"></div>
+        <div class="flex flex-col gap-1">
+          <label class="text-gray-500 text-[11px]">RTSP / M3U8 / Video URL</label>
+          <input type="text" id="fallbackUrl" placeholder="http://... .m3u8 or rtsp://..."
+            class="w-full bg-surface-50/80 text-gray-200 border border-white/[0.06] rounded-lg px-3 py-2 text-[12px] focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 outline-none transition-all placeholder-gray-600">
+        </div>
+        <div class="btn-row flex gap-2 mt-1">
+          <button onclick="opsStreamPlay()"
+            class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-sky-600 to-cyan-700 hover:from-sky-500 hover:to-cyan-600 text-white text-[12px] font-medium rounded-lg border-none cursor-pointer transition-all shadow-lg shadow-sky-900/30">
+            <i data-lucide="play" class="w-3.5 h-3.5"></i> 스트림 재생
+          </button>
+        </div>
+        <div class="status-msg text-[11px] text-center" id="opsStreamStatus"></div>
       </div>
     </div>
+
     <!-- Canvas for relay -->
     <div class="canvas-wrap" id="opsCanvasWrap" style="display:none;">
       <canvas id="screen"></canvas>
@@ -646,69 +294,98 @@
       <video id="streamVideo" autoplay muted playsinline style="width:100%;height:100%;object-fit:contain;"></video>
     </div>
   </div>
+
+  <!-- === CCTV Panel === -->
   <div class="panel" id="panel-cctv" style="flex-direction:column;">
     <!-- DVR sub-tabs -->
-    <div class="dvr-tabs" id="dvrTabs">
-      <div class="dvr-tab add-dvr" onclick="showAddDVR()">+ DVR 추가</div>
+    <div class="dvr-tabs flex items-center bg-surface-100 border-b border-white/[0.03] flex-shrink-0 overflow-x-auto gap-1 px-2 py-1" id="dvrTabs">
+      <div class="dvr-tab add-dvr flex items-center gap-1 px-3 py-1.5 text-[11px] text-emerald-400 cursor-pointer rounded-md hover:bg-emerald-500/10 transition-all font-medium" onclick="showAddDVR()">
+        <i data-lucide="plus-circle" class="w-3 h-3"></i> DVR 추가
+      </div>
     </div>
-    <!-- Add DVR form (hidden by default) -->
-    <div class="dvr-form" id="dvrForm" style="display:none;">
-      <label>이름:</label>
-      <input type="text" id="dvrName" placeholder="내 DVR" style="width:100px">
-      <label>IP:</label>
-      <input type="text" id="dvrAddr" placeholder="192.168.1.64" style="width:130px">
-      <label>포트:</label>
-      <input type="number" id="dvrPort" value="80" style="width:50px">
-      <label>계정:</label>
-      <input type="text" id="dvrUser" value="admin" style="width:70px">
-      <label>비밀번호:</label>
-      <input type="password" id="dvrPass" style="width:80px">
-      <label>프로토콜:</label>
-      <select id="dvrProtocol" onchange="onProtocolChange()">
+
+    <!-- DVR form -->
+    <div class="dvr-form flex items-center gap-2 px-4 py-2.5 bg-surface-200/80 backdrop-blur-sm border-b border-white/[0.04] text-[11px] flex-shrink-0 flex-wrap" id="dvrForm" style="display:none;">
+      <label class="text-gray-500">이름:</label>
+      <input type="text" id="dvrName" placeholder="내 DVR" class="w-[100px] bg-surface-50 text-gray-200 border border-white/[0.06] rounded-md px-2 py-1 text-[11px] focus:border-cyan-500/50 outline-none transition-all">
+      <label class="text-gray-500">IP:</label>
+      <input type="text" id="dvrAddr" placeholder="192.168.1.64" class="w-[130px] bg-surface-50 text-gray-200 border border-white/[0.06] rounded-md px-2 py-1 text-[11px] focus:border-cyan-500/50 outline-none transition-all">
+      <label class="text-gray-500">포트:</label>
+      <input type="number" id="dvrPort" value="80" class="w-[50px] bg-surface-50 text-gray-200 border border-white/[0.06] rounded-md px-2 py-1 text-[11px] focus:border-cyan-500/50 outline-none transition-all">
+      <label class="text-gray-500">계정:</label>
+      <input type="text" id="dvrUser" value="admin" class="w-[70px] bg-surface-50 text-gray-200 border border-white/[0.06] rounded-md px-2 py-1 text-[11px] focus:border-cyan-500/50 outline-none transition-all">
+      <label class="text-gray-500">비밀번호:</label>
+      <input type="password" id="dvrPass" class="w-[80px] bg-surface-50 text-gray-200 border border-white/[0.06] rounded-md px-2 py-1 text-[11px] focus:border-cyan-500/50 outline-none transition-all">
+      <label class="text-gray-500">프로토콜:</label>
+      <select id="dvrProtocol" onchange="onProtocolChange()" class="bg-surface-50 text-gray-200 border border-white/[0.06] rounded-md px-2 py-1 text-[11px] outline-none">
         <option value="isapi">ISAPI</option>
         <option value="rtsp">RTSP</option>
       </select>
-      <label>화질:</label>
-      <select id="dvrQuality"><option value="sub">보조</option><option value="main">메인</option></select>
-      <label>갱신:</label>
-      <select id="dvrRefresh">
+      <label class="text-gray-500">화질:</label>
+      <select id="dvrQuality" class="bg-surface-50 text-gray-200 border border-white/[0.06] rounded-md px-2 py-1 text-[11px] outline-none">
+        <option value="sub">보조</option><option value="main">메인</option>
+      </select>
+      <label class="text-gray-500">갱신:</label>
+      <select id="dvrRefresh" class="bg-surface-50 text-gray-200 border border-white/[0.06] rounded-md px-2 py-1 text-[11px] outline-none">
         <option value="1000">1s</option>
         <option value="2000" selected>2s</option>
         <option value="3000">3s</option>
         <option value="5000">5s</option>
       </select>
-      <button id="dvrSaveBtn" onclick="saveDVR()">저장 후 연결</button>
-      <button onclick="hideDVRForm()" style="background:#666;">취소</button>
-      <button id="dvrTestBtn" onclick="testDVRConn()" style="background:#334155;">RTSP 테스트</button>
-      <span id="dvrStatus" style="color:#888;margin-left:8px;"></span>
+      <button id="dvrSaveBtn" onclick="saveDVR()"
+        class="flex items-center gap-1 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] rounded-md border-none cursor-pointer transition-all font-medium">
+        <i data-lucide="save" class="w-3 h-3"></i> 저장 후 연결
+      </button>
+      <button onclick="hideDVRForm()"
+        class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-[11px] rounded-md border-none cursor-pointer transition-all">취소</button>
+      <button id="dvrTestBtn" onclick="testDVRConn()"
+        class="flex items-center gap-1 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-gray-300 text-[11px] rounded-md border-none cursor-pointer transition-all">
+        <i data-lucide="wifi" class="w-3 h-3"></i> RTSP 테스트
+      </button>
+      <span id="dvrStatus" class="text-gray-500 ml-2"></span>
     </div>
+
     <!-- Grid layout selector -->
-    <div class="grid-layout-bar" id="gridLayoutBar">
-      <span>그리드:</span>
-      <button class="grid-btn" data-cols="2" onclick="setGridLayout(2)">2x2</button>
-      <button class="grid-btn active" data-cols="3" onclick="setGridLayout(3)">3x3</button>
-      <button class="grid-btn" data-cols="4" onclick="setGridLayout(4)">4x4</button>
+    <div class="grid-layout-bar flex items-center gap-1.5 px-3 py-1.5 bg-surface-100 border-b border-white/[0.03] flex-shrink-0" id="gridLayoutBar">
+      <span class="text-gray-600 text-[10px] mr-1 flex items-center gap-1">
+        <i data-lucide="layout-grid" class="w-3 h-3"></i> 그리드:
+      </span>
+      <button class="grid-btn px-2.5 py-1 bg-surface-300 border border-white/[0.06] rounded-md text-gray-500 text-[10px] cursor-pointer transition-all hover:text-gray-300 hover:border-white/10" data-cols="2" onclick="setGridLayout(2)">2x2</button>
+      <button class="grid-btn active px-2.5 py-1 bg-surface-300 border border-white/[0.06] rounded-md text-gray-500 text-[10px] cursor-pointer transition-all hover:text-gray-300 hover:border-white/10" data-cols="3" onclick="setGridLayout(3)">3x3</button>
+      <button class="grid-btn px-2.5 py-1 bg-surface-300 border border-white/[0.06] rounded-md text-gray-500 text-[10px] cursor-pointer transition-all hover:text-gray-300 hover:border-white/10" data-cols="4" onclick="setGridLayout(4)">4x4</button>
     </div>
+
     <!-- Channel grid -->
     <div class="cctv-grid grid-3" id="cctvGrid">
-      <div class="cctv-no-channels">채널을 보려면 DVR을 추가하세요</div>
+      <div class="cctv-no-channels">
+        <i data-lucide="camera-off" class="w-5 h-5 text-gray-600"></i>
+        채널을 보려면 DVR을 추가하세요
+      </div>
     </div>
   </div>
+
+  <!-- === Mixed Panel === -->
   <div class="panel" id="panel-mixed" style="flex-direction:column;">
     <div class="mixed-split">
-      <!-- Left: CCTV -->
       <div class="mixed-left" id="mixedLeft" style="flex-basis:40%;">
         <div class="mixed-cctv-grid" id="mixedCctvGrid">
-          <div class="cctv-no-channels">CCTV 채널 없음</div>
+          <div class="cctv-no-channels">
+            <i data-lucide="camera-off" class="w-4 h-4 text-gray-600"></i>
+            CCTV 채널 없음
+          </div>
         </div>
       </div>
-      <!-- Divider -->
       <div class="mixed-divider" id="mixedDivider"></div>
-      <!-- Right: Ops -->
       <div class="mixed-right" id="mixedRight">
         <div class="region-toolbar" id="regionToolbar">
-          <button class="region-btn" id="regionSelectBtn" onclick="toggleRegionSelect()">영역 선택</button>
-          <button class="region-btn" id="regionResetBtn" onclick="resetRegion()" style="display:none;">초기화</button>
+          <button class="region-btn" id="regionSelectBtn" onclick="toggleRegionSelect()">
+            <i data-lucide="scan" class="w-3 h-3"></i>
+            <span class="region-btn-label">영역 선택</span>
+          </button>
+          <button class="region-btn" id="regionResetBtn" onclick="resetRegion()" style="display:none;">
+            <i data-lucide="rotate-ccw" class="w-3 h-3"></i>
+            <span class="region-btn-label">초기화</span>
+          </button>
         </div>
         <div class="region-select-overlay" id="regionOverlay">
           <div class="region-rect" id="regionRect"></div>
@@ -720,11 +397,15 @@
     </div>
   </div>
 
+  <!-- === Scripts === -->
   <script src="https://cdn.jsdelivr.net/npm/fzstd@0.1.1/umd/index.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
   <script src="viewer.js"></script>
   <script>
+    // Initialize Lucide icons
+    lucide.createIcons();
+
     // Tab switching (saves last tab)
     function switchTab(el) {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -938,10 +619,15 @@
     let activeDvrId = null;
     let cctvChannels = [];
     let cctvTimers = [];
+    let cctvRenderedDvrId = null;
+    let mixedRenderedDvrId = null;
     // Shared map of active WebRTC streams: key "dvrID_chNum" → { pc, stream }
     let channelStreams = {};
+    let channelConnecting = new Set();
     let channelPeerConns = [];
     let mixedPeerConns = [];
+    const MIXED_MISSING_RETRY_MS = [3500, 9000];
+    let mixedRetryTimers = [];
 
     function cleanupChannelPCs() {
       channelPeerConns.forEach(pc => { try { pc.close(); } catch(e) {} });
@@ -955,115 +641,179 @@
       cleanupChannelPCs();
       cleanupMixedPCs();
       channelStreams = {};
+      channelConnecting = new Set();
+    }
+    function clearMixedRetryTimers() {
+      mixedRetryTimers.forEach(t => clearTimeout(t));
+      mixedRetryTimers = [];
     }
 
-    const MAX_RETRIES = 9;
-    const MAX_CONCURRENT = 4;
+    const MAX_RETRIES = 6;
+    const ICE_GATHER_TIMEOUT_MS = 900;
+
+    function getConcurrentLimit(channelCount) {
+      if (channelCount >= 16) return 2;
+      if (channelCount >= 9) return 3;
+      return 4;
+    }
+
+    async function waitForIceCandidates(pc, timeoutMs = ICE_GATHER_TIMEOUT_MS) {
+      if (pc.iceGatheringState === 'complete') return;
+      const hasLocalCandidate = () =>
+        !!(pc.localDescription && pc.localDescription.sdp && pc.localDescription.sdp.includes('a=candidate:'));
+      if (hasLocalCandidate()) return;
+
+      await new Promise((resolve) => {
+        const done = () => {
+          clearTimeout(timer);
+          pc.removeEventListener('icecandidate', onIce);
+          pc.removeEventListener('icegatheringstatechange', onState);
+          resolve();
+        };
+        const onIce = () => {
+          if (hasLocalCandidate()) done();
+        };
+        const onState = () => {
+          if (pc.iceGatheringState === 'complete') done();
+        };
+        const timer = setTimeout(done, timeoutMs);
+        pc.addEventListener('icecandidate', onIce);
+        pc.addEventListener('icegatheringstatechange', onState);
+      });
+    }
 
     async function startRTSPChannel(dvrID, chNum, video, instanceArr) {
       const key = dvrID + '_' + chNum;
       const cell = video.parentElement;
-      let retries = 0;
 
-      // Reuse existing stream if available
+      // Reuse existing stream if already alive.
       if (channelStreams[key] && channelStreams[key].stream) {
-        video.srcObject = channelStreams[key].stream;
-        video.play().catch(() => {});
+        const tracks = channelStreams[key].stream.getTracks();
+        const alive = tracks.length > 0 && tracks.every(t => t.readyState === 'live');
+        if (alive) {
+          video.srcObject = channelStreams[key].stream;
+          video.play().catch(() => {});
+          const staleStatus = cell.querySelector('.ch-status');
+          if (staleStatus) staleStatus.remove();
+          return;
+        }
+      }
+
+      // Another panel is connecting this channel right now.
+      if (channelConnecting.has(key)) {
+        let waitStatus = cell.querySelector('.ch-status');
+        if (!waitStatus) {
+          waitStatus = document.createElement('div');
+          waitStatus.className = 'ch-status';
+          waitStatus.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:11px;text-align:center;padding:8px;pointer-events:none;z-index:1;';
+          cell.appendChild(waitStatus);
+        }
+        waitStatus.textContent = 'CH' + chNum + ' 연결 대기...';
         return;
       }
 
-      // Status element
-      let statusEl = cell.querySelector('.ch-status');
-      if (!statusEl) {
-        statusEl = document.createElement('div');
-        statusEl.className = 'ch-status';
-        statusEl.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#888;font-size:11px;text-align:center;padding:8px;pointer-events:none;z-index:1;';
-        cell.appendChild(statusEl);
-      }
+      channelConnecting.add(key);
+      try {
+        let retries = 0;
 
-      async function attempt() {
-        if (!CM()) return;
-        statusEl.style.color = '#888';
-        statusEl.textContent = 'CH' + chNum + ' 연결 중...' + (retries > 0 ? ' (재시도 ' + retries + '/' + MAX_RETRIES + ')' : '');
-
-        // Clean up previous PC for this channel
+        // Stale stream, clean up
         if (channelStreams[key] && channelStreams[key].pc) {
           try { channelStreams[key].pc.close(); } catch(e) {}
           delete channelStreams[key];
         }
 
-        try {
-          console.log('[cctv] ch' + chNum + ': attempt ' + (retries + 1));
-          const pc = new RTCPeerConnection({
-            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-          });
-          pc.addTransceiver('video', { direction: 'recvonly' });
+        let statusEl = cell.querySelector('.ch-status');
+        if (!statusEl) {
+          statusEl = document.createElement('div');
+          statusEl.className = 'ch-status';
+          statusEl.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#888;font-size:11px;text-align:center;padding:8px;pointer-events:none;z-index:1;';
+          cell.appendChild(statusEl);
+        }
 
-          pc.ontrack = e => {
-            console.log('[cctv] ch' + chNum + ': ontrack fired');
-            const stream = e.streams && e.streams[0] ? e.streams[0] : new MediaStream([e.track]);
-            channelStreams[key] = { pc: pc, stream: stream };
-            video.srcObject = stream;
-            video.style.display = '';
-            video.play().catch(() => {});
-            if (statusEl && statusEl.parentElement) statusEl.remove();
-          };
+        async function attempt() {
+          if (!CM()) return;
+          statusEl.style.color = '#888';
+          statusEl.textContent = 'CH' + chNum + ' 연결 중...' + (retries > 0 ? ' (재시도 ' + retries + '/' + MAX_RETRIES + ')' : '');
 
-          // Auto-retry on WebRTC connection failure
-          pc.onconnectionstatechange = () => {
-            console.log('[cctv] ch' + chNum + ': state=' + pc.connectionState);
-            if (pc.connectionState === 'failed') {
-              retries++;
-              if (retries < MAX_RETRIES) {
-                console.log('[cctv] ch' + chNum + ': WebRTC failed, retrying ' + retries + '/' + MAX_RETRIES);
-                // Re-add status element if removed
-                if (!cell.querySelector('.ch-status')) {
-                  statusEl = document.createElement('div');
-                  statusEl.className = 'ch-status';
-                  statusEl.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#eab308;font-size:11px;text-align:center;padding:8px;pointer-events:none;z-index:1;';
-                  cell.appendChild(statusEl);
-                }
-                setTimeout(() => attempt(), 2000);
-              } else {
-                console.log('[cctv] ch' + chNum + ': all retries exhausted, switching to snapshot');
-                switchToSnapshot(dvrID, chNum, cell);
-              }
-            }
-          };
+          // Clean up previous PC for this channel
+          if (channelStreams[key] && channelStreams[key].pc) {
+            try { channelStreams[key].pc.close(); } catch(e) {}
+            delete channelStreams[key];
+          }
 
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
+          try {
+            console.log('[cctv] ch' + chNum + ': attempt ' + (retries + 1));
+            const pc = new RTCPeerConnection({
+              iceServers: [],
+              bundlePolicy: 'max-bundle'
+            });
+            pc.addTransceiver('video', { direction: 'recvonly' });
 
-          await new Promise((resolve) => {
-            if (pc.iceGatheringState === 'complete') { resolve(); return; }
-            const t = setTimeout(resolve, 3000);
-            pc.onicegatheringstatechange = () => {
-              if (pc.iceGatheringState === 'complete') { clearTimeout(t); resolve(); }
+            pc.ontrack = e => {
+              console.log('[cctv] ch' + chNum + ': ontrack fired');
+              const stream = e.streams && e.streams[0] ? e.streams[0] : new MediaStream([e.track]);
+              channelStreams[key] = { pc: pc, stream: stream };
+              video.srcObject = stream;
+              video.style.display = '';
+              video.play().catch(() => {});
+              if (statusEl && statusEl.parentElement) statusEl.remove();
             };
-          });
 
-          const result = await CM().StartChannelStream(dvrID, chNum, pc.localDescription.sdp);
-          console.log('[cctv] ch' + chNum + ': WebRTC answer received');
-          await pc.setRemoteDescription({ type: 'answer', sdp: result.sdp });
-          instanceArr.push(pc);
-          video._pc = pc;
-        } catch(e) {
-          const errMsg = (e && e.message) ? e.message : String(e);
-          console.error('[cctv] ch' + chNum + ' attempt failed:', errMsg);
-          retries++;
-          if (retries < MAX_RETRIES) {
-            statusEl.style.color = '#eab308';
-            statusEl.textContent = 'CH' + chNum + ' 재시도 ' + retries + '/' + MAX_RETRIES;
-            await new Promise(r => setTimeout(r, 2000));
-            return attempt();
-          } else {
-            console.log('[cctv] ch' + chNum + ': all retries exhausted, switching to snapshot');
-            switchToSnapshot(dvrID, chNum, cell);
+            // Auto-retry on WebRTC connection failure
+            pc.onconnectionstatechange = () => {
+              console.log('[cctv] ch' + chNum + ': state=' + pc.connectionState);
+              if (pc.connectionState === 'failed') {
+                retries++;
+                if (retries < MAX_RETRIES) {
+                  console.log('[cctv] ch' + chNum + ': WebRTC failed, retrying ' + retries + '/' + MAX_RETRIES);
+                  // Re-add status element if removed
+                  if (!cell.querySelector('.ch-status')) {
+                    statusEl = document.createElement('div');
+                    statusEl.className = 'ch-status';
+                    statusEl.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#eab308;font-size:11px;text-align:center;padding:8px;pointer-events:none;z-index:1;';
+                    cell.appendChild(statusEl);
+                  }
+                  setTimeout(() => attempt(), 2000);
+                } else {
+                  console.log('[cctv] ch' + chNum + ': all retries exhausted, switching to snapshot');
+                  switchToSnapshot(dvrID, chNum, cell);
+                }
+              }
+            };
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            await waitForIceCandidates(pc);
+            const localDesc = pc.localDescription;
+            if (!localDesc || !localDesc.sdp) {
+              throw new Error('WebRTC offer SDP 생성 실패');
+            }
+
+            const result = await CM().StartChannelStream(dvrID, chNum, localDesc.sdp);
+            console.log('[cctv] ch' + chNum + ': WebRTC answer received');
+            await pc.setRemoteDescription({ type: 'answer', sdp: result.sdp });
+            instanceArr.push(pc);
+            video._pc = pc;
+          } catch(e) {
+            const errMsg = (e && e.message) ? e.message : String(e);
+            console.error('[cctv] ch' + chNum + ' attempt failed:', errMsg);
+            retries++;
+            if (retries < MAX_RETRIES) {
+              statusEl.style.color = '#eab308';
+              statusEl.textContent = 'CH' + chNum + ' 재시도 ' + retries + '/' + MAX_RETRIES;
+              await new Promise(r => setTimeout(r, 2000));
+              return attempt();
+            } else {
+              console.log('[cctv] ch' + chNum + ': all retries exhausted, switching to snapshot');
+              switchToSnapshot(dvrID, chNum, cell);
+            }
           }
         }
-      }
 
-      await attempt();
+        await attempt();
+      } finally {
+        channelConnecting.delete(key);
+      }
     }
 
     // Switch a failed WebRTC channel to ISAPI-style snapshot polling
@@ -1088,11 +838,12 @@
         preload.onload = () => { img.src = preload.src; img.style.opacity = '1'; };
         preload.src = '/cctv/snapshot/' + dvrID + '/' + chNum + '?t=' + Date.now();
       }, 2000);
-      cctvTimers.push(timer);
+      const timerPool = cell.closest('#mixedCctvGrid') ? mixedCctvTimers : cctvTimers;
+      timerPool.push(timer);
       console.log('[cctv] ch' + chNum + ': switched to snapshot polling');
     }
 
-    // Concurrent channel connections (4 at a time), all channels attempted
+    // Concurrent channel connections with adaptive limit by channel count.
     async function startRTSPChannelsStaggered(dvrID, channels, getVideo, instanceArr) {
       const queue = channels.slice();
 
@@ -1104,7 +855,8 @@
         startRTSPChannel(dvrID, ch.ch_num, video, instanceArr).finally(() => next());
       }
 
-      for (let i = 0; i < Math.min(MAX_CONCURRENT, queue.length); i++) {
+      const concurrency = Math.min(getConcurrentLimit(queue.length), queue.length);
+      for (let i = 0; i < concurrency; i++) {
         next();
       }
     }
@@ -1125,22 +877,25 @@
       bar.innerHTML = '';
       dvrs.forEach(d => {
         const tab = document.createElement('div');
-        tab.className = 'dvr-tab' + (d.id === activeDvrId ? ' active' : '');
-        tab.innerHTML = d.name
-          + '<span class="edit-btn" title="Edit DVR">&#9998;</span>'
-          + '<span class="del-btn" title="Delete DVR">&times;</span>';
+        tab.className = 'dvr-tab flex items-center gap-1 px-3 py-1.5 text-[11px] text-gray-500 cursor-pointer rounded-md transition-all hover:text-gray-300 hover:bg-white/[0.04]' + (d.id === activeDvrId ? ' active !text-cyan-300 bg-cyan-500/10' : '');
+        tab.innerHTML = '<i data-lucide="hard-drive" style="width:12px;height:12px;display:inline-block;"></i> ' + d.name
+          + '<span class="edit-btn ml-1.5 text-gray-600 text-[10px] cursor-pointer hover:text-cyan-300 transition-colors" title="Edit DVR">&#9998;</span>'
+          + '<span class="del-btn ml-0.5 text-gray-600 text-[10px] cursor-pointer hover:text-red-400 transition-colors" title="Delete DVR">&times;</span>';
         tab.addEventListener('click', e => {
           if (e.target.classList.contains('del-btn')) { deleteDVR(d.id); return; }
           if (e.target.classList.contains('edit-btn')) { showEditDVR(d.id); return; }
           selectDVR(d.id);
         });
         bar.appendChild(tab);
+        // Re-init lucide for dynamic icons
+        lucide.createIcons({ nodes: [tab] });
       });
       const addTab = document.createElement('div');
-      addTab.className = 'dvr-tab add-dvr';
-      addTab.textContent = '+ DVR 추가';
+      addTab.className = 'dvr-tab add-dvr flex items-center gap-1 px-3 py-1.5 text-[11px] text-emerald-400 cursor-pointer rounded-md hover:bg-emerald-500/10 transition-all font-medium';
+      addTab.innerHTML = '<i data-lucide="plus-circle" style="width:12px;height:12px;display:inline-block;"></i> DVR 추가';
       addTab.onclick = showAddDVR;
       bar.appendChild(addTab);
+      lucide.createIcons({ nodes: [addTab] });
     }
 
     function updateCCTVStatus() {
@@ -1182,8 +937,17 @@
           setDVRStatus(cctvChannels.length + '개 채널', '#22c55e');
         }
         const dvr = dvrs.find(d => d.id === id);
-        renderCCTVGrid(dvr);
-        renderMixedCCTV();
+        const activePanel = document.querySelector('.panel.active');
+        if (activePanel && activePanel.id === 'panel-mixed') {
+          cctvRenderedDvrId = null;
+          renderMixedCCTV();
+        } else if (activePanel && activePanel.id === 'panel-cctv') {
+          mixedRenderedDvrId = null;
+          renderCCTVGrid(dvr);
+        } else {
+          cctvRenderedDvrId = null;
+          mixedRenderedDvrId = null;
+        }
         updateCCTVStatus();
       } catch(e) {
         setDVRStatus('Error: ' + e, '#ef4444');
@@ -1468,6 +1232,7 @@
 
     function renderCCTVGrid(dvr) {
       const grid = document.getElementById('cctvGrid');
+      cctvRenderedDvrId = dvr ? dvr.id : null;
       cctvTimers.forEach(t => clearInterval(t));
       cctvTimers = [];
       collapseCell(true);
@@ -1478,7 +1243,7 @@
       enabled.sort((a, b) => a.order - b.order);
 
       if (enabled.length === 0) {
-        grid.innerHTML = '<div class="cctv-no-channels">채널을 찾을 수 없음</div>';
+        grid.innerHTML = '<div class="cctv-no-channels"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-600"><path d="M2 2l20 20"/><path d="M7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16"/><path d="M9.5 4h5L17 7h3a2 2 0 0 1 2 2v7.5"/><path d="M14.121 9.879A3 3 0 0 1 15 12"/></svg>채널을 찾을 수 없음</div>';
         return;
       }
 
@@ -1510,12 +1275,7 @@
           img.alt = ch.name;
           img.src = '/cctv/snapshot/' + activeDvrId + '/' + ch.ch_num + '?t=' + Date.now();
           img.onerror = function() { this.style.opacity = '0.3'; };
-          img.onload = function() {
-            this.style.opacity = '1';
-            if (this.naturalWidth > 0 && this.naturalHeight > 0 && ch.width === 0) {
-              cell.style.aspectRatio = this.naturalWidth + '/' + this.naturalHeight;
-            }
-          };
+          img.onload = function() { this.style.opacity = '1'; };
           cell.appendChild(img);
 
           const timer = setInterval(() => {
@@ -1523,9 +1283,6 @@
             preload.onload = () => {
               img.src = preload.src;
               img.style.opacity = '1';
-              if (preload.naturalWidth > 0 && ch.width === 0) {
-                cell.style.aspectRatio = preload.naturalWidth + '/' + preload.naturalHeight;
-              }
             };
             preload.src = '/cctv/snapshot/' + activeDvrId + '/' + ch.ch_num + '?t=' + Date.now();
           }, refreshMs);
@@ -1646,17 +1403,45 @@
 
     // Mixed CCTV grid (read-only, no DND)
     let mixedCctvTimers = [];
+    function getMissingMixedChannels(channels) {
+      return channels.filter(ch => {
+        const video = document.getElementById('mixed-video-' + ch.ch_num);
+        if (!video) return false;
+        const stream = video.srcObject;
+        const hasLiveTrack = !!(stream && stream.getTracks().some(t => t.readyState === 'live'));
+        const hasStatus = !!video.parentElement.querySelector('.ch-status');
+        return !hasLiveTrack && !hasStatus;
+      });
+    }
+    function scheduleMixedMissingRetry(dvrID, channels) {
+      clearMixedRetryTimers();
+      MIXED_MISSING_RETRY_MS.forEach((delay, idx) => {
+        const t = setTimeout(() => {
+          if (activeDvrId !== dvrID) return;
+          const missing = getMissingMixedChannels(channels);
+          if (missing.length === 0) return;
+          console.log('[cctv] mixed retry ' + (idx + 1) + ': ' + missing.length + ' channels');
+          startRTSPChannelsStaggered(dvrID, missing,
+            (chNum) => document.getElementById('mixed-video-' + chNum),
+            mixedPeerConns
+          );
+        }, delay);
+        mixedRetryTimers.push(t);
+      });
+    }
     function renderMixedCCTV() {
       const grid = document.getElementById('mixedCctvGrid');
+      mixedRenderedDvrId = activeDvrId || null;
       mixedCctvTimers.forEach(t => clearInterval(t));
       mixedCctvTimers = [];
+      clearMixedRetryTimers();
       cleanupMixedPCs();
 
       const enabled = cctvChannels.filter(ch => ch.enabled);
       enabled.sort((a, b) => a.order - b.order);
 
       if (enabled.length === 0 || !activeDvrId) {
-        grid.innerHTML = '<div class="cctv-no-channels">CCTV 채널 없음</div>';
+        grid.innerHTML = '<div class="cctv-no-channels"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-600"><path d="M2 2l20 20"/><path d="M7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16"/><path d="M9.5 4h5L17 7h3a2 2 0 0 1 2 2v7.5"/><path d="M14.121 9.879A3 3 0 0 1 15 12"/></svg>CCTV 채널 없음</div>';
         grid.classList.remove('cols-3', 'cols-4');
         return;
       }
@@ -1672,11 +1457,9 @@
       enabled.forEach(ch => {
         const cell = document.createElement('div');
         cell.className = 'cctv-cell';
-        if (ch.width > 0 && ch.height > 0) {
-          cell.style.aspectRatio = ch.width + '/' + ch.height;
-        } else {
-          cell.style.aspectRatio = '16/9';
-        }
+        cell.dataset.chnum = ch.ch_num;
+        // Keep uniform tile height for stable mixed-grid layout.
+        cell.style.aspectRatio = '16/9';
 
         if (isRTSP) {
           const video = document.createElement('video');
@@ -1696,7 +1479,10 @@
 
           const timer = setInterval(() => {
             const preload = new Image();
-            preload.onload = () => { img.src = preload.src; img.style.opacity = '1'; };
+            preload.onload = () => {
+              img.src = preload.src;
+              img.style.opacity = '1';
+            };
             preload.src = '/cctv/snapshot/' + activeDvrId + '/' + ch.ch_num + '?t=' + Date.now();
           }, refreshMs);
           mixedCctvTimers.push(timer);
@@ -1704,7 +1490,7 @@
 
         const label = document.createElement('div');
         label.className = 'ch-label';
-        label.innerHTML = '<span style="font-size:11px;color:#ccc;">' + ch.name + '</span><span class="ch-id">CH' + ch.ch_num + '</span>';
+        label.innerHTML = '<span style="font-size:11px;color:#d1d5db;">' + ch.name + '</span><span class="ch-id">CH' + ch.ch_num + '</span>';
         cell.appendChild(label);
         cell.addEventListener('dblclick', () => {
           expandCell(ch.ch_num, ch.name, grid, cell);
@@ -1718,6 +1504,7 @@
           (chNum) => document.getElementById('mixed-video-' + chNum),
           mixedPeerConns
         );
+        scheduleMixedMissingRetry(dvr.id, enabled);
       }
     }
 
@@ -1767,14 +1554,15 @@
     function toggleRegionSelect() {
       regionSelectActive = !regionSelectActive;
       const btn = document.getElementById('regionSelectBtn');
+      const label = btn.querySelector('.region-btn-label');
       const overlay = document.getElementById('regionOverlay');
       if (regionSelectActive) {
         btn.classList.add('active');
-        btn.textContent = '선택 중...';
+        if (label) label.textContent = '선택 중...';
         overlay.style.display = 'block';
       } else {
         btn.classList.remove('active');
-        btn.textContent = '영역 선택';
+        if (label) label.textContent = '영역 선택';
         overlay.style.display = 'none';
       }
     }
@@ -1901,22 +1689,16 @@
     // Update mixed CCTV when tab switches to mixed
     const origSwitchTab = switchTab;
     switchTab = function(el) {
-      const prevPanel = document.querySelector('.panel.active');
       const targetPanel = el.dataset.panel;
-      // Clean up frontend PCs when leaving a streaming tab
-      // Backend cleanup is handled by StartChannelStream (per-channel) and renderXXX
-      if (prevPanel) {
-        if (prevPanel.id === 'panel-mixed') cleanupMixedPCs();
-        if (prevPanel.id === 'panel-cctv') cleanupChannelPCs();
-      }
+      if (targetPanel !== 'mixed') clearMixedRetryTimers();
       origSwitchTab(el);
-      // Reconnect streams on entering a streaming tab
-      if (targetPanel === 'mixed') {
-        renderMixedCCTV();
-      }
+
       if (targetPanel === 'cctv' && activeDvrId) {
         const dvr = dvrs.find(d => d.id === activeDvrId);
-        if (dvr) renderCCTVGrid(dvr);
+        if (dvr && cctvRenderedDvrId !== activeDvrId) renderCCTVGrid(dvr);
+      }
+      if (targetPanel === 'mixed' && activeDvrId) {
+        if (mixedRenderedDvrId !== activeDvrId) renderMixedCCTV();
       }
     };
 

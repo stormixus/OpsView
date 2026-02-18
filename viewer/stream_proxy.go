@@ -47,8 +47,9 @@ func (p *StreamProxy) StartStream(rawURL string) (string, error) {
 	}
 
 	c := &gortsplib.Client{
-		Scheme: u.Scheme,
-		Host:   u.Host,
+		Scheme:   u.Scheme,
+		Host:     u.Host,
+		Protocol: ptrProtocol(gortsplib.ProtocolTCP),
 	}
 
 	if err := c.Start(); err != nil {
@@ -68,9 +69,10 @@ func (p *StreamProxy) StartStream(rawURL string) (string, error) {
 	}
 
 	muxer := &gohlslib.Muxer{
-		Variant:            gohlslib.MuxerVariantMPEGTS,
-		SegmentCount:       5,
-		SegmentMinDuration: 1 * time.Second,
+		Variant:      gohlslib.MuxerVariantMPEGTS,
+		SegmentCount: 5,
+		// Keep target duration stable for strict HLS clients (iOS Safari).
+		SegmentMinDuration: 4 * time.Second,
 		Tracks:             []*gohlslib.Track{track},
 	}
 	if err := muxer.Start(); err != nil {
@@ -244,6 +246,11 @@ func (p *StreamProxy) ServeHLS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Avoid stale playlist/segment cache after refresh or stream restart.
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+
 	// Strip /ops/hls prefix so the muxer sees paths like /index.m3u8
 	r.URL.Path = "/" + strings.TrimPrefix(r.URL.Path, "/ops/hls/")
 	muxer.Handle(w, r)
@@ -283,4 +290,8 @@ func formaH265PPS(f *format.H265) []byte {
 		return f.PPS
 	}
 	return nil
+}
+
+func ptrProtocol(v gortsplib.Protocol) *gortsplib.Protocol {
+	return &v
 }

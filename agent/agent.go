@@ -17,15 +17,18 @@ type Agent struct {
 	conn     *websocket.Conn
 	connMu   sync.Mutex
 	seq      atomic.Uint32
+	profile  atomic.Int32
 	capturer Capturer
 	stopped  chan struct{}
 }
 
 func NewAgent(cfg AgentConfig) *Agent {
-	return &Agent{
+	a := &Agent{
 		cfg:     cfg,
 		stopped: make(chan struct{}),
 	}
+	a.profile.Store(int32(cfg.Profile))
+	return a
 }
 
 func (a *Agent) Run() {
@@ -42,9 +45,12 @@ func (a *Agent) Run() {
 			a.backoff()
 			continue
 		}
+		backoffIdx = 0
 
 		// 2) Initialize capturer
-		cap, err := NewCapturer(a.cfg)
+		capCfg := a.cfg
+		capCfg.Profile = int(a.profile.Load())
+		cap, err := NewCapturer(capCfg)
 		if err != nil {
 			log.Printf("[agent] capturer init error: %v", err)
 			a.closeConn()
@@ -82,7 +88,7 @@ func (a *Agent) connect() error {
 		Supports:      []string{"zstd"},
 	}
 	profileStr := "1080"
-	if a.cfg.Profile == 720 {
+	if a.profile.Load() == 720 {
 		profileStr = "720"
 	}
 	hello.WantProfile = &profileStr
@@ -139,9 +145,9 @@ func (a *Agent) readPump(conn *websocket.Conn) {
 				log.Printf("[agent] control: %s profile=%s", ctrl.Cmd, ctrl.Profile)
 				if ctrl.Cmd == "set_profile" {
 					if ctrl.Profile == "720" {
-						a.cfg.Profile = 720
+						a.profile.Store(720)
 					} else {
-						a.cfg.Profile = 1080
+						a.profile.Store(1080)
 					}
 					// Capturer will pick up new profile on next init
 				}
@@ -186,10 +192,11 @@ func (a *Agent) captureLoop() {
 			}
 
 			seq := a.seq.Add(1)
+			profile := uint16(a.profile.Load())
 			fd := &proto.FrameDelta{
 				Seq:       seq,
 				TsMs:      uint64(time.Now().UnixMilli()),
-				Profile:   uint16(a.cfg.Profile),
+				Profile:   profile,
 				Width:     uint16(width),
 				Height:    uint16(height),
 				TileSize:  uint16(a.cfg.TileSize),
