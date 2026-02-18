@@ -130,6 +130,22 @@
     .mixed-cctv-grid .cctv-cell img,
     .mixed-cctv-grid .cctv-cell video { object-fit: contain; }
 
+    /* Vertical layout */
+    .mixed-split.vertical { flex-direction: column; }
+    .mixed-split.vertical .mixed-left { min-width: unset; min-height: 120px; flex-basis: 40%; }
+    .mixed-split.vertical .mixed-divider { width: auto; height: 4px; cursor: row-resize; }
+    .mixed-split.vertical .mixed-right { min-width: unset; min-height: 120px; }
+
+    /* Layout toggle bar */
+    .mixed-layout-bar { display: flex; align-items: center; gap: 6px; padding: 3px 10px; background: rgba(10,20,34,0.6); border-bottom: 1px solid var(--line-soft); flex-shrink: 0; }
+    .layout-toggle-btn {
+      display: flex; align-items: center; gap: 4px; padding: 3px 10px; font-size: 10px;
+      background: rgba(30,42,65,0.6); border: 1px solid var(--line-soft); border-radius: 5px;
+      color: #94a3b8; cursor: pointer; transition: all 0.15s; font-family: inherit;
+    }
+    .layout-toggle-btn:hover { color: #e2e8f0; border-color: rgba(148,163,184,0.3); }
+    .layout-toggle-btn.active { background: rgba(6,182,212,0.15); color: #22d3ee; border-color: rgba(6,182,212,0.3); }
+
     /* === Region select === */
     .region-toolbar { position: absolute; top: 8px; left: 8px; display: flex; gap: 4px; z-index: 12; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
     .mixed-right:hover .region-toolbar { opacity: 1; pointer-events: auto; }
@@ -367,7 +383,22 @@
 
   <!-- === Mixed Panel === -->
   <div class="panel" id="panel-mixed" style="flex-direction:column;">
-    <div class="mixed-split">
+    <div class="mixed-layout-bar">
+      <span class="text-gray-600 text-[10px] flex items-center gap-1">
+        <i data-lucide="layout-panel-left" class="w-3 h-3"></i> 레이아웃:
+      </span>
+      <button class="layout-toggle-btn active" data-layout="horizontal" onclick="setMixedLayout('horizontal')">
+        <i data-lucide="columns-2" class="w-3 h-3"></i> 가로
+      </button>
+      <button class="layout-toggle-btn" data-layout="vertical" onclick="setMixedLayout('vertical')">
+        <i data-lucide="rows-2" class="w-3 h-3"></i> 세로
+      </button>
+      <span class="text-gray-700 text-[10px] mx-1">|</span>
+      <button class="layout-toggle-btn" id="swapBtn" onclick="swapMixedPanes()">
+        <i data-lucide="arrow-left-right" class="w-3 h-3"></i> 전환
+      </button>
+    </div>
+    <div class="mixed-split" id="mixedSplit">
       <div class="mixed-left" id="mixedLeft" style="flex-basis:40%;">
         <div class="mixed-cctv-grid" id="mixedCctvGrid">
           <div class="cctv-no-channels">
@@ -451,10 +482,11 @@
       if (savedUrl) document.getElementById('relayUrl').value = savedUrl;
       if (savedToken) document.getElementById('token').value = savedToken;
       if (savedFallback) document.getElementById('fallbackUrl').value = savedFallback;
+      // Wails backend config as fallback (only if no localStorage values)
       if (window.go && window.go.main && window.go.main.App) {
         window.go.main.App.GetConfig().then(cfg => {
-          if (cfg.url) document.getElementById('relayUrl').value = cfg.url;
-          if (cfg.token) document.getElementById('token').value = cfg.token;
+          if (!savedUrl && cfg.url) document.getElementById('relayUrl').value = cfg.url;
+          if (!savedToken && cfg.token) document.getElementById('token').value = cfg.token;
         });
       }
     })();
@@ -1391,26 +1423,89 @@
 
     // === Mixed Panel ===
 
+    let mixedLayout = localStorage.getItem('opsview_mixed_layout') || 'horizontal';
+
+    function setMixedLayout(layout) {
+      mixedLayout = layout;
+      localStorage.setItem('opsview_mixed_layout', layout);
+      const split = document.getElementById('mixedSplit');
+      const left = document.getElementById('mixedLeft');
+      const btns = document.querySelectorAll('.layout-toggle-btn[data-layout]');
+      btns.forEach(b => b.classList.toggle('active', b.dataset.layout === layout));
+
+      if (layout === 'vertical') {
+        split.classList.add('vertical');
+        const saved = localStorage.getItem('opsview_mixed_split_v');
+        left.style.flexBasis = saved ? saved + '%' : '40%';
+      } else {
+        split.classList.remove('vertical');
+        const saved = localStorage.getItem('opsview_mixed_split');
+        left.style.flexBasis = saved ? saved + '%' : '40%';
+      }
+      applyMixedOrder();
+    }
+
+    let mixedSwapped = localStorage.getItem('opsview_mixed_swapped') === 'true';
+
+    function swapMixedPanes() {
+      mixedSwapped = !mixedSwapped;
+      localStorage.setItem('opsview_mixed_swapped', mixedSwapped);
+      applyMixedOrder();
+      document.getElementById('swapBtn').classList.toggle('active', mixedSwapped);
+    }
+
+    function applyMixedOrder() {
+      const split = document.getElementById('mixedSplit');
+      const left = document.getElementById('mixedLeft');
+      const divider = document.getElementById('mixedDivider');
+      const right = document.getElementById('mixedRight');
+      // Default: CCTV first, Canvas second
+      // Swapped: Canvas first, CCTV second
+      // Vertical default: Canvas first (top), CCTV second (bottom)
+      // Vertical swapped: CCTV first (top), Canvas second (bottom)
+      const isVert = mixedLayout === 'vertical';
+      const cctvFirst = isVert ? mixedSwapped : !mixedSwapped;
+      if (cctvFirst) {
+        split.insertBefore(left, split.firstChild);
+        split.insertBefore(divider, right);
+      } else {
+        split.insertBefore(right, split.firstChild);
+        split.insertBefore(divider, left);
+      }
+    }
+
     // Split pane resizer
     (function initSplitPane() {
       const divider = document.getElementById('mixedDivider');
       const left = document.getElementById('mixedLeft');
-      const split = divider.parentElement;
+      const split = document.getElementById('mixedSplit');
       let dragging = false;
 
       divider.addEventListener('mousedown', e => {
         e.preventDefault();
         dragging = true;
         divider.classList.add('dragging');
-        document.body.style.cursor = 'col-resize';
+        document.body.style.cursor = mixedLayout === 'vertical' ? 'row-resize' : 'col-resize';
       });
       document.addEventListener('mousemove', e => {
         if (!dragging) return;
         const rect = split.getBoundingClientRect();
-        const pct = ((e.clientX - rect.left) / rect.width) * 100;
-        const clamped = Math.max(15, Math.min(85, pct));
-        left.style.flexBasis = clamped + '%';
-        localStorage.setItem('opsview_mixed_split', clamped);
+        // Check if mixedLeft is the first child (before divider)
+        const leftIsFirst = left === split.firstElementChild;
+        let pct;
+        if (mixedLayout === 'vertical') {
+          const rawPct = ((e.clientY - rect.top) / rect.height) * 100;
+          pct = leftIsFirst ? rawPct : (100 - rawPct);
+          const clamped = Math.max(15, Math.min(85, pct));
+          left.style.flexBasis = clamped + '%';
+          localStorage.setItem('opsview_mixed_split_v', clamped);
+        } else {
+          const rawPct = ((e.clientX - rect.left) / rect.width) * 100;
+          pct = leftIsFirst ? rawPct : (100 - rawPct);
+          const clamped = Math.max(15, Math.min(85, pct));
+          left.style.flexBasis = clamped + '%';
+          localStorage.setItem('opsview_mixed_split', clamped);
+        }
       });
       document.addEventListener('mouseup', () => {
         if (dragging) {
@@ -1419,9 +1514,9 @@
           document.body.style.cursor = '';
         }
       });
-      // Restore saved split
-      const saved = localStorage.getItem('opsview_mixed_split');
-      if (saved) left.style.flexBasis = saved + '%';
+      // Restore saved layout, split, and swap state
+      setMixedLayout(mixedLayout);
+      document.getElementById('swapBtn').classList.toggle('active', mixedSwapped);
     })();
 
     // Mixed CCTV grid (read-only, no DND)
