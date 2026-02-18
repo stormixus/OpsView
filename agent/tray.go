@@ -11,12 +11,13 @@ import (
 )
 
 var (
-	trayAgent       *Agent
-	trayAgentMu     sync.Mutex
-	trayStatusItem  *systray.MenuItem
-	trayStartItem   *systray.MenuItem
-	trayPauseItem   *systray.MenuItem
-	trayRestartItem *systray.MenuItem
+	trayAgent         *Agent
+	trayAgentMu       sync.Mutex
+	trayStatusItem    *systray.MenuItem
+	trayStartItem     *systray.MenuItem
+	trayPauseItem     *systray.MenuItem
+	trayRestartItem   *systray.MenuItem
+	trayAutoStartItem *systray.MenuItem
 )
 
 //go:embed tray.ico
@@ -39,7 +40,8 @@ func onTrayReady(cfg Config) {
 	systray.AddSeparator()
 
 	mSettings := systray.AddMenuItem("설정...", "Open settings")
-	mAutoStart := systray.AddMenuItemCheckbox("Windows 시작 시 자동 실행", "Toggle auto-start", cfg.AutoStart)
+	trayAutoStartItem = systray.AddMenuItemCheckbox("Windows 시작 시 자동 실행", "Toggle auto-start", cfg.AutoStart)
+	mAutoStart := trayAutoStartItem
 
 	systray.AddSeparator()
 
@@ -189,5 +191,17 @@ func updateTrayControlMenu(running bool) {
 		trayStartItem.Enable()
 		trayPauseItem.Disable()
 		trayRestartItem.Disable()
+	}
+}
+
+// syncTrayAutoStart updates the tray menu checkbox to match settings dialog changes.
+func syncTrayAutoStart(enabled bool) {
+	if trayAutoStartItem == nil {
+		return
+	}
+	if enabled {
+		trayAutoStartItem.Check()
+	} else {
+		trayAutoStartItem.Uncheck()
 	}
 }

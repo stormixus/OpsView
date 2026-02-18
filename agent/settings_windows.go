@@ -16,6 +16,7 @@ func showSettings() {
 	var relayURLEdit *walk.LineEdit
 	var tokenEdit *walk.LineEdit
 	var profileCombo *walk.ComboBox
+	var autoStartCB *walk.CheckBox
 
 	profileOptions := []string{"1080", "720"}
 	profileIndex := 0
@@ -26,7 +27,7 @@ func showSettings() {
 	_, err := Dialog{
 		AssignTo: &dlg,
 		Title:    "OpsView Agent 설정",
-		MinSize:  Size{Width: 400, Height: 250},
+		MinSize:  Size{Width: 400, Height: 280},
 		Layout:   VBox{},
 		Children: []Widget{
 			Composite{
@@ -46,6 +47,11 @@ func showSettings() {
 					},
 				},
 			},
+			CheckBox{
+				AssignTo: &autoStartCB,
+				Text:     "Windows 시작 시 자동 실행",
+				Checked:  cfg.AutoStart,
+			},
 			Composite{
 				Layout: HBox{},
 				Children: []Widget{
@@ -60,11 +66,17 @@ func showSettings() {
 							} else {
 								cfg.Profile = 1080
 							}
+							newAutoStart := autoStartCB.Checked()
+							if newAutoStart != cfg.AutoStart {
+								setAutoStart(newAutoStart)
+								cfg.AutoStart = newAutoStart
+								syncTrayAutoStart(newAutoStart)
+							}
 							if err := saveConfig(cfg); err != nil {
 								walk.MsgBox(dlg, "Error", "설정 저장 실패: "+err.Error(), walk.MsgBoxIconError)
 								return
 							}
-							log.Printf("[settings] saved: relay=%s profile=%d", cfg.RelayURL, cfg.Profile)
+							log.Printf("[settings] saved: relay=%s profile=%d autostart=%v", cfg.RelayURL, cfg.Profile, cfg.AutoStart)
 							dlg.Accept()
 							go restartAgentIfRunning()
 						},
