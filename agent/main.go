@@ -7,35 +7,17 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 )
 
 func main() {
-	cfg := loadAgentConfig()
-
-	log.Printf("[agent] relay=%s profile=%d fps_min=%d fps_max=%d",
-		cfg.RelayURL, cfg.Profile, cfg.FPSMin, cfg.FPSMax)
-
-	agent := NewAgent(cfg)
-
-	// Graceful shutdown
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigCh
-		log.Println("[agent] shutting down...")
-		agent.Stop()
-	}()
-
-	agent.Run()
+	cfg := loadConfig()
+	log.Printf("[agent] relay=%s profile=%d", cfg.RelayURL, cfg.Profile)
+	runTray(cfg)
 }
 
-// AgentConfig holds agent settings from environment variables.
+// AgentConfig holds agent runtime settings.
 type AgentConfig struct {
 	RelayURL string
 	Token    string
@@ -43,67 +25,6 @@ type AgentConfig struct {
 	FPSMin   int
 	FPSMax   int
 	TileSize int
-}
-
-func loadAgentConfig() AgentConfig {
-	relayURL := os.Getenv("AGENT_RELAY_URL")
-	if relayURL == "" {
-		relayURL = "ws://127.0.0.1:8080/publish"
-	}
-
-	token := os.Getenv("AGENT_TOKEN")
-	if token == "" {
-		var err error
-		token, err = loadOrCreateAgentToken()
-		if err != nil {
-			token = "dev-publisher-token"
-			log.Printf("[agent] WARNING: token auto-generation failed: %v", err)
-			log.Println("[agent] WARNING: falling back to default token (set AGENT_TOKEN)")
-		}
-	}
-
-	profile := 1080
-	if p := os.Getenv("AGENT_PROFILE"); p == "720" {
-		profile = 720
-	}
-
-	fpsMin := envInt("AGENT_FPS_MIN", 5)
-	fpsMax := envInt("AGENT_FPS_MAX", 10)
-	tileSize := envInt("AGENT_TILE_SIZE", 128)
-	if fpsMin < 1 {
-		log.Printf("[agent] WARNING: invalid AGENT_FPS_MIN=%d, using 1", fpsMin)
-		fpsMin = 1
-	}
-	if fpsMax < 1 {
-		log.Printf("[agent] WARNING: invalid AGENT_FPS_MAX=%d, using 10", fpsMax)
-		fpsMax = 10
-	}
-	if fpsMin > fpsMax {
-		log.Printf("[agent] WARNING: AGENT_FPS_MIN(%d) > AGENT_FPS_MAX(%d), clamping min", fpsMin, fpsMax)
-		fpsMin = fpsMax
-	}
-	if tileSize < 16 || tileSize > 512 {
-		log.Printf("[agent] WARNING: invalid AGENT_TILE_SIZE=%d, using 128", tileSize)
-		tileSize = 128
-	}
-
-	return AgentConfig{
-		RelayURL: relayURL,
-		Token:    token,
-		Profile:  profile,
-		FPSMin:   fpsMin,
-		FPSMax:   fpsMax,
-		TileSize: tileSize,
-	}
-}
-
-func envInt(key string, def int) int {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
-	}
-	return def
 }
 
 func loadOrCreateAgentToken() (string, error) {
@@ -117,9 +38,9 @@ func loadOrCreateAgentToken() (string, error) {
 		return "", err
 	}
 	if created {
-		log.Printf("[agent] generated AGENT_TOKEN at %s (set RELAY_PUBLISHER_TOKEN to match)", tokenPath)
+		log.Printf("[agent] generated token at %s", tokenPath)
 	} else {
-		log.Printf("[agent] loaded AGENT_TOKEN from %s", tokenPath)
+		log.Printf("[agent] loaded token from %s", tokenPath)
 	}
 	return token, nil
 }

@@ -338,29 +338,64 @@ func (m *CCTVManager) TestDVRConnection(dvrID int64) (string, error) {
 // --- RTSP discovery ---
 
 func (m *CCTVManager) discoverFromDVRRTSP(dvr DVRConfig) ([]ChannelConfig, error) {
+	const maxChannels = 32
+	const concurrency = 4
+
+	type probeResult struct {
+		ch    int
+		found bool
+	}
+
+	sem := make(chan struct{}, concurrency)
+	results := make(chan probeResult, maxChannels)
+	var wg sync.WaitGroup
+
+	for ch := 1; ch <= maxChannels; ch++ {
+		wg.Add(1)
+		go func(ch int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			rtspURL := buildRTSPURL(dvr.Username, dvr.Password, dvr.Addr, dvr.Port,
+				fmt.Sprintf("/Streaming/Channels/%d01", ch))
+			found := probeRTSPChannelGo(rtspURL)
+			results <- probeResult{ch: ch, found: found}
+			if found {
+				log.Printf("[cctv] RTSP discover: ch%d OK", ch)
+			}
+		}(ch)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	foundSet := make(map[int]bool)
+	for r := range results {
+		if r.found {
+			foundSet[r.ch] = true
+		}
+	}
+
 	var channels []ChannelConfig
-	for ch := 1; ch <= 32; ch++ {
-		rtspURL := buildRTSPURL(dvr.Username, dvr.Password, dvr.Addr, dvr.Port,
-			fmt.Sprintf("/Streaming/Channels/%d01", ch))
-		if probeRTSPChannelGo(rtspURL) {
+	consecutiveMisses := 0
+	for ch := 1; ch <= maxChannels; ch++ {
+		if foundSet[ch] {
+			consecutiveMisses = 0
 			channels = append(channels, ChannelConfig{
 				DVRID: dvr.ID, ChNum: ch,
 				Name: fmt.Sprintf("Channel %d", ch), Order: ch - 1,
 			})
-			log.Printf("[cctv] RTSP discover: ch%d OK", ch)
-		} else if ch > 1 && len(channels) > 0 {
-			prevFound := false
-			for _, c := range channels {
-				if c.ChNum == ch-1 {
-					prevFound = true
-					break
-				}
-			}
-			if !prevFound {
+		} else if len(channels) > 0 {
+			consecutiveMisses++
+			if consecutiveMisses >= 3 {
 				break
 			}
 		}
 	}
+
 	if len(channels) == 0 {
 		return nil, fmt.Errorf("no RTSP channels found (check address, port, credentials)")
 	}
@@ -372,7 +407,12 @@ func probeRTSPChannelGo(rtspURL string) bool {
 	if err != nil {
 		return false
 	}
-	c := &gortsplib.Client{Scheme: u.Scheme, Host: u.Host}
+	c := &gortsplib.Client{
+		Scheme:       u.Scheme,
+		Host:         u.Host,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
 	if err := c.Start(); err != nil {
 		return false
 	}

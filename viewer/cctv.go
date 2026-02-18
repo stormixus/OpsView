@@ -497,7 +497,103 @@ type isAPIVideoInfo struct {
 	Height int `xml:"videoResolutionHeight"`
 }
 
+type isAPIVideoInputList struct {
+	XMLName  xml.Name          `xml:"VideoInputChannelList"`
+	Channels []isAPIVideoInput `xml:"VideoInputChannel"`
+}
+
+type isAPIVideoInput struct {
+	ID   int    `xml:"id"`
+	Name string `xml:"inputPort>name"`
+}
+
+type isAPIDeviceInfo struct {
+	XMLName           xml.Name `xml:"DeviceInfo"`
+	DeviceName        string   `xml:"deviceName"`
+	AnalogChannelNum  int      `xml:"analogChannelNum"`
+	DigitalChannelNum int      `xml:"digitalChannelNum"`
+}
+
 func (m *CCTVManager) discoverFromDVRISAPI(dvr DVRConfig) ([]ChannelConfig, error) {
+	// Strategy 1: Get device info for total channel count (most reliable)
+	channels, err := m.discoverISAPIDeviceInfo(dvr)
+	if err != nil {
+		log.Printf("[cctv] ISAPI deviceInfo discovery failed: %v", err)
+	}
+
+	// Strategy 2: Parse streaming channels list
+	if len(channels) == 0 {
+		channels, err = m.discoverISAPIStreaming(dvr)
+		if err != nil {
+			log.Printf("[cctv] ISAPI streaming discovery failed: %v", err)
+		}
+	}
+
+	// Strategy 3: Parse video input channels
+	if len(channels) == 0 {
+		log.Printf("[cctv] trying video inputs fallback")
+		channels, err = m.discoverISAPIVideoInputs(dvr)
+		if err != nil {
+			return nil, fmt.Errorf("ISAPI discovery failed: %w", err)
+		}
+	}
+
+	if len(channels) == 0 {
+		return nil, fmt.Errorf("no channels found via ISAPI")
+	}
+	return channels, nil
+}
+
+// discoverISAPIDeviceInfo gets total channel count from /ISAPI/System/deviceInfo
+// and generates channel list 1..N. This is the most reliable method.
+func (m *CCTVManager) discoverISAPIDeviceInfo(dvr DVRConfig) ([]ChannelConfig, error) {
+	url := fmt.Sprintf("http://%s:%d/ISAPI/System/deviceInfo", dvr.Addr, dvr.Port)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.SetBasicAuth(dvr.Username, dvr.Password)
+
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("connect to DVR: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("DVR returned %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	log.Printf("[cctv] ISAPI deviceInfo response: %s", string(body))
+
+	var info isAPIDeviceInfo
+	if err := xml.Unmarshal(body, &info); err != nil {
+		return nil, fmt.Errorf("parse deviceInfo: %w", err)
+	}
+
+	totalChannels := info.AnalogChannelNum + info.DigitalChannelNum
+	if totalChannels == 0 {
+		return nil, fmt.Errorf("deviceInfo reports 0 channels")
+	}
+	log.Printf("[cctv] deviceInfo: analog=%d digital=%d total=%d", info.AnalogChannelNum, info.DigitalChannelNum, totalChannels)
+
+	var channels []ChannelConfig
+	for ch := 1; ch <= totalChannels; ch++ {
+		w, h := m.fetchChannelResolution(dvr, ch)
+		channels = append(channels, ChannelConfig{
+			DVRID:  dvr.ID,
+			ChNum:  ch,
+			Name:   fmt.Sprintf("Channel %d", ch),
+			Order:  ch - 1,
+			Width:  w,
+			Height: h,
+		})
+	}
+	return channels, nil
+}
+
+func (m *CCTVManager) discoverISAPIStreaming(dvr DVRConfig) ([]ChannelConfig, error) {
 	url := fmt.Sprintf("http://%s:%d/ISAPI/Streaming/channels", dvr.Addr, dvr.Port)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.SetBasicAuth(dvr.Username, dvr.Password)
@@ -513,15 +609,26 @@ func (m *CCTVManager) discoverFromDVRISAPI(dvr DVRConfig) ([]ChannelConfig, erro
 		return nil, fmt.Errorf("DVR returned %d: %s", resp.StatusCode, string(body))
 	}
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	log.Printf("[cctv] ISAPI streaming channels response (%d bytes): %s", len(body), string(body))
+
 	var list isAPIChannelList
-	if err := xml.NewDecoder(resp.Body).Decode(&list); err != nil {
+	if err := xml.Unmarshal(body, &list); err != nil {
 		return nil, fmt.Errorf("parse channel list: %w", err)
 	}
 
 	seen := make(map[int]bool)
 	var channels []ChannelConfig
 	for _, ch := range list.Channels {
-		chNum := ch.ID / 100
+		var chNum int
+		if ch.ID >= 100 {
+			chNum = ch.ID / 100
+		} else {
+			chNum = ch.ID
+		}
 		if chNum == 0 || seen[chNum] {
 			continue
 		}
@@ -532,15 +639,65 @@ func (m *CCTVManager) discoverFromDVRISAPI(dvr DVRConfig) ([]ChannelConfig, erro
 			name = fmt.Sprintf("Channel %d", chNum)
 		}
 
-		// Try to get resolution from ISAPI
 		w, h := m.fetchChannelResolution(dvr, chNum)
 
 		channels = append(channels, ChannelConfig{
-			DVRID: dvr.ID,
-			ChNum: chNum,
-			Name:  name,
-			Order: chNum - 1,
-			Width: w,
+			DVRID:  dvr.ID,
+			ChNum:  chNum,
+			Name:   name,
+			Order:  chNum - 1,
+			Width:  w,
+			Height: h,
+		})
+	}
+
+	return channels, nil
+}
+
+func (m *CCTVManager) discoverISAPIVideoInputs(dvr DVRConfig) ([]ChannelConfig, error) {
+	url := fmt.Sprintf("http://%s:%d/ISAPI/System/Video/inputs/channels", dvr.Addr, dvr.Port)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.SetBasicAuth(dvr.Username, dvr.Password)
+
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("connect to DVR: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("DVR returned %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	log.Printf("[cctv] ISAPI video inputs response (%d bytes): %s", len(body), string(body))
+
+	var list isAPIVideoInputList
+	if err := xml.Unmarshal(body, &list); err != nil {
+		return nil, fmt.Errorf("parse video input list: %w", err)
+	}
+
+	var channels []ChannelConfig
+	for _, ch := range list.Channels {
+		if ch.ID == 0 {
+			continue
+		}
+		name := ch.Name
+		if name == "" {
+			name = fmt.Sprintf("Channel %d", ch.ID)
+		}
+
+		w, h := m.fetchChannelResolution(dvr, ch.ID)
+
+		channels = append(channels, ChannelConfig{
+			DVRID:  dvr.ID,
+			ChNum:  ch.ID,
+			Name:   name,
+			Order:  ch.ID - 1,
+			Width:  w,
 			Height: h,
 		})
 	}

@@ -152,6 +152,7 @@
     canvas { width: 100%; height: 100%; object-fit: contain; }
 
     /* === No channels placeholder === */
+    .grid-btn.active { background: rgba(6, 182, 212, 0.15) !important; color: #22d3ee !important; border-color: rgba(6, 182, 212, 0.3) !important; }
     .cctv-no-channels { grid-column: 1/-1; display: flex; align-items: center; justify-content: center; color: #4b5563; font-size: 14px; min-height: 200px; gap: 8px; }
 
     /* === Scrollbar === */
@@ -879,11 +880,13 @@
         const tab = document.createElement('div');
         tab.className = 'dvr-tab flex items-center gap-1 px-3 py-1.5 text-[11px] text-gray-500 cursor-pointer rounded-md transition-all hover:text-gray-300 hover:bg-white/[0.04]' + (d.id === activeDvrId ? ' active !text-cyan-300 bg-cyan-500/10' : '');
         tab.innerHTML = '<i data-lucide="hard-drive" style="width:12px;height:12px;display:inline-block;"></i> ' + d.name
-          + '<span class="edit-btn ml-1.5 text-gray-600 text-[10px] cursor-pointer hover:text-cyan-300 transition-colors" title="Edit DVR">&#9998;</span>'
+          + '<span class="rescan-btn ml-1.5 text-gray-600 text-[10px] cursor-pointer hover:text-emerald-400 transition-colors" title="채널 재탐색">&#8635;</span>'
+          + '<span class="edit-btn ml-0.5 text-gray-600 text-[10px] cursor-pointer hover:text-cyan-300 transition-colors" title="Edit DVR">&#9998;</span>'
           + '<span class="del-btn ml-0.5 text-gray-600 text-[10px] cursor-pointer hover:text-red-400 transition-colors" title="Delete DVR">&times;</span>';
         tab.addEventListener('click', e => {
-          if (e.target.classList.contains('del-btn')) { deleteDVR(d.id); return; }
-          if (e.target.classList.contains('edit-btn')) { showEditDVR(d.id); return; }
+          if (e.target.closest('.del-btn')) { e.stopPropagation(); deleteDVR(d.id); return; }
+          if (e.target.closest('.edit-btn')) { e.stopPropagation(); showEditDVR(d.id); return; }
+          if (e.target.closest('.rescan-btn')) { e.stopPropagation(); rediscoverChannels(d.id); return; }
           selectDVR(d.id);
         });
         bar.appendChild(tab);
@@ -1051,8 +1054,7 @@
     }
 
     async function deleteDVR(id) {
-      if (!CM()) return;
-      if (!confirm('이 DVR과 모든 채널을 삭제하시겠습니까?')) return;
+      if (!CM()) { console.error('deleteDVR: CM() not available'); return; }
       try {
         await CM().DeleteDVR(id);
         dvrs = dvrs.filter(d => d.id !== id);
@@ -1063,6 +1065,27 @@
         if (activeDvrId) selectDVR(activeDvrId);
         else { cctvChannels = []; renderCCTVGrid(null); }
       } catch(e) { console.error('deleteDVR:', e); }
+    }
+
+    async function rediscoverChannels(id) {
+      if (!CM()) return;
+      try {
+        setDVRStatus('채널 재탐색 중...', '#eab308');
+        cctvChannels = await CM().DiscoverChannels(id) || [];
+        setDVRStatus(cctvChannels.length + '개 채널 발견', '#22c55e');
+        activeDvrId = id;
+        const dvr = dvrs.find(d => d.id === id);
+        const activePanel = document.querySelector('.panel.active');
+        if (activePanel && activePanel.id === 'panel-mixed') {
+          renderMixedCCTV();
+        } else {
+          renderCCTVGrid(dvr);
+        }
+        updateCCTVStatus();
+      } catch(e) {
+        setDVRStatus('재탐색 실패: ' + e, '#ef4444');
+        console.error('rediscoverChannels:', e);
+      }
     }
 
     function setDVRStatus(text, color) {
