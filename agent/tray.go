@@ -3,6 +3,7 @@
 package main
 
 import (
+	_ "embed"
 	"log"
 	"sync"
 
@@ -10,20 +11,29 @@ import (
 )
 
 var (
-	trayAgent      *Agent
-	trayAgentMu    sync.Mutex
-	trayStatusItem *systray.MenuItem
+	trayAgent       *Agent
+	trayAgentMu     sync.Mutex
+	trayStatusItem  *systray.MenuItem
+	trayStartItem   *systray.MenuItem
+	trayPauseItem   *systray.MenuItem
+	trayRestartItem *systray.MenuItem
 )
+
+//go:embed tray.ico
+var trayIcon []byte
 
 func runTray(cfg Config) {
 	systray.Run(func() { onTrayReady(cfg) }, onTrayExit)
 }
 
 func onTrayReady(cfg Config) {
+	if len(trayIcon) > 0 {
+		systray.SetIcon(trayIcon)
+	}
 	systray.SetTitle("OpsView Agent")
 	systray.SetTooltip("OpsView Agent")
 
-	trayStatusItem = systray.AddMenuItem("Connecting...", "Connection status")
+	trayStatusItem = systray.AddMenuItem("○ 포즈됨", "Agent status")
 	trayStatusItem.Disable()
 
 	systray.AddSeparator()
@@ -33,7 +43,14 @@ func onTrayReady(cfg Config) {
 
 	systray.AddSeparator()
 
-	mQuit := systray.AddMenuItem("종료", "Quit OpsView Agent")
+	trayStartItem = systray.AddMenuItem("스타트", "Start agent")
+	trayPauseItem = systray.AddMenuItem("포즈", "Pause agent")
+	trayRestartItem = systray.AddMenuItem("리스타트", "Restart agent")
+	updateTrayControlMenu(false)
+
+	systray.AddSeparator()
+
+	mQuit := systray.AddMenuItem("엑시트", "Quit OpsView Agent")
 
 	// Start agent
 	startAgent(cfg)
@@ -49,14 +66,24 @@ func onTrayReady(cfg Config) {
 					setAutoStart(false)
 					c := loadConfig()
 					c.AutoStart = false
-					saveConfig(c)
+					if err := saveConfig(c); err != nil {
+						log.Printf("[tray] save auto-start config failed: %v", err)
+					}
 				} else {
 					mAutoStart.Check()
 					setAutoStart(true)
 					c := loadConfig()
 					c.AutoStart = true
-					saveConfig(c)
+					if err := saveConfig(c); err != nil {
+						log.Printf("[tray] save auto-start config failed: %v", err)
+					}
 				}
+			case <-trayStartItem.ClickedCh:
+				startAgent(loadConfig())
+			case <-trayPauseItem.ClickedCh:
+				stopAgent()
+			case <-trayRestartItem.ClickedCh:
+				restartAgent()
 			case <-mQuit.ClickedCh:
 				systray.Quit()
 			}
@@ -71,6 +98,9 @@ func onTrayExit() {
 func startAgent(cfg Config) {
 	trayAgentMu.Lock()
 	defer trayAgentMu.Unlock()
+	if trayAgent != nil {
+		return
+	}
 
 	agentCfg := AgentConfig{
 		RelayURL: cfg.RelayURL,
@@ -87,6 +117,11 @@ func startAgent(cfg Config) {
 		if err != nil {
 			agentCfg.Token = "dev-publisher-token"
 			log.Printf("[tray] token auto-gen failed: %v", err)
+		} else {
+			cfg.Token = agentCfg.Token
+			if err := saveConfig(cfg); err != nil {
+				log.Printf("[tray] save token config failed: %v", err)
+			}
 		}
 	}
 
@@ -94,6 +129,7 @@ func startAgent(cfg Config) {
 	go trayAgent.Run()
 
 	updateTrayStatus(true)
+	updateTrayControlMenu(true)
 	log.Printf("[tray] agent started: relay=%s profile=%d", cfg.RelayURL, cfg.Profile)
 }
 
@@ -104,8 +140,10 @@ func stopAgent() {
 	if trayAgent != nil {
 		trayAgent.Stop()
 		trayAgent = nil
+		log.Println("[tray] agent stopped")
 	}
-	log.Println("[tray] agent stopped")
+	updateTrayStatus(false)
+	updateTrayControlMenu(false)
 }
 
 func restartAgent() {
@@ -114,15 +152,42 @@ func restartAgent() {
 	startAgent(cfg)
 }
 
-func updateTrayStatus(connected bool) {
+func restartAgentIfRunning() {
+	if isAgentRunning() {
+		restartAgent()
+	}
+}
+
+func isAgentRunning() bool {
+	trayAgentMu.Lock()
+	defer trayAgentMu.Unlock()
+	return trayAgent != nil
+}
+
+func updateTrayStatus(running bool) {
 	if trayStatusItem == nil {
 		return
 	}
-	if connected {
-		trayStatusItem.SetTitle("● Connected to relay")
+	if running {
+		trayStatusItem.SetTitle("● 실행 중")
 		trayStatusItem.SetTooltip("Agent is running")
 	} else {
-		trayStatusItem.SetTitle("○ Disconnected")
-		trayStatusItem.SetTooltip("Agent is not connected")
+		trayStatusItem.SetTitle("○ 포즈됨")
+		trayStatusItem.SetTooltip("Agent is paused")
+	}
+}
+
+func updateTrayControlMenu(running bool) {
+	if trayStartItem == nil || trayPauseItem == nil || trayRestartItem == nil {
+		return
+	}
+	if running {
+		trayStartItem.Disable()
+		trayPauseItem.Enable()
+		trayRestartItem.Enable()
+	} else {
+		trayStartItem.Enable()
+		trayPauseItem.Disable()
+		trayRestartItem.Disable()
 	}
 }

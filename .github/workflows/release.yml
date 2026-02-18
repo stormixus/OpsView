@@ -14,7 +14,7 @@ env:
 
 jobs:
   build-agent:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -24,21 +24,21 @@ jobs:
           cache-dependency-path: agent/go.sum
 
       - name: Build agent (windows/amd64)
+        shell: bash
         run: |
           cd agent
-          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o opsview-agent.exe .
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=1 go build -ldflags="-s -w -H windowsgui" -o opsview-agent.exe .
 
-      - name: Package agent
+      - name: Build installer
+        shell: pwsh
         run: |
-          mkdir -p dist/agent
-          cp agent/opsview-agent.exe dist/agent/
-          cp agent/scripts/*.bat dist/agent/
-          cd dist && zip -r ../opsview-agent-windows-amd64.zip agent/
+          $tag = "$env:GITHUB_REF" -replace '^refs/tags/v', ''
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' "/DMyAppVersion=$tag" agent\installer.iss
 
       - uses: actions/upload-artifact@v4
         with:
           name: opsview-agent-windows-amd64
-          path: opsview-agent-windows-amd64.zip
+          path: agent/opsview-agent-setup.exe
 
   build-viewer:
     strategy:

@@ -66,7 +66,7 @@ func showSettings() {
 							}
 							log.Printf("[settings] saved: relay=%s profile=%d", cfg.RelayURL, cfg.Profile)
 							dlg.Accept()
-							go restartAgent()
+							go restartAgentIfRunning()
 						},
 					},
 					PushButton{
