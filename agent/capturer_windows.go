@@ -102,6 +102,46 @@ func NewCapturer(cfg AgentConfig) (Capturer, error) {
 	return c, nil
 }
 
+// ID3D11DeviceContext vtable indices (from d3d11.h ID3D11DeviceContextVtbl):
+//
+//	IUnknown:        0=QI, 1=AddRef, 2=Release
+//	ID3D11DeviceChild: 3=GetDevice, 4=GetPrivateData, 5=SetPrivateData, 6=SetPrivateDataInterface
+//	ID3D11DeviceContext (starting at 7):
+//	  7=VSSetConstantBuffers, 8=PSSetShaderResources, 9=PSSetShader,
+//	  10=PSSetSamplers, 11=VSSetShader, 12=DrawIndexed, 13=Draw,
+//	  14=Map, 15=Unmap, 16=PSSetConstantBuffers, ...
+//	  46=CopySubresourceRegion, 47=CopyResource, 48=UpdateSubresource, ...
+//	  105=Flush, 106=GetType
+//
+// IDXGIOutputDuplication vtable indices (IDL declaration order):
+//
+//	IUnknown: 0=QI, 1=AddRef, 2=Release
+//	IDXGIObject: 3=SetPrivateData, 4=SetPrivateDataInterface, 5=GetPrivateData, 6=GetParent
+//	IDXGIOutputDuplication:
+//	  7=GetDesc, 8=AcquireNextFrame, 9=GetFrameDirtyRects,
+//	  10=GetFrameMoveRects, 11=GetFramePointerShape,
+//	  12=MapDesktopSurface, 13=UnMapDesktopSurface, 14=ReleaseFrame
+const (
+	// ID3D11DeviceContext
+	vtCtxMap          = 14
+	vtCtxUnmap        = 15
+	vtCtxCopyResource = 47
+	vtCtxFlush        = 105
+
+	// ID3D11Device
+	vtDevCreateTexture2D      = 5
+	vtDevGetDeviceRemovedReason = 39
+
+	// IDXGIOutputDuplication
+	vtDupGetDesc            = 7
+	vtDupAcquireNextFrame   = 8
+	vtDupGetFrameDirtyRects = 9
+	vtDupReleaseFrame       = 14
+
+	// ID3D11Texture2D (inherits ID3D11Resource inherits ID3D11DeviceChild)
+	vtTexGetDesc = 10
+)
+
 func (c *DXGICapturer) init() error {
 	// Create D3D11 device
 	var device, ctx uintptr
@@ -123,7 +163,7 @@ func (c *DXGICapturer) init() error {
 	c.device = device
 	c.ctx = ctx
 
-	// Get IDXGIDevice → IDXGIAdapter → IDXGIOutput → IDXGIOutput1
+	// Get IDXGIDevice -> IDXGIAdapter -> IDXGIOutput -> IDXGIOutput1
 	var dxgiDevice uintptr
 	hr = comQueryInterface(device, &IID_IDXGIDevice, &dxgiDevice)
 	if hr != 0 {
@@ -131,17 +171,25 @@ func (c *DXGICapturer) init() error {
 	}
 	defer comRelease(dxgiDevice)
 
+	// IDXGIDevice::GetAdapter (vtable[7])
+	// CRITICAL: Use direct SyscallN for calls that pass Go-stack pointers.
+	// Passing unsafe.Pointer -> uintptr through an intermediate Go function (comCall)
+	// is unsafe because goroutine stack growth can move the stack between the
+	// uintptr conversion and the actual syscall, leaving stale pointers.
 	var adapter uintptr
-	hr = comCall(dxgiDevice, 7, uintptr(unsafe.Pointer(&adapter))) // IDXGIDevice::GetParent/GetAdapter at vtable[7]
-	if hr != 0 {
-		return fmt.Errorf("GetAdapter: 0x%X", hr)
+	r, _, _ := syscall.SyscallN(comVtbl(dxgiDevice)[7],
+		dxgiDevice, uintptr(unsafe.Pointer(&adapter)))
+	if uintptr(r) != 0 {
+		return fmt.Errorf("GetAdapter: 0x%X", r)
 	}
 	defer comRelease(adapter)
 
+	// IDXGIAdapter::EnumOutputs(0)
 	var output uintptr
-	hr = comCall(adapter, 7, 0, uintptr(unsafe.Pointer(&output))) // IDXGIAdapter::EnumOutputs(0, &output)
-	if hr != 0 {
-		return fmt.Errorf("EnumOutputs: 0x%X", hr)
+	r, _, _ = syscall.SyscallN(comVtbl(adapter)[7],
+		adapter, 0, uintptr(unsafe.Pointer(&output)))
+	if uintptr(r) != 0 {
+		return fmt.Errorf("EnumOutputs: 0x%X", r)
 	}
 	defer comRelease(output)
 
@@ -152,23 +200,28 @@ func (c *DXGICapturer) init() error {
 	}
 	defer comRelease(output1)
 
-	// DuplicateOutput
+	// IDXGIOutput1::DuplicateOutput
 	var dup uintptr
-	hr = comCall(output1, 22, uintptr(device), uintptr(unsafe.Pointer(&dup))) // IDXGIOutput1::DuplicateOutput
-	if hr != 0 {
-		return fmt.Errorf("DuplicateOutput: 0x%X", hr)
+	r, _, _ = syscall.SyscallN(comVtbl(output1)[22],
+		output1, uintptr(device), uintptr(unsafe.Pointer(&dup)))
+	if uintptr(r) != 0 {
+		return fmt.Errorf("DuplicateOutput: 0x%X", r)
 	}
 	c.dup = dup
 
-	// Get output description for resolution
-	c.width = 1920
-	c.height = 1080
-	if c.cfg.Profile == 720 {
-		c.width = 1280
-		c.height = 720
+	// Get actual desktop resolution from GetDesc (vtable[7] on dup)
+	var dupDesc [48]byte // DXGI_OUTDUPL_DESC (36 bytes, pad to 48)
+	syscall.SyscallN(comVtbl(dup)[vtDupGetDesc],
+		dup, uintptr(unsafe.Pointer(&dupDesc[0])))
+	c.width = int(*(*uint32)(unsafe.Pointer(&dupDesc[0])))
+	c.height = int(*(*uint32)(unsafe.Pointer(&dupDesc[4])))
+	if c.width == 0 || c.height == 0 {
+		c.width = 1920
+		c.height = 1080
 	}
 
-	log.Printf("[capturer] initialized DXGI %dx%d tile=%d", c.width, c.height, c.tileSize)
+	log.Printf("[capturer] initialized DXGI %dx%d tile=%d device=%#x ctx=%#x dup=%#x",
+		c.width, c.height, c.tileSize, c.device, c.ctx, c.dup)
 	return nil
 }
 
@@ -183,11 +236,14 @@ func (c *DXGICapturer) CaptureFrame() ([]proto.Tile, int, int, error) {
 	// AcquireNextFrame with 100ms timeout
 	var frameInfo [6]uint64 // DXGI_OUTDUPL_FRAME_INFO (48 bytes)
 	var resource uintptr
-	hr := comCall(c.dup, 8, // IDXGIOutputDuplication::AcquireNextFrame
+	dupVt := comVtbl(c.dup)
+	r, _, _ := syscall.SyscallN(dupVt[vtDupAcquireNextFrame],
+		c.dup,
 		100, // TimeoutInMilliseconds
 		uintptr(unsafe.Pointer(&frameInfo[0])),
 		uintptr(unsafe.Pointer(&resource)),
 	)
+	hr := uintptr(r)
 	if hr == DXGI_ERROR_WAIT_TIMEOUT {
 		return nil, c.width, c.height, nil // No changes
 	}
@@ -197,7 +253,7 @@ func (c *DXGICapturer) CaptureFrame() ([]proto.Tile, int, int, error) {
 	if hr != 0 {
 		return nil, 0, 0, fmt.Errorf("AcquireNextFrame: 0x%X", hr)
 	}
-	defer comCall(c.dup, 11) // ReleaseFrame
+	defer comCall(c.dup, vtDupReleaseFrame)
 	defer comRelease(resource)
 
 	// Map the frame texture and extract changed tiles.
@@ -213,12 +269,14 @@ type rect struct {
 func (c *DXGICapturer) getDirtyRects() []rect {
 	buf := make([]byte, 4096)
 	var needed uint32
-	hr := comCall(c.dup, 9, // GetFrameDirtyRects
+	dupVt := comVtbl(c.dup)
+	r, _, _ := syscall.SyscallN(dupVt[vtDupGetFrameDirtyRects],
+		c.dup,
 		uintptr(len(buf)),
 		uintptr(unsafe.Pointer(&buf[0])),
 		uintptr(unsafe.Pointer(&needed)),
 	)
-	if hr != 0 || needed == 0 {
+	if uintptr(r) != 0 || needed == 0 {
 		// Fall back to full screen as dirty
 		return []rect{{0, 0, c.width, c.height}}
 	}
@@ -238,26 +296,27 @@ func (c *DXGICapturer) getDirtyRects() []rect {
 }
 
 func (c *DXGICapturer) extractTiles(resource uintptr) []proto.Tile {
-	// 1. QueryInterface resource → ID3D11Texture2D
+	// 1. QueryInterface resource -> ID3D11Texture2D
 	var tex uintptr
 	hr := comQueryInterface(resource, &IID_ID3D11Texture2D, &tex)
 	if hr != 0 {
-		log.Printf("[capturer] QueryInterface ID3D11Texture2D failed: 0x%X", hr)
+		log.Printf("[capturer] QI ID3D11Texture2D: 0x%X", hr)
 		return nil
 	}
 	defer comRelease(tex)
 
-	// 2. Read source texture dimensions and ensure staging matches.
+	// 2. Read source texture dimensions (direct SyscallN for Go-stack pointer).
 	var srcDesc d3d11Texture2DDesc
-	comCall(tex, 10, uintptr(unsafe.Pointer(&srcDesc))) // ID3D11Texture2D::GetDesc
+	syscall.SyscallN(comVtbl(tex)[vtTexGetDesc],
+		tex, uintptr(unsafe.Pointer(&srcDesc)))
 	if srcDesc.Width == 0 || srcDesc.Height == 0 {
-		log.Printf("[capturer] invalid source texture size %dx%d", srcDesc.Width, srcDesc.Height)
+		log.Printf("[capturer] invalid source texture %dx%d", srcDesc.Width, srcDesc.Height)
 		return nil
 	}
 	if c.width != int(srcDesc.Width) || c.height != int(srcDesc.Height) {
 		c.width = int(srcDesc.Width)
 		c.height = int(srcDesc.Height)
-		log.Printf("[capturer] source resolution %dx%d", c.width, c.height)
+		log.Printf("[capturer] resolution changed %dx%d", c.width, c.height)
 	}
 	if !c.ensureStagingTexture(srcDesc) {
 		return nil
@@ -282,20 +341,22 @@ func (c *DXGICapturer) extractTiles(resource uintptr) []proto.Tile {
 		return nil
 	}
 
-	// 3. CopyResource: staging ← frame texture
-	comCall(c.ctx, 47, c.staging, tex) // ID3D11DeviceContext::CopyResource
+	// 3. CopyResource: staging <- frame texture (no Go-stack pointers, comCall is safe)
+	comCall(c.ctx, vtCtxCopyResource, c.staging, tex)
 
-	// 4. Map staging texture for CPU read
+	// 4. Map staging texture for CPU read (direct SyscallN for &mapped on Go stack)
 	var mapped d3d11MappedSubresource
-	hr = comCall(c.ctx, 14, // ID3D11DeviceContext::Map
+	ctxVt := comVtbl(c.ctx)
+	r, _, _ := syscall.SyscallN(ctxVt[vtCtxMap],
+		c.ctx,
 		c.staging,
 		0,              // Subresource
 		D3D11_MAP_READ, // MapType
 		0,              // MapFlags
 		uintptr(unsafe.Pointer(&mapped)),
 	)
-	if hr != 0 {
-		log.Printf("[capturer] Map staging texture failed: 0x%X", hr)
+	if uintptr(r) != 0 {
+		log.Printf("[capturer] Map failed: 0x%X staging=%#x", r, c.staging)
 		return nil
 	}
 
@@ -334,8 +395,8 @@ func (c *DXGICapturer) extractTiles(resource uintptr) []proto.Tile {
 		})
 	}
 
-	// 6. Unmap staging texture
-	comCall(c.ctx, 15, c.staging, 0) // ID3D11DeviceContext::Unmap
+	// 6. Unmap staging texture (no Go-stack pointers, comCall is safe)
+	comCall(c.ctx, vtCtxUnmap, c.staging, 0)
 
 	return tiles
 }
@@ -366,14 +427,20 @@ func (c *DXGICapturer) ensureStagingTexture(src d3d11Texture2DDesc) bool {
 		MiscFlags:      0,
 	}
 
+	// Direct SyscallN: &desc and &staging are Go-stack pointers.
 	var staging uintptr
-	hr := comCall(c.device, 5, // ID3D11Device::CreateTexture2D
+	r, _, _ := syscall.SyscallN(comVtbl(c.device)[vtDevCreateTexture2D],
+		c.device,
 		uintptr(unsafe.Pointer(&desc)),
 		0, // pInitialData (NULL)
 		uintptr(unsafe.Pointer(&staging)),
 	)
-	if hr != 0 {
-		log.Printf("[capturer] CreateTexture2D staging failed: 0x%X", hr)
+	if uintptr(r) != 0 {
+		log.Printf("[capturer] CreateTexture2D staging failed: 0x%X", r)
+		return false
+	}
+	if staging == 0 {
+		log.Printf("[capturer] CreateTexture2D returned nil staging")
 		return false
 	}
 
@@ -381,6 +448,7 @@ func (c *DXGICapturer) ensureStagingTexture(src d3d11Texture2DDesc) bool {
 	c.stagingWidth = w
 	c.stagingHeight = h
 	c.stagingFormat = src.Format
+	log.Printf("[capturer] created staging %dx%d fmt=%d ptr=%#x", w, h, src.Format, staging)
 	return true
 }
 
@@ -412,9 +480,16 @@ func (c *DXGICapturer) Close() {
 
 // --- COM helper functions ---
 
+// comVtbl reads the vtable pointer array from a COM object.
+// This returns a pointer to native (non-Go) memory, so it is safe
+// to use across potential goroutine stack moves.
+func comVtbl(obj uintptr) *[1024]uintptr {
+	return (*[1024]uintptr)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(obj))))
+}
+
 func comQueryInterface(obj uintptr, iid *windows.GUID, out *uintptr) uintptr {
-	vtable := *(*[1024]uintptr)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(obj))))
-	r, _, _ := syscall.SyscallN(vtable[0], obj, uintptr(unsafe.Pointer(iid)), uintptr(unsafe.Pointer(out)))
+	r, _, _ := syscall.SyscallN(comVtbl(obj)[0],
+		obj, uintptr(unsafe.Pointer(iid)), uintptr(unsafe.Pointer(out)))
 	return uintptr(r)
 }
 
@@ -422,13 +497,14 @@ func comRelease(obj uintptr) {
 	if obj == 0 {
 		return
 	}
-	vtable := *(*[1024]uintptr)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(obj))))
-	syscall.SyscallN(vtable[2], obj)
+	syscall.SyscallN(comVtbl(obj)[2], obj)
 }
 
+// comCall calls a COM method where all args are non-Go-memory uintptrs
+// (COM object pointers or integer values). Do NOT pass Go-stack pointers
+// through this function; use direct syscall.SyscallN instead.
 func comCall(obj uintptr, method int, args ...uintptr) uintptr {
-	vtable := *(*[1024]uintptr)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(obj))))
 	allArgs := append([]uintptr{obj}, args...)
-	r, _, _ := syscall.SyscallN(vtable[method], allArgs...)
+	r, _, _ := syscall.SyscallN(comVtbl(obj)[method], allArgs...)
 	return uintptr(r)
 }
