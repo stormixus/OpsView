@@ -29,3 +29,6 @@ Thumbs.db
 # Config (may contain tokens)
 *.env
 !*.env.example
+
+.omc
+/viewer/frontend/wailsjs/
