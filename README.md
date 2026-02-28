@@ -2,16 +2,11 @@
 
 Windows 객실관리 앱 화면을 원격으로 시청하는 View-only 스트리밍 시스템.
 
+![OpsView Overview](docs/architecture-overview.png)
+
 ## Architecture
 
-```
-[Windows Agent]                    [Relay Server]                [Viewers]
- DXGI Capture                       Auth + Fan-out
- Dirty Rect → Tile(128x128)   WSS   ┌──────────┐   WSS    ┌─ Wails Desktop
- zstd Compress ──────────────────→  │opsview-  │──────────┤
-                                    │relay     │          ├─ Web Browser
-                                    └──────────┘          └─ Mobile
-```
+![OpsView Architecture Detail](docs/architecture-detail.png)
 
 - **타일 델타 전송**: 변경 영역(128x128)만 zstd 압축하여 전송 → 저사양 PC에서도 동작
 - **LAN / Public 모드**: 내부 IP(`ws://`) 또는 공인 도메인(`wss://`) 모두 지원
