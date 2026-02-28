@@ -3,8 +3,8 @@ FROM golang:1.25-alpine AS builder
 RUN apk add --no-cache git
 WORKDIR /src
 COPY proto/ ./proto/
-COPY go.mod go.sum ./relay/
-COPY *.go ./relay/
+COPY relay/go.mod relay/go.sum ./relay/
+COPY relay/*.go ./relay/
 WORKDIR /src/relay
 RUN go build -ldflags="-s -w" -o /opsview-relay .
 
