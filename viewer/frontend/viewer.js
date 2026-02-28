@@ -56,7 +56,7 @@ function connect() {
     const hello = {
       role: 'watcher',
       client: 'opsview-web',
-      client_version: '0.1.0',
+      client_version: '0.1.7',
       supports: ['zstd'],
       want_profile: null
     };

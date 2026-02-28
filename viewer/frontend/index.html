@@ -534,8 +534,8 @@
 
     // This function is moved from viewer.js and modified to take ip, port, pin
     // and construct the URL.
-    let ws = null;
-    let connected = false;
+    let opsWs = null;
+    let opsConnected = false;
     let reconnectAttempts = 0;
     const MAX_RECONNECT_ATTEMPTS = 5;
     let reconnectTimeout = null;
@@ -567,25 +567,25 @@
       const url = `ws://${ip}:${port}/watch`;
       setStatus('connecting', '연결 중...');
 
-      if (ws) {
-        ws.close();
+      if (opsWs) {
+        opsWs.close();
       }
 
-      ws = new WebSocket(url);
+      opsWs = new WebSocket(url);
 
-      ws.onopen = () => {
+      opsWs.onopen = () => {
         console.log('WebSocket Connected');
-        connected = true;
+        opsConnected = true;
         reconnectAttempts = 0;
         clearTimeout(reconnectTimeout);
         setStatus('connected', '연결됨');
         // Send PIN if available
         if (pin) {
-          ws.send(JSON.stringify({ type: 'auth', token: pin }));
+          opsWs.send(JSON.stringify({ type: 'auth', token: pin }));
         }
       };
 
-      ws.onmessage = (event) => {
+      opsWs.onmessage = (event) => {
         // Handle messages from the relay
         // This part would typically be in viewer.js, but for this specific change,
         // we're only concerned with the connection logic.
@@ -593,9 +593,9 @@
         console.log('Message from relay:', event.data);
       };
 
-      ws.onclose = () => {
+      opsWs.onclose = () => {
         console.log('WebSocket Disconnected');
-        connected = false;
+        opsConnected = false;
         if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttempts++;
           setStatus('disconnected', `연결 끊김. 재연결 시도 중 (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
@@ -605,19 +605,19 @@
         }
       };
 
-      ws.onerror = (error) => {
+      opsWs.onerror = (error) => {
         console.error('WebSocket Error:', error);
         setStatus('error', '연결 오류');
-        ws.close(); // Force close to trigger onclose and potential reconnect
+        opsWs.close(); // Force close to trigger onclose and potential reconnect
       };
     }
 
     function disconnect() {
-      if (ws) {
-        ws.close();
-        ws = null;
+      if (opsWs) {
+        opsWs.close();
+        opsWs = null;
       }
-      connected = false;
+      opsConnected = false;
       reconnectAttempts = 0;
       clearTimeout(reconnectTimeout);
       setStatus('disconnected', '연결 끊김');
@@ -650,7 +650,7 @@
       let checks = 0;
       const checker = setInterval(() => {
         checks++;
-        if (connected) {
+        if (opsConnected) {
           clearInterval(checker);
           document.getElementById('opsRelayStatus').textContent = '';
           document.getElementById('opsSetup').style.display = 'none';
@@ -688,7 +688,7 @@
       document.getElementById('opsStreamStatus').textContent = '로딩 중...';
       document.getElementById('opsStreamStatus').style.color = '#eab308';
 
-      if (connected) disconnect();
+      if (opsConnected) disconnect();
       stopStream();
 
       const video = document.getElementById('streamVideo');
