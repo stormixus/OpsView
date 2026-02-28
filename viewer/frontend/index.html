@@ -340,8 +340,10 @@
       <input type="password" id="dvrPass" class="w-[80px] bg-surface-50 text-gray-200 border border-white/[0.06] rounded-md px-2 py-1 text-[11px] focus:border-cyan-500/50 outline-none transition-all">
       <label class="text-gray-500">프로토콜:</label>
       <select id="dvrProtocol" onchange="onProtocolChange()" class="bg-surface-50 text-gray-200 border border-white/[0.06] rounded-md px-2 py-1 text-[11px] outline-none">
-        <option value="isapi">ISAPI</option>
-        <option value="rtsp">RTSP</option>
+        <option value="auto" selected>Auto(자동)</option>
+        <option value="isapi">ISAPI(Hikvision)</option>
+        <option value="dahua">Dahua CGI</option>
+        <option value="rtsp">RTSP(범용)</option>
       </select>
       <label class="text-gray-500">화질:</label>
       <select id="dvrQuality" class="bg-surface-50 text-gray-200 border border-white/[0.06] rounded-md px-2 py-1 text-[11px] outline-none">

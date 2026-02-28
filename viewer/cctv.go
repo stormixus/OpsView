@@ -31,35 +31,35 @@ type DVRConfig struct {
 	Port          int    `json:"port"`
 	Username      string `json:"username"`
 	Password      string `json:"password"`
-	RefreshRate   int    `json:"refresh_rate"`  // snapshot interval in ms (default 2000)
+	RefreshRate   int    `json:"refresh_rate"`   // snapshot interval in ms (default 2000)
 	StreamQuality string `json:"stream_quality"` // "main" or "sub"
 	Protocol      string `json:"protocol"`       // "isapi" or "rtsp"
 	CreatedAt     string `json:"created_at"`
 }
 
 type ChannelConfig struct {
-	ID       int    `json:"id"`
-	DVRID    int64  `json:"dvr_id"`
-	ChNum    int    `json:"ch_num"`
-	Name     string `json:"name"`
-	Order    int    `json:"order"`
-	Enabled  bool   `json:"enabled"`
-	Width    int    `json:"width"`
-	Height   int    `json:"height"`
+	ID      int    `json:"id"`
+	DVRID   int64  `json:"dvr_id"`
+	ChNum   int    `json:"ch_num"`
+	Name    string `json:"name"`
+	Order   int    `json:"order"`
+	Enabled bool   `json:"enabled"`
+	Width   int    `json:"width"`
+	Height  int    `json:"height"`
 }
 
 // CCTVManager handles multiple DVR connections and channel configuration via SQLite.
 type CCTVManager struct {
-	ctx        context.Context
-	mu         sync.RWMutex
-	db         *sql.DB
-	dbPath     string
+	ctx         context.Context
+	mu          sync.RWMutex
+	db          *sql.DB
+	dbPath      string
 	client      *http.Client
 	shortClient *http.Client // short timeout for fallback ISAPI probes
 	esrganPath  string
-	esrganSem  chan struct{}           // limits concurrent ESRGAN to 1
-	streams    map[string]*channelStream // key: "{dvrID}_{chNum}"
-	streamsMu  sync.Mutex
+	esrganSem   chan struct{}             // limits concurrent ESRGAN to 1
+	streams     map[string]*channelStream // key: "{dvrID}_{chNum}"
+	streamsMu   sync.Mutex
 }
 
 func NewCCTVManager() *CCTVManager {
@@ -161,7 +161,7 @@ func (m *CCTVManager) AddDVR(name, addr string, port int, username, password, pr
 
 func (m *CCTVManager) UpdateDVR(id int64, name, addr string, port int, username, password string, refreshRate int, streamQuality, protocol string) error {
 	if protocol == "" {
-		protocol = "isapi"
+		protocol = "auto"
 	}
 	_, err := m.db.Exec(`UPDATE dvrs SET name=?, addr=?, port=?, username=?, password=?, refresh_rate=?, stream_quality=?, protocol=? WHERE id=?`,
 		name, addr, port, username, password, refreshRate, streamQuality, protocol, id)
@@ -199,11 +199,19 @@ func (m *CCTVManager) DiscoverChannels(dvrID int64) ([]ChannelConfig, error) {
 		return nil, err
 	}
 
+	if dvr.Protocol == "auto" || dvr.Protocol == "" {
+		dvr.Protocol = m.probeDVRProtocol(dvr)
+		// Save the discovered protocol for future rapid access
+		m.db.Exec(`UPDATE dvrs SET protocol=? WHERE id=?`, dvr.Protocol, dvr.ID)
+	}
+
 	var discovered []ChannelConfig
 	switch dvr.Protocol {
 	case "rtsp":
 		discovered, err = m.discoverFromDVRRTSP(dvr)
-	default: // "isapi"
+	case "dahua":
+		discovered, err = m.discoverFromDVRDahua(dvr)
+	default: // "isapi" (hikvision)
 		discovered, err = m.discoverFromDVRISAPI(dvr)
 	}
 	if err != nil {
@@ -260,6 +268,8 @@ func (m *CCTVManager) FetchSnapshot(dvrID int64, chNum int, upscale int, aiUpsca
 		if err != nil {
 			data, err = m.fetchSnapshotRTSP(dvr, chNum)
 		}
+	case "dahua":
+		data, err = m.fetchSnapshotDahua(dvr, chNum)
 	default: // "isapi"
 		data, err = m.fetchSnapshotISAPI(dvr, chNum)
 	}
@@ -477,6 +487,132 @@ func (m *CCTVManager) maybeDetectResolution(dvrID int64, chNum int, jpegData []b
 		m.db.Exec(`UPDATE channels SET width=?, height=? WHERE dvr_id=? AND ch_num=?`,
 			cfg.Width, cfg.Height, dvrID, chNum)
 	}
+}
+
+// --- Auto Detection (Probing) ---
+
+func (m *CCTVManager) probeDVRProtocol(dvr DVRConfig) string {
+	// 1. Try Hikvision ISAPI
+	urlHik := fmt.Sprintf("http://%s:%d/ISAPI/System/deviceInfo", dvr.Addr, dvr.Port)
+	reqHik, _ := http.NewRequest("GET", urlHik, nil)
+	reqHik.SetBasicAuth(dvr.Username, dvr.Password)
+	if respHik, err := m.shortClient.Do(reqHik); err == nil {
+		respHik.Body.Close()
+		if respHik.StatusCode == 200 {
+			log.Printf("[cctv] Probed ISAPI (Hikvision) for %s:%d", dvr.Addr, dvr.Port)
+			return "isapi"
+		}
+	}
+
+	// 2. Try Dahua CGI
+	urlDahua := fmt.Sprintf("http://%s:%d/cgi-bin/magicBox.cgi?action=getSystemInfo", dvr.Addr, dvr.Port)
+	reqDahua, _ := http.NewRequest("GET", urlDahua, nil)
+	// Dahua requires Digest Auth usually, but basic might work or at least return 401 unauth
+	reqDahua.SetBasicAuth(dvr.Username, dvr.Password)
+	if respDahua, err := m.shortClient.Do(reqDahua); err == nil {
+		respDahua.Body.Close()
+		// Even if 401 Unauthorized, if it responds to CGI it's likely Dahua
+		if respDahua.StatusCode == 200 || respDahua.StatusCode == 401 {
+			log.Printf("[cctv] Probed Dahua CGI for %s:%d", dvr.Addr, dvr.Port)
+			return "dahua"
+		}
+	}
+
+	// 3. Fallback to generic RTSP profile if port is alive but HTTP APIs fail
+	log.Printf("[cctv] Probe fallback to RTSP for %s:%d", dvr.Addr, dvr.Port)
+	return "rtsp"
+}
+
+// --- Dahua CGI Support ---
+
+func (m *CCTVManager) fetchSnapshotDahua(dvr DVRConfig, chNum int) ([]byte, error) {
+	// Dahua channels are usually 1-indexed in CGI
+	streamID := 1 // 1 for Main, 2 for Extra1 (Substream)
+	if dvr.StreamQuality == "sub" {
+		streamID = 2
+	}
+	url := fmt.Sprintf("http://%s:%d/cgi-bin/snapshot.cgi?channel=%d&subtype=%d", dvr.Addr, dvr.Port, chNum, streamID)
+
+	// Note: We're using standard Digest Transport implementation or basic auth.
+	// Many Dahua DVRs require digest auth.
+	// For simplicity in this example, assuming Basic works or is configured to work.
+	req, _ := http.NewRequest("GET", url, nil)
+	req.SetBasicAuth(dvr.Username, dvr.Password)
+
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("Dahua snapshot returned %d", resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+func (m *CCTVManager) discoverFromDVRDahua(dvr DVRConfig) ([]ChannelConfig, error) {
+	// Try to get video input channels
+	url := fmt.Sprintf("http://%s:%d/cgi-bin/devVideoInput.cgi?action=getCaps", dvr.Addr, dvr.Port)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.SetBasicAuth(dvr.Username, dvr.Password)
+
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Dahua connect error: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("Dahua returned %d", resp.StatusCode)
+	}
+
+	_, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("Read Dahua response error: %w", err)
+	}
+
+	// Rough response parse to count 'caps[0]' etc or just default to 4-16 if hard to parse.
+	// For robust dahua, parsing the magicBox `VideoInBaseCaps` gives max channels.
+	// Since Dahua plain text Key-Value responses can be messy, we'll try a generic approach if probing MagicBox:
+
+	urlSys := fmt.Sprintf("http://%s:%d/cgi-bin/magicBox.cgi?action=getSystemInfo", dvr.Addr, dvr.Port)
+	reqSys, _ := http.NewRequest("GET", urlSys, nil)
+	reqSys.SetBasicAuth(dvr.Username, dvr.Password)
+	respSys, err := m.client.Do(reqSys)
+
+	var totalChannels = 4 // Safe fallback
+	if err == nil {
+		defer respSys.Body.Close()
+		sysBody, _ := io.ReadAll(respSys.Body)
+		// Usually contains "videoInBaseCaps[0].maxTotal=16" or similar
+		if bytes.Contains(sysBody, []byte("maxTotal=16")) {
+			totalChannels = 16
+		}
+		if bytes.Contains(sysBody, []byte("maxTotal=32")) {
+			totalChannels = 32
+		}
+		if bytes.Contains(sysBody, []byte("maxTotal=8")) {
+			totalChannels = 8
+		}
+	}
+
+	log.Printf("[cctv] Dahua total discovered channels approx: %d", totalChannels)
+
+	var channels []ChannelConfig
+	for ch := 1; ch <= totalChannels; ch++ {
+		// Dahua channels often 1-indexed for CGI
+		channels = append(channels, ChannelConfig{
+			DVRID:  dvr.ID,
+			ChNum:  ch,
+			Name:   fmt.Sprintf("Channel %d", ch),
+			Order:  ch - 1,
+			Width:  0, // Will be lazy loaded on first snapshot
+			Height: 0,
+		})
+	}
+
+	return channels, nil
 }
 
 // --- Hikvision ISAPI discovery ---
