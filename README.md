@@ -16,6 +16,7 @@ Windows 객실관리 앱 화면을 원격으로 시청하는 View-only 스트리
 - **타일 델타 전송**: 변경 영역(128x128)만 zstd 압축하여 전송 → 저사양 PC에서도 동작
 - **LAN / Public 모드**: 내부 IP(`ws://`) 또는 공인 도메인(`wss://`) 모두 지원
 - **해상도 프로파일**: 1080p / 720p 전환 가능
+- **접근 보완 보안**: 에이전트 화면에 표시되는 동적 6자리 PIN 번호를 통해 Viewer 인증 통일
 
 ## Components
 
@@ -25,7 +26,7 @@ Windows 객실관리 앱 화면을 원격으로 시청하는 View-only 스트리
 | **relay** | `relay/` | Go WebSocket 릴레이 서버 (인증, fan-out, backpressure) |
 | **agent** | `agent/` | Windows 화면 캡처 에이전트 (DXGI Desktop Duplication) |
 | **viewer** | `viewer/` | Wails 데스크톱 뷰어 (Ops / CCTV / Mixed 탭) |
-| **web** | `web/` | 브라우저 웹 뷰어 (Canvas + fzstd) |
+| **web** | `web/` | 브라우저 웹 뷰어 (Canvas + WASM zstd) |
 
 ## Quick Start
 
@@ -50,7 +51,6 @@ open http://127.0.0.1:8080
 # Relay
 RELAY_PORT=8080
 RELAY_PUBLISHER_TOKEN=your-secret
-RELAY_WATCHER_TOKENS=token1,token2
 
 # Agent
 AGENT_RELAY_URL=ws://127.0.0.1:8080/publish
@@ -59,7 +59,7 @@ AGENT_PROFILE=1080   # or 720
 
 # Viewer
 WATCH_URL=ws://127.0.0.1:8080/watch
-WATCH_TOKEN=token1
+WATCH_TOKEN=pin-number
 ```
 
 See [`.env.example`](.env.example) for full list.
