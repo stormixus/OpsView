@@ -7,8 +7,9 @@ import (
 	"log"
 	"net"
 	"net/http"
-
-	"github.com/jchv/go-webview2"
+	"os/exec"
+	"runtime"
+	"time"
 )
 
 var webSrv *http.Server
@@ -23,7 +24,10 @@ type APIStatus struct {
 }
 
 func getPublicIP() string {
-	resp, err := http.Get("https://api.ipify.org")
+	client := http.Client{
+		Timeout: 3 * time.Second,
+	}
+	resp, err := client.Get("https://api.ipify.org")
 	if err != nil {
 		return "Unknown"
 	}
@@ -64,28 +68,23 @@ func showSettings() {
 	}
 	url := fmt.Sprintf("http://127.0.0.1:%d", webPort)
 
-	// Create a native webview window instead of launching a cheap browser tab
-	go openWebView(url)
+	// Open the URL in the default system browser
+	go openBrowser(url)
 }
 
-func openWebView(url string) {
-	w := webview2.New(false)
-	if w == nil {
-		log.Println("[webui] failed to initialize webview")
-		return
+func openBrowser(url string) {
+	var err error
+	switch runtime.GOOS {
+	case "windows":
+		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		err = exec.Command("open", url).Start()
+	default:
+		err = exec.Command("xdg-open", url).Start()
 	}
-	defer w.Destroy()
-
-	w.SetTitle("OpsView Agent Settings")
-	w.SetSize(650, 800, webview2.HintNone)
-
-	// Bind an API to let the HTML button close the native window
-	w.Bind("closeNativeWindow", func() {
-		w.Terminate()
-	})
-
-	w.Navigate(url)
-	w.Run()
+	if err != nil {
+		log.Printf("[webui] failed to open browser: %v", err)
+	}
 }
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {

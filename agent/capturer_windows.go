@@ -81,13 +81,15 @@ type DXGICapturer struct {
 	tileSize      int
 	encoder       *zstd.Encoder
 	prevFrame     []byte // previous full frame for delta detection
+	firstFrame    bool
 	mu            sync.Mutex
 }
 
 func NewCapturer(cfg AgentConfig) (Capturer, error) {
 	c := &DXGICapturer{
-		cfg:      cfg,
-		tileSize: cfg.TileSize,
+		cfg:        cfg,
+		tileSize:   cfg.TileSize,
+		firstFrame: true,
 	}
 
 	enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest))
@@ -129,7 +131,7 @@ const (
 	vtCtxFlush        = 105
 
 	// ID3D11Device
-	vtDevCreateTexture2D      = 5
+	vtDevCreateTexture2D        = 5
 	vtDevGetDeviceRemovedReason = 39
 
 	// IDXGIOutputDuplication
@@ -269,6 +271,12 @@ type rect struct {
 func (c *DXGICapturer) getDirtyRects() []rect {
 	buf := make([]byte, 4096)
 	var needed uint32
+
+	if c.firstFrame {
+		c.firstFrame = false
+		return []rect{{0, 0, c.width, c.height}}
+	}
+
 	dupVt := comVtbl(c.dup)
 	r, _, _ := syscall.SyscallN(dupVt[vtDupGetFrameDirtyRects],
 		c.dup,

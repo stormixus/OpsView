@@ -24,3 +24,15 @@ func runTray(cfg Config) {
 	agent := NewAgent(agentCfg)
 	agent.Run()
 }
+
+func setAutoStart(enable bool) {
+	// Not implemented on non-Windows
+}
+
+func syncTrayAutoStart(enabled bool) {
+	// Not implemented on non-Windows
+}
+
+func restartAgentIfRunning() {
+	// Not implemented on non-Windows
+}

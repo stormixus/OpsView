@@ -264,8 +264,13 @@
           <i data-lucide="radio" class="w-3.5 h-3.5"></i> OpsView 릴레이
         </div>
         <div class="flex flex-col gap-1">
-          <label class="text-gray-500 text-[11px]">WebSocket URL</label>
-          <input type="text" id="relayUrl" placeholder="ws://127.0.0.1:8080/watch" value="ws://127.0.0.1:8080/watch"
+          <label class="text-gray-500 text-[11px]">OpsView IP</label>
+          <input type="text" id="relayIp" placeholder="127.0.0.1" value="127.0.0.1"
+            class="w-full bg-surface-50/80 text-gray-200 border border-white/[0.06] rounded-lg px-3 py-2 text-[12px] focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 outline-none transition-all placeholder-gray-600">
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-gray-500 text-[11px]">OpsView Port</label>
+          <input type="number" id="relayPort" placeholder="8080" value="8080"
             class="w-full bg-surface-50/80 text-gray-200 border border-white/[0.06] rounded-lg px-3 py-2 text-[12px] focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 outline-none transition-all placeholder-gray-600">
         </div>
         <div class="flex flex-col gap-1">
@@ -476,16 +481,25 @@
 
     // Load saved config into form fields
     (function initOpsConfig() {
-      const savedUrl = localStorage.getItem('opsview_relay_url');
+      const savedIp = localStorage.getItem('opsview_relay_ip');
+      const savedPort = localStorage.getItem('opsview_relay_port');
       const savedToken = localStorage.getItem('opsview_token');
       const savedFallback = localStorage.getItem('opsview_fallback_url');
-      if (savedUrl) document.getElementById('relayUrl').value = savedUrl;
+      if (savedIp) document.getElementById('relayIp').value = savedIp;
+      if (savedPort) document.getElementById('relayPort').value = savedPort;
       if (savedToken) document.getElementById('token').value = savedToken;
       if (savedFallback) document.getElementById('fallbackUrl').value = savedFallback;
       // Wails backend config as fallback (only if no localStorage values)
       if (window.go && window.go.main && window.go.main.App) {
         window.go.main.App.GetConfig().then(cfg => {
-          if (!savedUrl && cfg.url) document.getElementById('relayUrl').value = cfg.url;
+          if (!savedIp && cfg.url) {
+             try {
+                // cfg.url was likely the full wss url. Extract ip/port.
+                const urlObj = new URL(cfg.url);
+                document.getElementById('relayIp').value = urlObj.hostname;
+                document.getElementById('relayPort').value = urlObj.port || (urlObj.protocol === 'wss:' ? '443' : '80');
+             } catch(e) {}
+          }
           if (!savedToken && cfg.token) document.getElementById('token').value = cfg.token;
         });
       }
@@ -500,7 +514,7 @@
       }
       // Auto-connect Ops if we have saved relay or stream URL
       const lastOpsMode = localStorage.getItem('opsview_ops_mode'); // 'relay' or 'stream'
-      if (lastOpsMode === 'relay' && localStorage.getItem('opsview_relay_url')) {
+      if (lastOpsMode === 'relay' && localStorage.getItem('opsview_relay_ip')) {
         setTimeout(() => opsConnect(), 500);
       } else if (lastOpsMode === 'stream' && localStorage.getItem('opsview_fallback_url')) {
         setTimeout(() => opsStreamPlay(), 500);
@@ -516,15 +530,109 @@
       opsDisconnect();
     }
 
-    function opsConnect() {
-      const url = document.getElementById('relayUrl').value.trim();
+    // This function is moved from viewer.js and modified to take ip, port, token
+    // and construct the URL.
+    let ws = null;
+    let connected = false;
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT_ATTEMPTS = 5;
+    let reconnectTimeout = null;
+
+    function setStatus(status, message) {
+      const el = document.getElementById('opsRelayStatus');
+      if (el) {
+        el.textContent = message;
+        switch (status) {
+          case 'connecting': el.style.color = '#eab308'; break; // yellow
+          case 'connected': el.style.color = '#22c55e'; break; // green
+          case 'disconnected': el.style.color = '#ef4444'; break; // red
+          case 'error': el.style.color = '#ef4444'; break; // red
+          default: el.style.color = '#9ca3af'; // gray
+        }
+      }
+    }
+
+    function connect() {
+      const ip = document.getElementById('relayIp').value.trim();
+      const port = document.getElementById('relayPort').value.trim();
       const token = document.getElementById('token').value.trim();
-      if (!url) {
-        document.getElementById('opsRelayStatus').textContent = '릴레이 URL을 입력하세요';
+
+      if (!ip || !port) {
+        setStatus('error', 'IP와 포트를 입력하세요');
+        return;
+      }
+
+      const url = `ws://${ip}:${port}/watch`;
+      setStatus('connecting', '연결 중...');
+
+      if (ws) {
+        ws.close();
+      }
+
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        console.log('WebSocket Connected');
+        connected = true;
+        reconnectAttempts = 0;
+        clearTimeout(reconnectTimeout);
+        setStatus('connected', '연결됨');
+        // Send token if available
+        if (token) {
+          ws.send(JSON.stringify({ type: 'auth', token: token }));
+        }
+      };
+
+      ws.onmessage = (event) => {
+        // Handle messages from the relay
+        // This part would typically be in viewer.js, but for this specific change,
+        // we're only concerned with the connection logic.
+        // Assuming viewer.js will handle the actual data processing.
+        console.log('Message from relay:', event.data);
+      };
+
+      ws.onclose = () => {
+        console.log('WebSocket Disconnected');
+        connected = false;
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+          reconnectAttempts++;
+          setStatus('disconnected', `연결 끊김. 재연결 시도 중 (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+          reconnectTimeout = setTimeout(connect, 3000); // Try to reconnect after 3 seconds
+        } else {
+          setStatus('error', '연결 실패. 최대 재연결 시도 횟수 초과.');
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket Error:', error);
+        setStatus('error', '연결 오류');
+        ws.close(); // Force close to trigger onclose and potential reconnect
+      };
+    }
+
+    function disconnect() {
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+      connected = false;
+      reconnectAttempts = 0;
+      clearTimeout(reconnectTimeout);
+      setStatus('disconnected', '연결 끊김');
+    }
+
+    function opsConnect() {
+      const ip = document.getElementById('relayIp').value.trim();
+      const port = document.getElementById('relayPort').value.trim();
+      const token = document.getElementById('token').value.trim();
+
+      if (!ip || !port) {
+        document.getElementById('opsRelayStatus').textContent = 'IP와 포트를 입력하세요';
         document.getElementById('opsRelayStatus').style.color = '#ef4444';
         return;
       }
-      localStorage.setItem('opsview_relay_url', url);
+      localStorage.setItem('opsview_relay_ip', ip);
+      localStorage.setItem('opsview_relay_port', port);
       localStorage.setItem('opsview_token', token);
       localStorage.setItem('opsview_ops_mode', 'relay');
       document.getElementById('opsRelayStatus').textContent = '연결 중...';
