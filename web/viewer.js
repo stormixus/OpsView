@@ -32,9 +32,11 @@ document.addEventListener('DOMContentLoaded', () => {
   ctx = canvas.getContext('2d');
 
   // Load saved settings
-  const savedUrl = localStorage.getItem('opsview_relay_url');
+  const savedIp = localStorage.getItem('opsview_relay_ip');
+  const savedPort = localStorage.getItem('opsview_relay_port');
   const savedToken = localStorage.getItem('opsview_token');
-  if (savedUrl) document.getElementById('relayUrl').value = savedUrl;
+  if (savedIp) document.getElementById('relayIp').value = savedIp;
+  if (savedPort) document.getElementById('relayPort').value = savedPort;
   if (savedToken) document.getElementById('token').value = savedToken;
 
   // Stats update loop
@@ -51,13 +53,17 @@ function toggleConnection() {
 }
 
 function connect() {
-  const url = document.getElementById('relayUrl').value.trim();
+  const ip = document.getElementById('relayIp').value.trim();
+  const port = document.getElementById('relayPort').value.trim();
   const token = document.getElementById('token').value.trim();
 
-  if (!url) return;
+  if (!ip || !port) return;
+  
+  const url = `ws://${ip}:${port}/watch`;
 
   // Save settings
-  localStorage.setItem('opsview_relay_url', url);
+  localStorage.setItem('opsview_relay_ip', ip);
+  localStorage.setItem('opsview_relay_port', port);
   localStorage.setItem('opsview_token', token);
 
   setStatus('connecting', 'Connecting...');

@@ -10,5 +10,5 @@ services:
     environment:
       - RELAY_PORT=8080
       - RELAY_PUBLISHER_TOKEN=${RELAY_PUBLISHER_TOKEN:-}
-      - RELAY_WATCHER_TOKENS=${RELAY_WATCHER_TOKENS:-}
+      # RELAY_WATCHER_TOKENS is no longer needed; PIN covers all auth.
     restart: unless-stopped

@@ -1,132 +1,136 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OpsView</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      background: #0a0a0f;
-      color: #e0e0e0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-      overflow: hidden;
-    }
-
-    /* Header */
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 8px 16px;
-      background: #111118;
-      border-bottom: 1px solid #222;
-      flex-shrink: 0;
-    }
-    .header h1 {
-      font-size: 16px;
-      font-weight: 600;
-      color: #60a5fa;
-    }
-    .status {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 13px;
-    }
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #666;
-    }
-    .status-dot.connected { background: #22c55e; }
-    .status-dot.connecting { background: #eab308; animation: pulse 1s infinite; }
-    .status-dot.error { background: #ef4444; }
-    @keyframes pulse { 50% { opacity: 0.5; } }
-
-    .stats {
-      font-size: 12px;
-      color: #888;
-      font-family: monospace;
-    }
-
-    /* Canvas area */
-    .canvas-wrap {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #000;
-      overflow: hidden;
-    }
-    canvas {
-      max-width: 100%;
-      max-height: 100%;
-      image-rendering: auto;
-    }
-
-    /* Settings panel */
-    .settings {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 6px 16px;
-      background: #111118;
-      border-top: 1px solid #222;
-      flex-shrink: 0;
-      font-size: 13px;
-    }
-    .settings label { color: #999; }
-    .settings input, .settings select {
-      background: #1a1a24;
-      color: #e0e0e0;
-      border: 1px solid #333;
-      border-radius: 4px;
-      padding: 4px 8px;
-      font-size: 12px;
-    }
-    .settings button {
-      background: #2563eb;
-      color: #fff;
-      border: none;
-      border-radius: 4px;
-      padding: 5px 14px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    .settings button:hover { background: #1d4ed8; }
-    .settings button.disconnect { background: #dc2626; }
-    .settings button.disconnect:hover { background: #b91c1c; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpsView Web Viewer</title>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- Tailwind CSS (CDN for simple viewer) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        surface: { 50: '#070f1a', 100: '#0d1829', 200: '#14233a', 300: '#1e3048' },
+                        brand: { 400: '#38bdf8', 500: '#0ea5e9', 600: '#0284c7' }
+                    },
+                    fontFamily: {
+                        sans: ['Pretendard Variable', 'SUIT Variable', 'Noto Sans KR', '-apple-system', 'sans-serif'],
+                        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Custom logic for state classes manipulated by viewer.js -->
+    <style type="text/tailwindcss">
+        @layer components {
+            .status-dot {
+                @apply w-2.5 h-2.5 rounded-full bg-slate-600 transition-all duration-300;
+            }
+            .status-dot.connected {
+                @apply bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.8)];
+            }
+            .status-dot.connecting {
+                @apply bg-amber-500 animate-pulse shadow-[0_0_12px_rgba(245,158,11,0.6)];
+            }
+            .status-dot.error {
+                @apply bg-rose-500 shadow-[0_0_12px_rgba(244,63,63,0.8)];
+            }
+            
+            .btn-primary {
+                @apply bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 text-white font-semibold shadow-lg shadow-brand-500/20 text-[13px] tracking-wide transition-all transform hover:-translate-y-0.5 border-none cursor-pointer flex items-center gap-2;
+            }
+            .disconnect {
+                @apply !from-rose-600 !to-rose-500 hover:!from-rose-500 hover:!to-rose-400 !shadow-rose-500/20;
+            }
+        }
+        
+        body {
+            background-color: #030712;
+            background-image: 
+                radial-gradient(100% 100% at 50% 0%, rgba(14, 165, 233, 0.08) 0%, transparent 50%),
+                radial-gradient(100% 100% at 0% 100%, rgba(34, 211, 238, 0.05) 0%, transparent 50%);
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+        }
+        
+        canvas {
+            image-rendering: auto; /* Allow browser to decide for smoothness */
+            box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+            transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+    </style>
 </head>
-<body>
-  <div class="header">
-    <h1>OpsView</h1>
-    <div class="status">
-      <span class="status-dot" id="statusDot"></span>
-      <span id="statusText">Disconnected</span>
-    </div>
-    <div class="stats" id="stats"></div>
-  </div>
+<body class="text-slate-200 antialiased h-screen w-screen overflow-hidden flex flex-col relative">
 
-  <div class="canvas-wrap">
-    <canvas id="screen"></canvas>
-  </div>
+    <!-- Floating Glass Header -->
+    <header class="absolute top-4 inset-x-4 z-20 flex justify-between items-center px-6 py-3 bg-surface-100/60 backdrop-blur-xl border border-white/5 rounded-2xl shadow-xl shadow-black/20">
+        <div class="flex items-center gap-3">
+            <div class="p-1.5 bg-gradient-to-br from-brand-500 to-indigo-600 rounded-lg shadow-inner">
+                <i data-lucide="monitor-play" class="w-4 h-4 text-white"></i>
+            </div>
+            <h1 class="text-sm font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent tracking-wide">
+                OpsView Viewer
+            </h1>
+        </div>
+        
+        <div class="flex items-center gap-6">
+            <div id="stats" class="text-xs font-mono text-slate-400 hidden sm:block"></div>
+            
+            <div class="flex items-center gap-2 px-3 py-1.5 bg-black/40 rounded-full border border-white/5">
+                <span id="statusDot" class="status-dot"></span>
+                <span id="statusText" class="text-xs font-medium text-slate-300 tracking-wide uppercase">Disconnected</span>
+            </div>
+        </div>
+    </header>
 
-  <div class="settings">
-    <label>Relay:</label>
-    <input type="text" id="relayUrl" value="ws://127.0.0.1:8080/watch" style="width:260px">
-    <label>Token:</label>
-    <input type="password" id="token" value="dev-watcher-token" style="width:140px">
-    <button id="connectBtn" onclick="toggleConnection()">Connect</button>
-  </div>
+    <!-- Canvas Area -->
+    <main class="flex-1 w-full h-full flex items-center justify-center p-6 relative z-10 pt-24 pb-28">
+        <!-- Canvas wrapper is required for logic -->
+        <div class="canvas-wrap w-full h-full flex items-center justify-center">
+            <canvas id="screen" class="max-w-full max-h-full object-contain"></canvas>
+        </div>
+    </main>
 
-  <!-- fzstd: lightweight zstd decompressor for browsers -->
-  <script src="https://cdn.jsdelivr.net/npm/fzstd@0.1.1/umd/index.js"></script>
-  <script src="viewer.js"></script>
+    <!-- Bottom Floating Settings Bar -->
+    <footer class="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 w-fit max-w-[90%] px-2 py-2 bg-surface-100/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl shadow-black/40 flex flex-wrap sm:flex-nowrap items-center gap-3">
+        <div class="flex items-center gap-2 px-3 py-2 bg-black/30 border border-white/5 rounded-xl sm:flex-none">
+            <i data-lucide="monitor" class="w-3.5 h-3.5 text-slate-400"></i>
+            <input type="text" id="relayIp" value="127.0.0.1" 
+                   class="bg-transparent border-none outline-none text-[13px] text-slate-200 w-full sm:w-[140px] placeholder-slate-600 focus:ring-0" 
+                   placeholder="IP Address">
+            <span class="text-slate-500 font-bold">:</span>
+            <input type="text" id="relayPort" value="8080" 
+                   class="bg-transparent border-none outline-none text-[13px] text-slate-200 w-full sm:w-[50px] placeholder-slate-600 focus:ring-0 text-center" 
+                   placeholder="Port">
+        </div>
+        
+        <div class="flex items-center gap-2 px-3 py-2 bg-black/30 border border-white/5 rounded-xl flex-1 sm:flex-none">
+            <i data-lucide="key-round" class="w-3.5 h-3.5 text-slate-400"></i>
+            <input type="text" id="token" placeholder="6-digit PIN" 
+                   class="bg-transparent border-none outline-none text-[13px] text-slate-200 w-full sm:w-[120px] placeholder-slate-600 focus:ring-0 tracking-widest font-mono">
+        </div>
+        
+        <button id="connectBtn" onclick="toggleConnection()" class="btn-primary px-5 py-2 rounded-xl flex items-center justify-center min-w-[120px] h-[38px]">
+            <!-- JS updates the text content to 'Connect' or 'Disconnect', so we don't put text inside a span -->
+            Connect
+        </button>
+    </footer>
+
+    <!-- Initialize icons -->
+    <script>
+        lucide.createIcons();
+    </script>
+
+    <!-- fzstd: lightweight zstd decompressor for browsers -->
+    <script src="https://cdn.jsdelivr.net/npm/fzstd@0.1.1/umd/index.js"></script>
+    <script src="viewer.js"></script>
 </body>
 </html>

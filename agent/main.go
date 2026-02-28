@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,6 +63,34 @@ func loadOrCreateAgentToken() (string, error) {
 		log.Printf("[agent] loaded token from %s", tokenPath)
 	}
 	return token, nil
+}
+
+func loadOrCreateAgentPIN() (string, error) {
+	appData := os.Getenv("APPDATA")
+	if appData == "" {
+		home, _ := os.UserHomeDir()
+		appData = filepath.Join(home, "AppData", "Roaming")
+	}
+	pinPath := filepath.Join(appData, "opsview-agent", "agent_pin.txt")
+
+	b, err := os.ReadFile(pinPath)
+	if err == nil {
+		pin := strings.TrimSpace(string(b))
+		if len(pin) == 6 {
+			return pin, nil
+		}
+	}
+
+	// Generate 6-digit PIN
+	pinInt, err := rand.Int(rand.Reader, big.NewInt(1000000))
+	if err != nil {
+		return "", err
+	}
+	pin := fmt.Sprintf("%06d", pinInt.Int64())
+
+	os.MkdirAll(filepath.Dir(pinPath), 0755)
+	os.WriteFile(pinPath, []byte(pin+"\n"), 0644)
+	return pin, nil
 }
 
 func defaultAgentTokenPath() string {
