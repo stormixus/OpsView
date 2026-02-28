@@ -1,6 +1,8 @@
 name: Release
 
 on:
+  release:
+    types: [published]
   push:
     tags:
       - "v*"
@@ -32,7 +34,7 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
-          $tag = "$env:GITHUB_REF" -replace '^refs/tags/v', ''
+          $tag = "${{ github.event.release.tag_name || github.ref_name }}" -replace '^v', ''
           & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' "/DMyAppVersion=$tag" agent\installer.iss
 
       - uses: actions/upload-artifact@v4
@@ -93,7 +95,7 @@ jobs:
         shell: bash
         run: |
           cd viewer
-          TAG="${GITHUB_REF#refs/tags/}"
+          TAG="${{ github.event.release.tag_name || github.ref_name }}"
           wails build ${{ matrix.wails_flags }} -platform ${{ matrix.goos }}/${{ matrix.goarch }} -ldflags "-X main.Version=$TAG"
 
       - name: Download Real-ESRGAN
@@ -224,7 +226,7 @@ jobs:
 
       - name: Extract tag
         id: tag
-        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${{ github.event.release.tag_name || github.ref_name }}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push relay image
         uses: docker/build-push-action@v6
@@ -250,7 +252,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.release.tag_name || github.ref_name }}
           generate_release_notes: true
+          append_body: true
           files: |
             artifacts/*.dmg
             artifacts/*-setup.exe
