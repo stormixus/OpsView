@@ -148,6 +148,11 @@ jobs:
         env:
           HAS_CERT: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 != '' }}
         run: |
+          # Sign third-party esrgan binary first
+          codesign --force --options runtime \
+            --sign "${{ secrets.APPLE_SIGNING_IDENTITY }}" \
+            viewer/build/bin/opsview-viewer.app/Contents/Resources/esrgan/realesrgan-ncnn-vulkan
+          # Sign the entire app bundle
           codesign --deep --force --options runtime \
             --sign "${{ secrets.APPLE_SIGNING_IDENTITY }}" \
             --entitlements viewer/build/entitlements.plist \
