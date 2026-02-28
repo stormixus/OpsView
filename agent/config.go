@@ -10,7 +10,6 @@ import (
 // Config represents the JSON configuration stored at %APPDATA%/opsview-agent/config.json.
 type Config struct {
 	RelayURL  string `json:"relay_url"`
-	Token     string `json:"token"`
 	Profile   int    `json:"profile"`
 	AutoStart bool   `json:"auto_start"`
 }
@@ -18,7 +17,6 @@ type Config struct {
 func defaultConfig() Config {
 	return Config{
 		RelayURL:  "ws://127.0.0.1:8080/publish",
-		Token:     "",
 		Profile:   1080,
 		AutoStart: false,
 	}

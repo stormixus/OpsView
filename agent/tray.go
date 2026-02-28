@@ -111,27 +111,19 @@ func startAgent(cfg Config) {
 		return
 	}
 
+	pin, err := loadOrCreateAgentPIN()
+	if err != nil {
+		pin = "000000"
+		log.Printf("[tray] PIN auto-gen failed: %v", err)
+	}
+
 	agentCfg := AgentConfig{
 		RelayURL: cfg.RelayURL,
-		Token:    cfg.Token,
+		PIN:      pin,
 		Profile:  cfg.Profile,
 		FPSMin:   5,
 		FPSMax:   10,
 		TileSize: 128,
-	}
-
-	if agentCfg.Token == "" {
-		var err error
-		agentCfg.Token, err = loadOrCreateAgentToken()
-		if err != nil {
-			agentCfg.Token = "dev-publisher-token"
-			log.Printf("[tray] token auto-gen failed: %v", err)
-		} else {
-			cfg.Token = agentCfg.Token
-			if err := saveConfig(cfg); err != nil {
-				log.Printf("[tray] save token config failed: %v", err)
-			}
-		}
 	}
 
 	trayAgent = NewAgent(agentCfg)

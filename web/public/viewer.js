@@ -34,10 +34,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Load saved settings
   const savedIp = localStorage.getItem('opsview_relay_ip');
   const savedPort = localStorage.getItem('opsview_relay_port');
-  const savedToken = localStorage.getItem('opsview_token');
+  const savedPin = localStorage.getItem('opsview_pin');
   if (savedIp) document.getElementById('relayIp').value = savedIp;
   if (savedPort) document.getElementById('relayPort').value = savedPort;
-  if (savedToken) document.getElementById('token').value = savedToken;
+  if (savedPin) document.getElementById('pin').value = savedPin;
 
   // Stats update loop
   setInterval(updateStats, 1000);
@@ -55,16 +55,16 @@ function toggleConnection() {
 function connect() {
   const ip = document.getElementById('relayIp').value.trim();
   const port = document.getElementById('relayPort').value.trim();
-  const token = document.getElementById('token').value.trim();
+  const pin = document.getElementById('pin').value.trim();
 
   if (!ip || !port) return;
-  
+
   const url = `ws://${ip}:${port}/watch`;
 
   // Save settings
   localStorage.setItem('opsview_relay_ip', ip);
   localStorage.setItem('opsview_relay_port', port);
-  localStorage.setItem('opsview_token', token);
+  localStorage.setItem('opsview_pin', pin);
 
   setStatus('connecting', 'Connecting...');
 
@@ -88,7 +88,7 @@ function connect() {
     sendOVPMessage(MSG_HELLO, JSON.stringify(hello));
 
     // Send AUTH
-    const auth = { token: token };
+    const auth = { token: pin };
     sendOVPMessage(MSG_AUTH, JSON.stringify(auth));
 
     connected = true;

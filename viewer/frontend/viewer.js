@@ -38,7 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // --- Connection ---
 function connect() {
   const url = document.getElementById('relayUrl').value.trim();
-  const token = document.getElementById('token').value.trim();
+  const pin = document.getElementById('pin').value.trim();
 
   if (!url) return;
 
@@ -62,7 +62,7 @@ function connect() {
     };
     sendOVPMessage(MSG_HELLO, JSON.stringify(hello));
 
-    const auth = { token: token };
+    const auth = { token: pin };
     sendOVPMessage(MSG_AUTH, JSON.stringify(auth));
 
     connected = true;

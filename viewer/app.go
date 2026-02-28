@@ -24,12 +24,12 @@ func (a *App) GetConfig() map[string]string {
 	if url == "" {
 		url = "ws://127.0.0.1:8080/watch"
 	}
-	token := os.Getenv("WATCH_TOKEN")
-	if token == "" {
-		token = "dev-watcher-token"
+	pin := os.Getenv("WATCH_PIN")
+	if pin == "" {
+		pin = ""
 	}
 	return map[string]string{
-		"url":   url,
-		"token": token,
+		"url": url,
+		"pin": pin,
 	}
 }

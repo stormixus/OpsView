@@ -275,7 +275,7 @@
         </div>
         <div class="flex flex-col gap-1">
           <label class="text-gray-500 text-[11px]">PIN 번호</label>
-          <input type="text" id="token" placeholder="6자리 PIN (예: 482193)"
+          <input type="text" id="pin" placeholder="6자리 PIN (예: 482193)"
             class="w-full bg-surface-50/80 text-gray-200 border border-white/[0.06] rounded-lg px-3 py-2 text-[12px] focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 outline-none transition-all placeholder-gray-600">
         </div>
         <div class="btn-row flex gap-2 mt-1">
@@ -485,11 +485,11 @@
     (function initOpsConfig() {
       const savedIp = localStorage.getItem('opsview_relay_ip');
       const savedPort = localStorage.getItem('opsview_relay_port');
-      const savedToken = localStorage.getItem('opsview_token');
+      const savedPin = localStorage.getItem('opsview_pin');
       const savedFallback = localStorage.getItem('opsview_fallback_url');
       if (savedIp) document.getElementById('relayIp').value = savedIp;
       if (savedPort) document.getElementById('relayPort').value = savedPort;
-      if (savedToken) document.getElementById('token').value = savedToken;
+      if (savedPin) document.getElementById('pin').value = savedPin;
       if (savedFallback) document.getElementById('fallbackUrl').value = savedFallback;
       // Wails backend config as fallback (only if no localStorage values)
       if (window.go && window.go.main && window.go.main.App) {
@@ -502,7 +502,7 @@
                 document.getElementById('relayPort').value = urlObj.port || (urlObj.protocol === 'wss:' ? '443' : '80');
              } catch(e) {}
           }
-          if (!savedToken && cfg.token) document.getElementById('token').value = cfg.token;
+          if (!savedPin && cfg.pin) document.getElementById('pin').value = cfg.pin;
         });
       }
     })();
@@ -532,7 +532,7 @@
       opsDisconnect();
     }
 
-    // This function is moved from viewer.js and modified to take ip, port, token
+    // This function is moved from viewer.js and modified to take ip, port, pin
     // and construct the URL.
     let ws = null;
     let connected = false;
@@ -557,7 +557,7 @@
     function connect() {
       const ip = document.getElementById('relayIp').value.trim();
       const port = document.getElementById('relayPort').value.trim();
-      const token = document.getElementById('token').value.trim();
+      const pin = document.getElementById('pin').value.trim();
 
       if (!ip || !port) {
         setStatus('error', 'IP와 포트를 입력하세요');
@@ -579,9 +579,9 @@
         reconnectAttempts = 0;
         clearTimeout(reconnectTimeout);
         setStatus('connected', '연결됨');
-        // Send token if available
-        if (token) {
-          ws.send(JSON.stringify({ type: 'auth', token: token }));
+        // Send PIN if available
+        if (pin) {
+          ws.send(JSON.stringify({ type: 'auth', token: pin }));
         }
       };
 
@@ -626,7 +626,7 @@
     function opsConnect() {
       const ip = document.getElementById('relayIp').value.trim();
       const port = document.getElementById('relayPort').value.trim();
-      const token = document.getElementById('token').value.trim();
+      const pin = document.getElementById('pin').value.trim();
 
       if (!ip || !port) {
         document.getElementById('opsRelayStatus').textContent = 'IP와 포트를 입력하세요';
@@ -635,7 +635,7 @@
       }
       localStorage.setItem('opsview_relay_ip', ip);
       localStorage.setItem('opsview_relay_port', port);
-      localStorage.setItem('opsview_token', token);
+      localStorage.setItem('opsview_pin', pin);
       localStorage.setItem('opsview_ops_mode', 'relay');
       document.getElementById('opsRelayStatus').textContent = '연결 중...';
       document.getElementById('opsRelayStatus').style.color = '#eab308';

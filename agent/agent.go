@@ -101,7 +101,7 @@ func (a *Agent) connect() error {
 	}
 
 	// Send AUTH
-	auth := proto.Auth{Token: a.cfg.Token}
+	auth := proto.Auth{Token: a.cfg.PIN}
 	authPayload, _ := json.Marshal(auth)
 	authMsg := proto.MarshalMessage(proto.MsgAuth, authPayload)
 	if err := conn.WriteMessage(websocket.BinaryMessage, authMsg); err != nil {
