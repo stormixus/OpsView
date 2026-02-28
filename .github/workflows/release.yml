@@ -96,6 +96,38 @@ jobs:
           TAG="${GITHUB_REF#refs/tags/}"
           wails build ${{ matrix.wails_flags }} -platform ${{ matrix.goos }}/${{ matrix.goarch }} -ldflags "-X main.Version=$TAG"
 
+      - name: Download Real-ESRGAN
+        shell: bash
+        run: |
+          ESRGAN_VER="20220424"
+          case "${{ matrix.goos }}" in
+            darwin)  ESRGAN_OS="macos" ;;
+            windows) ESRGAN_OS="windows" ;;
+            linux)   ESRGAN_OS="ubuntu" ;;
+          esac
+          curl -L "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-${ESRGAN_VER}-${ESRGAN_OS}.zip" -o esrgan.zip
+          mkdir -p esrgan
+          unzip -o esrgan.zip -d esrgan-tmp
+          cp esrgan-tmp/realesrgan-ncnn-vulkan* esrgan/ || true
+          cp -r esrgan-tmp/models esrgan/
+          rm -rf esrgan-tmp esrgan.zip
+
+      - name: Package viewer (Windows)
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          Copy-Item "viewer/build/bin/opsview-viewer-amd64-installer.exe" "${{ matrix.artifact }}-setup.exe"
+          New-Item -ItemType Directory -Force -Path dist-esrgan/esrgan | Out-Null
+          Copy-Item -Recurse esrgan/* dist-esrgan/esrgan/
+          Compress-Archive -Path dist-esrgan/esrgan -DestinationPath "${{ matrix.artifact }}-esrgan.zip"
+
+      - name: Bundle Real-ESRGAN into app (macOS)
+        if: matrix.goos == 'darwin'
+        run: |
+          mkdir -p "viewer/build/bin/opsview-viewer.app/Contents/Resources/esrgan"
+          cp esrgan/realesrgan-ncnn-vulkan "viewer/build/bin/opsview-viewer.app/Contents/Resources/esrgan/"
+          cp -r esrgan/models "viewer/build/bin/opsview-viewer.app/Contents/Resources/esrgan/"
+
       - name: Import signing certificate
         if: matrix.goos == 'darwin' && env.HAS_CERT == 'true'
         env:
@@ -135,40 +167,12 @@ jobs:
           xcrun stapler staple viewer/build/bin/opsview-viewer.app
           rm notarize.zip
 
-      - name: Download Real-ESRGAN
-        shell: bash
-        run: |
-          ESRGAN_VER="20220424"
-          case "${{ matrix.goos }}" in
-            darwin)  ESRGAN_OS="macos" ;;
-            windows) ESRGAN_OS="windows" ;;
-            linux)   ESRGAN_OS="ubuntu" ;;
-          esac
-          curl -L "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-${ESRGAN_VER}-${ESRGAN_OS}.zip" -o esrgan.zip
-          mkdir -p esrgan
-          unzip -o esrgan.zip -d esrgan-tmp
-          cp esrgan-tmp/realesrgan-ncnn-vulkan* esrgan/ || true
-          cp -r esrgan-tmp/models esrgan/
-          rm -rf esrgan-tmp esrgan.zip
-
-      - name: Package viewer (Windows)
-        if: matrix.goos == 'windows'
-        shell: pwsh
-        run: |
-          Copy-Item "viewer/build/bin/opsview-viewer-amd64-installer.exe" "${{ matrix.artifact }}-setup.exe"
-          New-Item -ItemType Directory -Force -Path dist-esrgan/esrgan | Out-Null
-          Copy-Item -Recurse esrgan/* dist-esrgan/esrgan/
-          Compress-Archive -Path dist-esrgan/esrgan -DestinationPath "${{ matrix.artifact }}-esrgan.zip"
-
       - name: Package viewer (macOS)
         if: matrix.goos == 'darwin'
         run: |
           mkdir -p dmg-stage
           cp -R viewer/build/bin/opsview-viewer.app dmg-stage/
           ln -s /Applications dmg-stage/Applications
-          mkdir -p "dmg-stage/opsview-viewer.app/Contents/Resources/esrgan"
-          cp esrgan/realesrgan-ncnn-vulkan "dmg-stage/opsview-viewer.app/Contents/Resources/esrgan/"
-          cp -r esrgan/models "dmg-stage/opsview-viewer.app/Contents/Resources/esrgan/"
           hdiutil create -volname "OpsView Viewer" \
             -srcfolder dmg-stage \
             -ov -format UDZO \
