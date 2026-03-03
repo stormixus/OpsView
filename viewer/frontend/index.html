@@ -595,6 +595,9 @@
       opsWs.onopen = () => {
         console.log('WebSocket Connected');
         opsConnected = true;
+        // Bridge to viewer.js globals so frame rendering + stats work
+        ws = opsWs;
+        connected = true;
         reconnectAttempts = 0;
         clearTimeout(reconnectTimeout);
         setStatus('connected', '연결됨');
@@ -634,14 +637,9 @@
               cb(resp.error ? null : resp.data, resp.error || null);
             }
           } catch (e) { console.error('[surv] snapshot parse error:', e); }
-        } else if (msgType === 7) { // MsgError
-          const payload = new Uint8Array(buf, OVP_HEADER_SIZE, payloadLen);
-          const text = new TextDecoder().decode(payload);
-          try {
-            const err = JSON.parse(text);
-            console.error('[ovp] error:', err.code, err.message);
-            setStatus('error', err.message);
-          } catch (e) { console.error('[ovp] error:', text); }
+        } else {
+          // Forward all other messages (frames, errors, heartbeat) to viewer.js
+          handleBinaryMessage(buf);
         }
       };
 
@@ -670,6 +668,9 @@
         opsWs = null;
       }
       opsConnected = false;
+      // Sync viewer.js globals
+      ws = null;
+      connected = false;
       reconnectAttempts = 0;
       clearTimeout(reconnectTimeout);
       setStatus('disconnected', '연결 끊김');
