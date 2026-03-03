@@ -304,11 +304,12 @@ const htmlTemplate = `
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OpsView Agent Configuration</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>tailwind.config={theme:{fontFamily:{sans:['"Segoe UI"','"Malgun Gothic"','-apple-system','BlinkMacSystemFont','Roboto','Helvetica','Arial','sans-serif']}}}</script>
     <style>
         body {
             background-color: #0F172A;
             color: #F8FAFC;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: "Segoe UI", "Malgun Gothic", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
             background-image: radial-gradient(circle at 50% 0%, #1E293B, #0F172A 70%);
             min-height: 100vh;
         }

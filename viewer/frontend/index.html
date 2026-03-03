@@ -565,6 +565,14 @@
           default: el.style.color = '#9ca3af'; // gray
         }
       }
+      // Update the status dot in the top bar
+      const dot = document.getElementById('statusDot');
+      if (dot) {
+        dot.className = 'dot';
+        if (status === 'connected') dot.classList.add('on');
+        else if (status === 'connecting') dot.classList.add('warn');
+        else if (status === 'error' || status === 'disconnected') dot.classList.add('err');
+      }
     }
 
     function connect() {
