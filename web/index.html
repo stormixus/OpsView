@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpsView Web Viewer</title>
+    <script src="https://unpkg.com/lucide@0.460.0"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fzstd@0.1.1/umd/index.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        surface: { 50: '#070f1a', 100: '#0d1829', 200: '#14233a', 300: '#1e3048' },
+                        brand: { 400: '#38bdf8', 500: '#0ea5e9', 600: '#0284c7' }
+                    },
+                    fontFamily: {
+                        sans: ['Pretendard Variable', '-apple-system', 'sans-serif'],
+                        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #030712;
+            background-image:
+                radial-gradient(100% 100% at 50% 0%, rgba(14,165,233,0.08) 0%, transparent 50%),
+                radial-gradient(100% 100% at 0% 100%, rgba(34,211,238,0.05) 0%, transparent 50%);
+        }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #475569; transition: all 0.3s; }
+        .status-dot.connected { background: #10b981; box-shadow: 0 0 12px rgba(16,185,129,0.8); }
+        .status-dot.connecting { background: #f59e0b; animation: pulse 1.5s infinite; box-shadow: 0 0 12px rgba(245,158,11,0.6); }
+        .status-dot.error { background: #f43f5e; box-shadow: 0 0 12px rgba(244,63,94,0.8); }
+        @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.5 } }
+        canvas { image-rendering: auto; box-shadow: 0 0 40px rgba(0,0,0,0.5); border-radius: 8px; }
+        .tab { cursor: pointer; padding: 8px 16px; font-size: 13px; color: #64748b; border-bottom: 2px solid transparent; transition: all 0.2s; }
+        .tab:hover { color: #cbd5e1; }
+        .tab.active { color: #38bdf8; border-color: #38bdf8; }
+        .surv-cell { position: relative; background: #0a0f1a; border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; overflow: hidden; aspect-ratio: 16/9; }
+        .surv-cell img, .surv-cell video { width: 100%; height: 100%; object-fit: cover; background: #000; }
+        .surv-cell .label { position: absolute; bottom: 0; left: 0; right: 0; padding: 4px 8px; background: rgba(0,0,0,0.7); font-size: 11px; color: #94a3b8; }
+        .glass { background: rgba(13,24,41,0.8); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.05); }
+        .error-toast { position: fixed; top: 80px; left: 50%; transform: translateX(-50%); z-index: 100; padding: 12px 24px; background: rgba(244,63,94,0.9); color: white; border-radius: 12px; font-size: 13px; display: none; backdrop-filter: blur(8px); }
+    </style>
+</head>
+<body class="text-slate-200 antialiased h-screen w-screen overflow-hidden flex flex-col">
+
+    <!-- Error Toast -->
+    <div id="errorToast" class="error-toast"></div>
+
+    <!-- Header -->
+    <header class="absolute top-4 inset-x-4 z-20 flex justify-between items-center px-6 py-3 glass rounded-2xl shadow-xl">
+        <div class="flex items-center gap-3">
+            <div class="p-1.5 bg-gradient-to-br from-brand-500 to-indigo-600 rounded-lg">
+                <i data-lucide="monitor-play" class="w-4 h-4 text-white"></i>
+            </div>
+            <h1 class="text-sm font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent tracking-wide">OpsView</h1>
+        </div>
+
+        <!-- Tabs -->
+        <div class="flex items-center gap-1">
+            <div class="tab active" data-panel="ops" onclick="switchTab('ops')">
+                <i data-lucide="monitor" class="w-3.5 h-3.5 inline mr-1"></i>Ops
+            </div>
+            <div class="tab" data-panel="surv" onclick="switchTab('surv')">
+                <i data-lucide="camera" class="w-3.5 h-3.5 inline mr-1"></i>Cameras
+            </div>
+        </div>
+
+        <div class="flex items-center gap-4">
+            <div id="stats" class="text-xs font-mono text-slate-400 hidden sm:block"></div>
+            <div class="flex items-center gap-2 px-3 py-1.5 bg-black/40 rounded-full border border-white/5">
+                <span id="statusDot" class="status-dot"></span>
+                <span id="statusText" class="text-xs font-medium text-slate-300 tracking-wide uppercase">Disconnected</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Ops Panel -->
+    <div id="panel-ops" class="flex-1 w-full h-full flex items-center justify-center p-6 pt-24 pb-28">
+        <div class="w-full h-full flex items-center justify-center">
+            <canvas id="screen" class="max-w-full max-h-full object-contain"></canvas>
+        </div>
+    </div>
+
+    <!-- Surveillance Panel -->
+    <div id="panel-surv" class="flex-1 w-full h-full flex flex-col pt-20 pb-24 overflow-hidden" style="display:none">
+        <!-- DVR Tabs Bar -->
+        <div class="flex items-center gap-1 px-4 py-2 border-b border-white/5 bg-surface-50/50 flex-shrink-0">
+            <div id="dvrTabs" class="flex items-center gap-1 overflow-x-auto flex-1"></div>
+            <button onclick="showAddDVRForm()" class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-emerald-400 rounded-md hover:bg-emerald-500/10 transition-all font-medium whitespace-nowrap">
+                <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> Add DVR
+            </button>
+        </div>
+
+        <!-- Add/Edit DVR Form (hidden by default) -->
+        <div id="dvrForm" style="display:none" class="px-4 py-3 border-b border-white/5 bg-surface-100/60 flex-shrink-0">
+            <div class="max-w-3xl mx-auto space-y-3">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-sm font-medium text-slate-300" id="dvrFormTitle">Add DVR</h3>
+                    <button onclick="hideDVRForm()" class="text-slate-500 hover:text-slate-300 transition-colors">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
+                <div class="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                    <input type="text" id="dvrName" placeholder="Name" value="DVR-1" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600">
+                    <input type="text" id="dvrAddr" placeholder="IP Address" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600">
+                    <input type="number" id="dvrPort" value="80" placeholder="Port" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600 w-full">
+                    <input type="text" id="dvrUser" placeholder="Username" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600">
+                    <input type="password" id="dvrPass" placeholder="Password" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600">
+                    <select id="dvrChannels" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[12px] text-slate-300 outline-none">
+                        <option value="4">4ch</option>
+                        <option value="8">8ch</option>
+                        <option value="16" selected>16ch</option>
+                        <option value="32">32ch</option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-2">
+                    <select id="dvrProto" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[12px] text-slate-300 outline-none">
+                        <option value="isapi">ISAPI Snapshot</option>
+                        <option value="rtsp-hls">RTSP → HLS</option>
+                    </select>
+                    <select id="dvrQuality" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[12px] text-slate-300 outline-none">
+                        <option value="01">Main Stream</option>
+                        <option value="02" selected>Sub Stream</option>
+                    </select>
+                    <div class="flex-1"></div>
+                    <button onclick="saveDVR()" class="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-[12px] rounded-lg transition-colors font-medium">
+                        <i data-lucide="check" class="w-3.5 h-3.5"></i> Save & Generate
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Surv Grid -->
+        <div id="survGrid" class="flex-1 grid gap-1.5 p-2 overflow-y-auto bg-black/30 align-content-start" style="grid-template-columns: repeat(4, 1fr)"></div>
+
+        <!-- Empty state -->
+        <div id="survEmpty" class="flex-1 flex items-center justify-center text-slate-500 text-sm gap-2">
+            <i data-lucide="camera-off" class="w-5 h-5"></i>
+            No cameras configured. Click "Add DVR" to get started.
+        </div>
+    </div>
+
+    <!-- Bottom Settings Bar -->
+    <footer class="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 w-fit max-w-[90%] px-2 py-2 glass rounded-2xl shadow-2xl flex flex-wrap sm:flex-nowrap items-center gap-3">
+        <div class="flex items-center gap-1">
+            <select id="proto" class="bg-black/30 border border-white/5 rounded-lg px-2 py-2 text-[13px] text-slate-200 outline-none">
+                <option value="ws">ws://</option>
+                <option value="wss">wss://</option>
+            </select>
+        </div>
+        <div class="flex items-center gap-2 px-3 py-2 bg-black/30 border border-white/5 rounded-xl">
+            <i data-lucide="server" class="w-3.5 h-3.5 text-slate-400"></i>
+            <input type="text" id="relayIp" value="127.0.0.1"
+                   class="bg-transparent border-none outline-none text-[13px] text-slate-200 w-[130px] placeholder-slate-600" placeholder="IP">
+            <span class="text-slate-500 font-bold">:</span>
+            <input type="text" id="relayPort" value="8080"
+                   class="bg-transparent border-none outline-none text-[13px] text-slate-200 w-[50px] placeholder-slate-600 text-center" placeholder="Port">
+        </div>
+        <div class="flex items-center gap-2 px-3 py-2 bg-black/30 border border-white/5 rounded-xl">
+            <i data-lucide="key-round" class="w-3.5 h-3.5 text-slate-400"></i>
+            <input type="text" id="pin" placeholder="6-digit PIN"
+                   class="bg-transparent border-none outline-none text-[13px] text-slate-200 w-[120px] placeholder-slate-600 tracking-widest font-mono">
+        </div>
+        <button id="connectBtn" onclick="toggleConnection()"
+            class="px-5 py-2 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 text-white font-semibold text-[13px] tracking-wide transition-all shadow-lg shadow-brand-500/20 min-w-[110px]">
+            Connect
+        </button>
+    </footer>
+
+    <script>lucide.createIcons();</script>
+    <script src="viewer.js"></script>
+</body>
+</html>
