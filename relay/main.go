@@ -25,6 +25,8 @@ func runServer() (stop func()) {
 	mux.HandleFunc("/health", hub.HandleHealth)
 	mux.HandleFunc("/metrics", hub.HandleMetrics)
 	mux.HandleFunc("/api/surv", hub.HandleSurvConfig)
+	mux.HandleFunc("/api/surv/streams", hub.HandleSurvStreams)
+	mux.HandleFunc("/surv/", hub.survProxy.ServeHLS)
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: mux}
 

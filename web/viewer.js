@@ -32,6 +32,8 @@ let reconnectTimer = null;
 
 // Surv state
 let survPlayers = {}; // id -> { hls, interval }
+let relayStreams = []; // from /api/surv/streams
+let survMode = 'auto'; // 'auto' (relay HLS) or 'manual' (local DVR config)
 
 // --- Init ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -54,6 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   setInterval(updateStats, 1000);
+  applyI18n();
 });
 
 // --- Tabs ---
@@ -90,7 +93,7 @@ function connect() {
   const pin = document.getElementById('pin').value.trim();
 
   if (!ip || !port) {
-    showError('Please enter IP and port');
+    showError(t('enterIpPort'));
     return;
   }
 
@@ -102,7 +105,7 @@ function connect() {
   localStorage.setItem('opsview_pin', pin);
   localStorage.setItem('opsview_proto', proto);
 
-  setStatus('connecting', 'Connecting...');
+  setStatus('connecting', t('connecting'));
 
   if (ws) { ws.close(); ws = null; }
 
@@ -110,8 +113,8 @@ function connect() {
     ws = new WebSocket(url);
     ws.binaryType = 'arraybuffer';
   } catch (e) {
-    setStatus('error', 'Invalid URL');
-    showError('Invalid WebSocket URL');
+    setStatus('error', t('invalidUrl'));
+    showError(t('invalidUrl'));
     return;
   }
 
@@ -119,9 +122,14 @@ function connect() {
     connected = true;
     reconnectAttempts = 0;
     clearTimeout(reconnectTimer);
-    setStatus('connected', 'Connected');
-    document.getElementById('connectBtn').textContent = 'Disconnect';
+    setStatus('connected', t('connected'));
+    document.getElementById('connectBtnText').textContent = t('disconnect');
     document.getElementById('connectBtn').classList.add('!from-rose-600', '!to-rose-500');
+
+    // Fetch relay HLS streams on connect
+    if (survMode === 'auto') {
+      setTimeout(fetchRelayStreams, 1000);
+    }
 
     // Send OVP HELLO + AUTH
     const hello = {
@@ -159,10 +167,10 @@ function connect() {
         const err = JSON.parse(text);
         const msg = `Error ${err.code || ''}: ${err.message || text}`;
         console.error('[ovp]', msg);
-        setStatus('error', err.message || 'Error');
+        setStatus('error', err.message || t('connError'));
         showError(msg);
       } catch (e) {
-        showError('Server error: ' + text);
+        showError(t('serverError') + ': ' + text);
       }
     } else if (msgType === MSG_SURV_CONFIG) {
       const payload = new Uint8Array(buf, OVP_HEADER_SIZE, payloadLen);
@@ -178,21 +186,21 @@ function connect() {
 
   ws.onclose = () => {
     connected = false;
-    document.getElementById('connectBtn').textContent = 'Connect';
+    document.getElementById('connectBtnText').textContent = t('connect');
     document.getElementById('connectBtn').classList.remove('!from-rose-600', '!to-rose-500');
 
     if (reconnectAttempts < MAX_RECONNECT) {
       reconnectAttempts++;
-      setStatus('connecting', `Reconnecting (${reconnectAttempts}/${MAX_RECONNECT})...`);
+      setStatus('connecting', `${t('reconnecting')} (${reconnectAttempts}/${MAX_RECONNECT})...`);
       reconnectTimer = setTimeout(connect, 3000);
     } else {
-      setStatus('error', 'Disconnected');
+      setStatus('error', t('disconnected'));
     }
     ws = null;
   };
 
   ws.onerror = () => {
-    setStatus('error', 'Connection error');
+    setStatus('error', t('connError'));
   };
 }
 
@@ -201,8 +209,8 @@ function disconnect() {
   clearTimeout(reconnectTimer);
   if (ws) { ws.close(); ws = null; }
   connected = false;
-  setStatus('error', 'Disconnected');
-  document.getElementById('connectBtn').textContent = 'Connect';
+  setStatus('error', t('disconnected'));
+  document.getElementById('connectBtnText').textContent = t('connect');
   document.getElementById('connectBtn').classList.remove('!from-rose-600', '!to-rose-500');
 }
 
@@ -331,7 +339,104 @@ function saveDVRData() {
 
 function handleSurvConfig(cfg) {
   console.log('[surv] config received:', cfg);
-  // Could merge remote DVR configs here in the future
+  if (survMode === 'auto') {
+    fetchRelayStreams();
+  }
+}
+
+// --- Relay HLS auto mode ---
+function getHttpBase() {
+  const proto = document.getElementById('proto').value === 'wss' ? 'https' : 'http';
+  const ip = document.getElementById('relayIp').value.trim();
+  const port = document.getElementById('relayPort').value.trim();
+  return `${proto}://${ip}:${port}`;
+}
+
+function fetchRelayStreams() {
+  const base = getHttpBase();
+  fetch(`${base}/api/surv/streams`)
+    .then(r => r.json())
+    .then(streams => {
+      relayStreams = streams || [];
+      if (survMode === 'auto') renderRelayGrid();
+    })
+    .catch(err => console.log('[surv] streams fetch error:', err));
+}
+
+function renderRelayGrid() {
+  const grid = document.getElementById('survGrid');
+  const empty = document.getElementById('survEmpty');
+
+  if (relayStreams.length === 0) {
+    empty.style.display = 'flex';
+    grid.style.display = 'none';
+    empty.innerHTML = '<i data-lucide="camera-off" class="w-5 h-5"></i> ' + t('waitingStreams');
+    lucide.createIcons();
+    return;
+  }
+
+  empty.style.display = 'none';
+  grid.style.display = 'grid';
+
+  const cols = relayStreams.length <= 4 ? 2 : relayStreams.length <= 9 ? 3 : 4;
+  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+
+  stopAllStreams();
+
+  grid.innerHTML = relayStreams.map(s => `
+    <div class="surv-cell" id="cell-relay-${s.id}">
+      <div class="label">
+        <span class="text-slate-300 font-medium">${s.name || s.id}</span>
+        <span class="text-emerald-500 text-[9px] ml-2">${t('live')}</span>
+      </div>
+    </div>
+  `).join('');
+
+  const base = getHttpBase();
+  relayStreams.forEach(s => {
+    const cellId = `relay-${s.id}`;
+    const cell = document.getElementById('cell-' + cellId);
+    if (!cell) return;
+
+    const hlsUrl = `${base}/surv/${s.id}/index.m3u8`;
+    const video = document.createElement('video');
+    video.autoplay = true; video.muted = true; video.playsInline = true;
+    cell.prepend(video);
+
+    if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+      const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+      hls.loadSource(hlsUrl);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (data.fatal) console.error('[surv] HLS error:', data);
+      });
+      survPlayers[cellId] = { hls };
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = hlsUrl; video.play();
+      survPlayers[cellId] = {};
+    }
+  });
+}
+
+function setSurvMode(mode) {
+  survMode = mode;
+  stopAllStreams();
+
+  document.querySelectorAll('.surv-mode-btn').forEach(b => b.classList.remove('active-mode'));
+  const btn = document.querySelector(`.surv-mode-btn[data-mode="${mode}"]`);
+  if (btn) btn.classList.add('active-mode');
+
+  const dvrBar = document.getElementById('dvrManualBar');
+
+  if (mode === 'auto') {
+    dvrBar.style.display = 'none';
+    fetchRelayStreams();
+  } else {
+    dvrBar.style.display = 'flex';
+    renderDVRTabs();
+    if (activeDvrId) renderSurvGrid();
+  }
 }
 
 // --- DVR Tabs ---
@@ -393,7 +498,7 @@ let editingDvrId = null;
 
 function showAddDVRForm() {
   editingDvrId = null;
-  document.getElementById('dvrFormTitle').textContent = 'Add DVR';
+  document.getElementById('dvrFormTitle').textContent = t('addDvrTitle');
   document.getElementById('dvrName').value = 'DVR-' + (dvrs.length + 1);
   document.getElementById('dvrAddr').value = '';
   document.getElementById('dvrPort').value = '80';
@@ -410,7 +515,7 @@ function showEditDVRForm(id) {
   const d = dvrs.find(x => x.id === id);
   if (!d) return;
   editingDvrId = id;
-  document.getElementById('dvrFormTitle').textContent = 'Edit DVR';
+  document.getElementById('dvrFormTitle').textContent = t('editDvrTitle');
   document.getElementById('dvrName').value = d.name;
   document.getElementById('dvrAddr').value = d.addr;
   document.getElementById('dvrPort').value = d.port;
@@ -438,7 +543,7 @@ function saveDVR() {
   const proto = document.getElementById('dvrProto').value;
   const quality = document.getElementById('dvrQuality').value;
 
-  if (!addr) { showError('Please enter DVR IP address'); return; }
+  if (!addr) { showError(t('enterIpPort')); return; }
 
   const auth = user ? `${encodeURIComponent(user)}:${encodeURIComponent(pass)}@` : '';
 
@@ -554,5 +659,5 @@ function stopAllStreams() {
 
 // --- Init Surv ---
 loadDVRData();
-renderDVRTabs();
-if (activeDvrId) renderSurvGrid();
+// Start in auto mode by default (relay HLS)
+setSurvMode('auto');

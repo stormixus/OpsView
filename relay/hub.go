@@ -48,6 +48,9 @@ type Hub struct {
 
 	// Watcher ID counter for snapshot routing
 	watcherIDSeq atomic.Uint32
+
+	// Surveillance RTSP→HLS proxy
+	survProxy *SurvProxy
 }
 
 // Watcher wraps a viewer WebSocket connection with a send queue.
@@ -64,6 +67,7 @@ func NewHub(cfg Config) *Hub {
 		watchers:  make(map[*Watcher]struct{}),
 		broadcast: make(chan []byte, 64),
 		done:      make(chan struct{}),
+		survProxy: NewSurvProxy(),
 	}
 	h.testPattern = NewTestPattern(h)
 	return h
@@ -191,6 +195,9 @@ func (h *Hub) HandlePublish(w http.ResponseWriter, r *http.Request) {
 			h.survConfigMu.Unlock()
 			log.Printf("[relay] cached surveillance config (%d bytes)", len(data))
 			h.broadcast <- data
+
+			// Start RTSP→HLS proxy streams
+			h.survProxy.HandleSurvConfig(data[proto.HeaderSize:])
 
 		case proto.MsgSurvSnapshot:
 			// Snapshot response from publisher — route to specific watcher
@@ -481,12 +488,20 @@ func sendError(conn *websocket.Conn, code int, message string) {
 // Stop signals the hub to shut down.
 func (h *Hub) Stop() {
 	h.testPattern.Stop()
+	h.survProxy.StopAll()
 	select {
 	case <-h.done:
 		// already closed
 	default:
 		close(h.done)
 	}
+}
+
+// HandleSurvStreams returns the list of active HLS streams.
+func (h *Hub) HandleSurvStreams(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	json.NewEncoder(w).Encode(h.survProxy.ListStreams())
 }
 
 // HandleHealth returns basic health status.

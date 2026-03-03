@@ -43,6 +43,9 @@
         .surv-cell { position: relative; background: #0a0f1a; border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; overflow: hidden; aspect-ratio: 16/9; }
         .surv-cell img, .surv-cell video { width: 100%; height: 100%; object-fit: cover; background: #000; }
         .surv-cell .label { position: absolute; bottom: 0; left: 0; right: 0; padding: 4px 8px; background: rgba(0,0,0,0.7); font-size: 11px; color: #94a3b8; }
+        .surv-mode-btn { display: flex; align-items: center; gap: 4px; padding: 4px 10px; font-size: 11px; color: #64748b; border-radius: 6px; cursor: pointer; border: 1px solid transparent; transition: all 0.2s; background: none; }
+        .surv-mode-btn:hover { color: #cbd5e1; background: rgba(255,255,255,0.04); }
+        .surv-mode-btn.active-mode { color: #38bdf8; background: rgba(56,189,248,0.1); border-color: rgba(56,189,248,0.2); font-weight: 600; }
         .glass { background: rgba(13,24,41,0.8); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.05); }
         .error-toast { position: fixed; top: 80px; left: 50%; transform: translateX(-50%); z-index: 100; padding: 12px 24px; background: rgba(244,63,94,0.9); color: white; border-radius: 12px; font-size: 13px; display: none; backdrop-filter: blur(8px); }
     </style>
@@ -64,18 +67,25 @@
         <!-- Tabs -->
         <div class="flex items-center gap-1">
             <div class="tab active" data-panel="ops" onclick="switchTab('ops')">
-                <i data-lucide="monitor" class="w-3.5 h-3.5 inline mr-1"></i>Ops
+                <i data-lucide="monitor" class="w-3.5 h-3.5 inline mr-1"></i><span data-i18n="ops">Ops</span>
             </div>
             <div class="tab" data-panel="surv" onclick="switchTab('surv')">
-                <i data-lucide="camera" class="w-3.5 h-3.5 inline mr-1"></i>Cameras
+                <i data-lucide="camera" class="w-3.5 h-3.5 inline mr-1"></i><span data-i18n="cameras">Cameras</span>
             </div>
         </div>
 
         <div class="flex items-center gap-4">
             <div id="stats" class="text-xs font-mono text-slate-400 hidden sm:block"></div>
+            <select id="langSelect" onchange="changeLang(this.value)" class="bg-black/40 border border-white/5 rounded-lg px-2 py-1 text-[11px] text-slate-300 outline-none">
+                <option value="en">EN</option>
+                <option value="ko">한국어</option>
+                <option value="ja">日本語</option>
+                <option value="pt">PT</option>
+                <option value="es">ES</option>
+            </select>
             <div class="flex items-center gap-2 px-3 py-1.5 bg-black/40 rounded-full border border-white/5">
                 <span id="statusDot" class="status-dot"></span>
-                <span id="statusText" class="text-xs font-medium text-slate-300 tracking-wide uppercase">Disconnected</span>
+                <span id="statusText" class="text-xs font-medium text-slate-300 tracking-wide uppercase" data-i18n="disconnected">Disconnected</span>
             </div>
         </div>
     </header>
@@ -89,29 +99,41 @@
 
     <!-- Surveillance Panel -->
     <div id="panel-surv" class="flex-1 w-full h-full flex flex-col pt-20 pb-24 overflow-hidden" style="display:none">
-        <!-- DVR Tabs Bar -->
+        <!-- Mode Switcher + DVR Tabs Bar -->
         <div class="flex items-center gap-1 px-4 py-2 border-b border-white/5 bg-surface-50/50 flex-shrink-0">
-            <div id="dvrTabs" class="flex items-center gap-1 overflow-x-auto flex-1"></div>
-            <button onclick="showAddDVRForm()" class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-emerald-400 rounded-md hover:bg-emerald-500/10 transition-all font-medium whitespace-nowrap">
-                <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> Add DVR
-            </button>
+            <div class="flex items-center gap-1 mr-3 border-r border-white/5 pr-3">
+                <button class="surv-mode-btn active-mode" data-mode="auto" onclick="setSurvMode('auto')" title="Auto (Relay HLS)">
+                    <i data-lucide="radio" class="w-3 h-3"></i>
+                    <span data-i18n="auto">Auto</span>
+                </button>
+                <button class="surv-mode-btn" data-mode="manual" onclick="setSurvMode('manual')" title="Manual DVR Config">
+                    <i data-lucide="settings" class="w-3 h-3"></i>
+                    <span data-i18n="manual">Manual</span>
+                </button>
+            </div>
+            <div id="dvrManualBar" class="flex items-center gap-1 flex-1" style="display:none">
+                <div id="dvrTabs" class="flex items-center gap-1 overflow-x-auto flex-1"></div>
+                <button onclick="showAddDVRForm()" class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-emerald-400 rounded-md hover:bg-emerald-500/10 transition-all font-medium whitespace-nowrap">
+                    <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> <span data-i18n="addDvr">Add DVR</span>
+                </button>
+            </div>
         </div>
 
         <!-- Add/Edit DVR Form (hidden by default) -->
         <div id="dvrForm" style="display:none" class="px-4 py-3 border-b border-white/5 bg-surface-100/60 flex-shrink-0">
             <div class="max-w-3xl mx-auto space-y-3">
                 <div class="flex items-center justify-between">
-                    <h3 class="text-sm font-medium text-slate-300" id="dvrFormTitle">Add DVR</h3>
+                    <h3 class="text-sm font-medium text-slate-300" id="dvrFormTitle" data-i18n="addDvrTitle">Add DVR</h3>
                     <button onclick="hideDVRForm()" class="text-slate-500 hover:text-slate-300 transition-colors">
                         <i data-lucide="x" class="w-4 h-4"></i>
                     </button>
                 </div>
                 <div class="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                    <input type="text" id="dvrName" placeholder="Name" value="DVR-1" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600">
-                    <input type="text" id="dvrAddr" placeholder="IP Address" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600">
-                    <input type="number" id="dvrPort" value="80" placeholder="Port" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600 w-full">
-                    <input type="text" id="dvrUser" placeholder="Username" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600">
-                    <input type="password" id="dvrPass" placeholder="Password" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600">
+                    <input type="text" id="dvrName" placeholder="Name" value="DVR-1" data-i18n-placeholder="namePlaceholder" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600">
+                    <input type="text" id="dvrAddr" placeholder="IP Address" data-i18n-placeholder="ipPlaceholder" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600">
+                    <input type="number" id="dvrPort" value="80" placeholder="Port" data-i18n-placeholder="portPlaceholder" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600 w-full">
+                    <input type="text" id="dvrUser" placeholder="Username" data-i18n-placeholder="userPlaceholder" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600">
+                    <input type="password" id="dvrPass" placeholder="Password" data-i18n-placeholder="passPlaceholder" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600">
                     <select id="dvrChannels" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[12px] text-slate-300 outline-none">
                         <option value="4">4ch</option>
                         <option value="8">8ch</option>
@@ -121,16 +143,16 @@
                 </div>
                 <div class="flex items-center gap-2">
                     <select id="dvrProto" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[12px] text-slate-300 outline-none">
-                        <option value="isapi">ISAPI Snapshot</option>
-                        <option value="rtsp-hls">RTSP → HLS</option>
+                        <option value="isapi" data-i18n="isapiSnapshot">ISAPI Snapshot</option>
+                        <option value="rtsp-hls" data-i18n="rtspHls">RTSP → HLS</option>
                     </select>
                     <select id="dvrQuality" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[12px] text-slate-300 outline-none">
-                        <option value="01">Main Stream</option>
-                        <option value="02" selected>Sub Stream</option>
+                        <option value="01" data-i18n="mainStream">Main Stream</option>
+                        <option value="02" selected data-i18n="subStream">Sub Stream</option>
                     </select>
                     <div class="flex-1"></div>
                     <button onclick="saveDVR()" class="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-[12px] rounded-lg transition-colors font-medium">
-                        <i data-lucide="check" class="w-3.5 h-3.5"></i> Save & Generate
+                        <i data-lucide="check" class="w-3.5 h-3.5"></i> <span data-i18n="saveGenerate">Save & Generate</span>
                     </button>
                 </div>
             </div>
@@ -142,7 +164,7 @@
         <!-- Empty state -->
         <div id="survEmpty" class="flex-1 flex items-center justify-center text-slate-500 text-sm gap-2">
             <i data-lucide="camera-off" class="w-5 h-5"></i>
-            No cameras configured. Click "Add DVR" to get started.
+            <span data-i18n="noCameras">No cameras configured. Click "Add DVR" to get started.</span>
         </div>
     </div>
 
@@ -164,16 +186,17 @@
         </div>
         <div class="flex items-center gap-2 px-3 py-2 bg-black/30 border border-white/5 rounded-xl">
             <i data-lucide="key-round" class="w-3.5 h-3.5 text-slate-400"></i>
-            <input type="text" id="pin" placeholder="6-digit PIN"
+            <input type="text" id="pin" placeholder="6-digit PIN" data-i18n-placeholder="pinPlaceholder"
                    class="bg-transparent border-none outline-none text-[13px] text-slate-200 w-[120px] placeholder-slate-600 tracking-widest font-mono">
         </div>
         <button id="connectBtn" onclick="toggleConnection()"
             class="px-5 py-2 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 text-white font-semibold text-[13px] tracking-wide transition-all shadow-lg shadow-brand-500/20 min-w-[110px]">
-            Connect
+            <span id="connectBtnText" data-i18n="connect">Connect</span>
         </button>
     </footer>
 
     <script>lucide.createIcons();</script>
+    <script src="i18n.js"></script>
     <script src="viewer.js"></script>
 </body>
 </html>
