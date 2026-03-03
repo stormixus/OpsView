@@ -1,0 +1,32 @@
+---
+import { languages, getLangFromUrl, defaultLang } from '../i18n/ui';
+
+const lang = getLangFromUrl(Astro.url);
+// For GitHub Pages deployment, ensure correct base path calculation
+const baseUrl = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL;
+
+function getLocalizedPath(targetLang: string) {
+  // If target is default, just go to root level
+  if (targetLang === defaultLang) return `${baseUrl}/`;
+  // Otherwise append the lang folder
+  return `${baseUrl}/${targetLang}/`;
+}
+---
+
+<div class="relative group z-50">
+  <button class="flex items-center gap-2 px-4 py-2 bg-cyber-dark-glass border border-cyber-border rounded-md text-cyber-cyan hover:bg-cyber-cyan/10 transition-all cursor-pointer shadow-[0_0_10px_var(--color-cyber-cyan-glow)]">
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M2 12h20"/></svg>
+    <span class="font-mono text-sm uppercase font-bold tracking-wider">{languages[lang]}</span>
+  </button>
+  
+  <div class="absolute right-0 top-full mt-2 w-40 flex flex-col bg-[#050c16]/95 backdrop-blur-xl border border-cyber-cyan/30 rounded-md shadow-[0_0_20px_rgba(34,211,238,0.2)] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 transform translate-y-2 group-hover:translate-y-0">
+    {Object.entries(languages).map(([code, name]) => (
+      <a 
+        href={getLocalizedPath(code)} 
+        class={`px-4 py-3 font-mono text-sm uppercase transition-colors hover:bg-cyber-cyan/20 ${lang === code ? 'text-cyber-magenta font-bold bg-cyber-magenta/10' : 'text-slate-300 hover:text-cyber-cyan'}`}
+      >
+        {name}
+      </a>
+    ))}
+  </div>
+</div>

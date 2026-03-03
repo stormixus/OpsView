@@ -1,0 +1,39 @@
+---
+import '../styles/global.css';
+
+interface Props {
+	title: string;
+	lang: string;
+}
+
+const { title, lang } = Astro.props;
+---
+
+<!doctype html>
+<html lang={lang}>
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="description" content="OpsView - Neural Interface Online" />
+		<meta name="viewport" content="width=device-width" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<meta name="generator" content={Astro.generator} />
+		<title>{title}</title>
+
+		<!-- Preload modern fonts -->
+		<link rel="preconnect" href="https://rsms.me/">
+		<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+		<link rel="preconnect" href="https://fonts.googleapis.com">
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+		<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
+		
+		<!-- Optional Pretendard for KO -->
+		<link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+	</head>
+	<body class="antialiased min-h-screen flex flex-col items-center overflow-x-hidden">
+        <!-- Ambient Background Glows -->
+        <div class="fixed top-0 left-1/4 w-[50vw] h-[50vh] bg-cyber-cyan/10 blur-[120px] rounded-full pointer-events-none -z-10 mix-blend-screen"></div>
+        <div class="fixed bottom-0 right-1/4 w-[40vw] h-[40vh] bg-cyber-magenta/10 blur-[120px] rounded-full pointer-events-none -z-10 mix-blend-screen"></div>
+
+		<slot />
+	</body>
+</html>

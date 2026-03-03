@@ -1,100 +1,22 @@
 ---
-import '../styles/global.css';
+import Landing from '../components/Landing.astro';
+import { defaultLang } from '../i18n/ui';
+
+// Astro handles generating the root `/` page when base is defined.
+// This simply renders the default language on the root path.
+// Or we could redirect to `/en/`, but rendering raw is also fine,
+// except we want the LanguagePicker to reflect the path. 
+// Using `window.location.replace` or meta tag for a true redirect so `LangPicker` logic holds.
 ---
 
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OpsView Web Viewer</title>
-    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-    
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
-    
-    <style is:global>
-        body {
-            background-color: #030712;
-            background-image: 
-                radial-gradient(100% 100% at 50% 0%, rgba(14, 165, 233, 0.08) 0%, transparent 50%),
-                radial-gradient(100% 100% at 0% 100%, rgba(34, 211, 238, 0.05) 0%, transparent 50%);
-            background-repeat: no-repeat;
-            background-attachment: fixed;
-        }
-        
-        canvas {
-            image-rendering: auto; /* Allow browser to decide for smoothness */
-            box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
-            border-radius: 8px;
-            transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-    </style>
-</head>
-<body class="text-slate-200 antialiased h-screen w-screen overflow-hidden flex flex-col relative">
-
-    <!-- Floating Glass Header -->
-    <header class="absolute top-4 inset-x-4 z-20 flex justify-between items-center px-6 py-3 bg-slate-900/60 backdrop-blur-xl border border-white/5 rounded-2xl shadow-xl shadow-black/20">
-        <div class="flex items-center gap-3">
-            <div class="p-1.5 bg-gradient-to-br from-sky-500 to-indigo-600 rounded-lg shadow-inner">
-                <i data-lucide="monitor-play" class="w-4 h-4 text-white"></i>
-            </div>
-            <h1 class="text-sm font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent tracking-wide">
-                OpsView Viewer
-            </h1>
-        </div>
-        
-        <div class="flex items-center gap-6">
-            <div id="stats" class="text-xs font-mono text-slate-400 hidden sm:block"></div>
-            
-            <div class="flex items-center gap-2 px-3 py-1.5 bg-black/40 rounded-full border border-white/5">
-                <span id="statusDot" class="status-dot"></span>
-                <span id="statusText" class="text-xs font-medium text-slate-300 tracking-wide uppercase">Disconnected</span>
-            </div>
-        </div>
-    </header>
-
-    <!-- Canvas Area -->
-    <main class="flex-1 w-full h-full flex items-center justify-center p-6 relative z-10 pt-24 pb-28">
-        <!-- Canvas wrapper is required for logic -->
-        <div class="canvas-wrap w-full h-full flex items-center justify-center">
-            <canvas id="screen" class="max-w-full max-h-full object-contain"></canvas>
-        </div>
-    </main>
-
-    <!-- Bottom Floating Settings Bar -->
-    <footer class="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 w-fit max-w-[90%] px-2 py-2 bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl shadow-black/40 flex flex-wrap sm:flex-nowrap items-center gap-3">
-        <div class="flex items-center gap-2 px-3 py-2 bg-black/30 border border-white/5 rounded-xl sm:flex-none">
-            <i data-lucide="monitor" class="w-3.5 h-3.5 text-slate-400"></i>
-            <input type="text" id="relayIp" value="127.0.0.1" 
-                   class="bg-transparent border-none outline-none text-[13px] text-slate-200 w-full sm:w-[140px] placeholder-slate-600 focus:ring-0" 
-                   placeholder="IP Address">
-            <span class="text-slate-500 font-bold">:</span>
-            <input type="text" id="relayPort" value="8080" 
-                   class="bg-transparent border-none outline-none text-[13px] text-slate-200 w-full sm:w-[50px] placeholder-slate-600 focus:ring-0 text-center" 
-                   placeholder="Port">
-        </div>
-        
-        <div class="flex items-center gap-2 px-3 py-2 bg-black/30 border border-white/5 rounded-xl flex-1 sm:flex-none">
-            <i data-lucide="key-round" class="w-3.5 h-3.5 text-slate-400"></i>
-            <input type="text" id="pin" placeholder="6-digit PIN"
-                   class="bg-transparent border-none outline-none text-[13px] text-slate-200 w-full sm:w-[120px] placeholder-slate-600 focus:ring-0 tracking-widest font-mono">
-        </div>
-        
-        <button id="connectBtn" onclick="toggleConnection()" class="btn-primary px-5 py-2 rounded-xl flex items-center justify-center min-w-[120px] h-[38px]">
-            Connect
-        </button>
-    </footer>
-
-    <!-- Initialize icons -->
-    <script is:inline>
-        document.addEventListener('DOMContentLoaded', () => {
-            lucide.createIcons();
-        });
-    </script>
-
-    <!-- fzstd: lightweight zstd decompressor for browsers -->
-    <script is:inline src="https://cdn.jsdelivr.net/npm/fzstd@0.1.1/umd/index.js"></script>
-    <script is:inline src="/viewer.js"></script>
-</body>
+<!doctype html>
+<html lang={defaultLang}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="refresh" content={`0;url=./${defaultLang}/`} />
+    <title>Redirecting...</title>
+  </head>
+  <body class="bg-[#050c16]">
+    <!-- Redirecting to default language -->
+  </body>
 </html>
