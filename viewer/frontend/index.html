@@ -532,12 +532,7 @@
       opsDisconnect();
     }
 
-    // This function is moved from viewer.js and modified to take ip, port, pin
-    // and construct the URL.
-    const OVP_MAGIC = 0x4F565031;
-    const OVP_HEADER_SIZE = 12;
-    const MSG_SURV_CONFIG = 9;
-    const MSG_SURV_SNAPSHOT = 10;
+    // Uses OVP_MAGIC, OVP_HEADER_SIZE, MSG_SURV_CONFIG, MSG_SURV_SNAPSHOT from viewer.js
 
     function sendOVPMsg(type, jsonStr) {
       if (!opsWs || opsWs.readyState !== WebSocket.OPEN) return;

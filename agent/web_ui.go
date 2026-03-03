@@ -48,6 +48,7 @@ func startWebUI() {
 	mux.HandleFunc("/", handleIndex)
 	mux.HandleFunc("/api/status", handleAPIStatus)
 	mux.HandleFunc("/api/save", handleAPISave)
+	mux.HandleFunc("/api/update", handleAPIUpdate)
 	mux.HandleFunc("/api/surv/dvrs", handleSurvDVRs)
 	mux.HandleFunc("/api/surv/dvrs/", handleSurvDVR)
 
@@ -151,6 +152,16 @@ func handleAPISave(w http.ResponseWriter, r *http.Request) {
 	go restartAgentIfRunning()
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func handleAPIUpdate(w http.ResponseWriter, r *http.Request) {
+	info, err := CheckForUpdate()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(info)
 }
 
 // --- Surveillance DVR API ---
@@ -320,7 +331,20 @@ const htmlTemplate = `
 <body class="flex items-center justify-center p-6">
 
     <div class="glass-panel w-full max-w-2xl rounded-3xl p-8 md:p-12 animate-fade-in-up transition-all duration-500">
-        
+
+        <!-- Update Banner -->
+        <div id="update-banner" class="hidden mb-6 bg-amber-500/15 border border-amber-500/30 rounded-2xl p-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <svg class="w-5 h-5 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                <div>
+                    <span class="text-amber-300 text-sm font-medium">새 버전 사용 가능:</span>
+                    <span id="update-version" class="text-white text-sm font-semibold ml-1"></span>
+                    <span class="text-slate-400 text-xs ml-2">(현재: <span id="update-current"></span>)</span>
+                </div>
+            </div>
+            <a id="update-link" href="#" target="_blank" class="bg-amber-500 hover:bg-amber-400 text-slate-900 text-sm font-semibold px-4 py-1.5 rounded-lg transition flex-shrink-0">다운로드</a>
+        </div>
+
         <!-- Header -->
         <div class="text-center mb-10">
             <h1 class="text-4xl font-extrabold tracking-tight mb-2"><span class="gradient-text">OpsView</span> Agent</h1>
@@ -661,9 +685,26 @@ const htmlTemplate = `
             }
         }
 
+        // Check for updates
+        async function checkUpdate() {
+            try {
+                const res = await fetch('/api/update');
+                const info = await res.json();
+                if (info.available) {
+                    document.getElementById('update-version').textContent = info.latest_ver;
+                    document.getElementById('update-current').textContent = info.current_ver;
+                    document.getElementById('update-link').href = info.release_url;
+                    document.getElementById('update-banner').classList.remove('hidden');
+                }
+            } catch (e) {
+                console.log('Update check failed:', e);
+            }
+        }
+
         // Init
         loadSettings();
         loadDVRs();
+        setTimeout(checkUpdate, 3000);
     </script>
 </body>
 </html>

@@ -10,6 +10,9 @@ import (
 	"strings"
 )
 
+// Version is set at build time via ldflags.
+var Version = "dev"
+
 // logPath returns the log file path next to the config directory.
 func logPath() string {
 	appData := os.Getenv("APPDATA")

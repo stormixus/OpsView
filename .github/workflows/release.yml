@@ -29,7 +29,8 @@ jobs:
         shell: bash
         run: |
           cd agent
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=1 go build -ldflags="-s -w -H windowsgui" -o opsview-agent.exe .
+          TAG="${{ github.event.release.tag_name || github.ref_name }}"
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=1 go build -ldflags="-s -w -H windowsgui -X main.Version=${TAG}" -o opsview-agent.exe .
 
       - name: Build installer
         shell: pwsh

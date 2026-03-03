@@ -87,7 +87,7 @@ func (a *Agent) connect() error {
 	hello := proto.Hello{
 		Role:          "publisher",
 		Client:        "opsview-agent",
-		ClientVersion: "0.1.0",
+		ClientVersion: Version,
 		Supports:      []string{"zstd"},
 	}
 	profileStr := "1080"
