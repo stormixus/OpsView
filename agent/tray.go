@@ -153,8 +153,11 @@ func stopAgent() {
 }
 
 func restartAgent() {
+	// Preserve SurvMgr across restart (loadConfig returns nil since it's json:"-")
+	existingSurvMgr := webSurvMgr
 	stopAgent()
 	cfg := loadConfig()
+	cfg.SurvMgr = existingSurvMgr
 	startAgent(cfg)
 }
 
