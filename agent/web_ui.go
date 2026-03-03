@@ -182,12 +182,14 @@ func handleSurvDVRs(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(dvrs)
 	case http.MethodPost:
 		var req struct {
-			Name     string `json:"name"`
-			Addr     string `json:"addr"`
-			Port     int    `json:"port"`
-			Username string `json:"username"`
-			Password string `json:"password"`
-			Protocol string `json:"protocol"`
+			Name          string `json:"name"`
+			Addr          string `json:"addr"`
+			Port          int    `json:"port"`
+			Username      string `json:"username"`
+			Password      string `json:"password"`
+			Protocol      string `json:"protocol"`
+			RefreshRate   int    `json:"refresh_rate"`
+			StreamQuality string `json:"stream_quality"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -196,7 +198,7 @@ func handleSurvDVRs(w http.ResponseWriter, r *http.Request) {
 		if req.Port == 0 {
 			req.Port = 80
 		}
-		dvr, err := webSurvMgr.AddDVR(req.Name, req.Addr, req.Port, req.Username, req.Password, req.Protocol)
+		dvr, err := webSurvMgr.AddDVR(req.Name, req.Addr, req.Port, req.Username, req.Password, req.Protocol, req.RefreshRate, req.StreamQuality)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -470,6 +472,19 @@ const htmlTemplate = `
                             <input type="password" id="dvr-password" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </div>
                     </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs text-slate-400 mb-1">갱신 주기 (ms)</label>
+                            <input type="number" id="dvr-refresh" value="2000" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-slate-400 mb-1">스트림 품질</label>
+                            <select id="dvr-quality" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none">
+                                <option value="sub">서브스트림 (저화질)</option>
+                                <option value="main">메인스트림 (고화질)</option>
+                            </select>
+                        </div>
+                    </div>
                     <button type="button" onclick="addDVR()" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 px-4 rounded-lg text-sm font-medium transition">
                         추가
                     </button>
@@ -491,6 +506,68 @@ const htmlTemplate = `
                 </button>
             </div>
         </form>
+    </div>
+
+    <!-- Edit DVR Modal -->
+    <div id="edit-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div class="glass-panel rounded-2xl p-6 w-full max-w-md mx-4">
+            <h3 class="text-lg font-semibold text-white mb-4">DVR 수정</h3>
+            <input type="hidden" id="edit-dvr-id">
+            <div class="space-y-3">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">이름</label>
+                        <input type="text" id="edit-dvr-name" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">프로토콜</label>
+                        <select id="edit-dvr-protocol" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none">
+                            <option value="auto">자동 탐지</option>
+                            <option value="isapi">Hikvision (ISAPI)</option>
+                            <option value="dahua">Dahua</option>
+                            <option value="rtsp">RTSP</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="col-span-2">
+                        <label class="block text-xs text-slate-400 mb-1">주소</label>
+                        <input type="text" id="edit-dvr-addr" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">포트</label>
+                        <input type="number" id="edit-dvr-port" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">사용자명</label>
+                        <input type="text" id="edit-dvr-username" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">비밀번호</label>
+                        <input type="password" id="edit-dvr-password" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="변경 시 입력">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">갱신 주기 (ms)</label>
+                        <input type="number" id="edit-dvr-refresh" value="2000" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">스트림 품질</label>
+                        <select id="edit-dvr-quality" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none">
+                            <option value="sub">서브스트림 (저화질)</option>
+                            <option value="main">메인스트림 (고화질)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="flex justify-end gap-3 mt-5">
+                <button onclick="closeEditModal()" class="bg-slate-700 hover:bg-slate-600 text-white py-2 px-5 rounded-lg text-sm font-medium transition">취소</button>
+                <button onclick="saveDVR()" class="bg-blue-600 hover:bg-blue-500 text-white py-2 px-5 rounded-lg text-sm font-medium transition">저장</button>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -609,12 +686,14 @@ const htmlTemplate = `
                     return;
                 }
                 list.innerHTML = dvrs.map(function(d) {
+                    var dj = encodeURIComponent(JSON.stringify(d));
                     return '<div class="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 flex items-center justify-between">' +
                         '<div>' +
                             '<div class="font-medium text-white text-sm">' + (d.name || d.addr) + '</div>' +
                             '<div class="text-xs text-slate-400 mt-0.5">' + d.addr + ':' + d.port + ' \u00b7 ' + d.protocol + '</div>' +
                         '</div>' +
                         '<div class="flex gap-2">' +
+                            '<button onclick="editDVR(\'' + dj + '\')" class="text-xs bg-slate-600/30 text-slate-300 hover:bg-slate-600/50 px-3 py-1.5 rounded-lg transition">\uc218\uc815</button>' +
                             '<button onclick="discoverChannels(' + d.id + ')" class="text-xs bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600/30 px-3 py-1.5 rounded-lg transition">\ucc44\ub110 \ud0d0\uc0c9</button>' +
                             '<button onclick="deleteDVR(' + d.id + ')" class="text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 px-3 py-1.5 rounded-lg transition">\uc0ad\uc81c</button>' +
                         '</div>' +
@@ -633,6 +712,8 @@ const htmlTemplate = `
                 username: document.getElementById('dvr-username').value.trim(),
                 password: document.getElementById('dvr-password').value,
                 protocol: document.getElementById('dvr-protocol').value,
+                refresh_rate: parseInt(document.getElementById('dvr-refresh').value) || 2000,
+                stream_quality: document.getElementById('dvr-quality').value,
             };
             if (!payload.addr) { showMsg('DVR 주소를 입력하세요.', 'error'); return; }
             try {
@@ -667,6 +748,54 @@ const htmlTemplate = `
                 }
             } catch (err) {
                 showMsg('삭제 중 오류가 발생했습니다.', 'error');
+            }
+        }
+
+        function editDVR(encoded) {
+            var d = JSON.parse(decodeURIComponent(encoded));
+            document.getElementById('edit-dvr-id').value = d.id;
+            document.getElementById('edit-dvr-name').value = d.name || '';
+            document.getElementById('edit-dvr-protocol').value = d.protocol || 'auto';
+            document.getElementById('edit-dvr-addr').value = d.addr || '';
+            document.getElementById('edit-dvr-port').value = d.port || 80;
+            document.getElementById('edit-dvr-username').value = d.username || '';
+            document.getElementById('edit-dvr-password').value = '';
+            document.getElementById('edit-dvr-refresh').value = d.refresh_rate || 2000;
+            document.getElementById('edit-dvr-quality').value = d.stream_quality || 'sub';
+            document.getElementById('edit-modal').classList.remove('hidden');
+        }
+
+        function closeEditModal() {
+            document.getElementById('edit-modal').classList.add('hidden');
+        }
+
+        async function saveDVR() {
+            var id = document.getElementById('edit-dvr-id').value;
+            var payload = {
+                name: document.getElementById('edit-dvr-name').value.trim(),
+                addr: document.getElementById('edit-dvr-addr').value.trim(),
+                port: parseInt(document.getElementById('edit-dvr-port').value) || 80,
+                username: document.getElementById('edit-dvr-username').value.trim(),
+                password: document.getElementById('edit-dvr-password').value,
+                protocol: document.getElementById('edit-dvr-protocol').value,
+                refresh_rate: parseInt(document.getElementById('edit-dvr-refresh').value) || 2000,
+                stream_quality: document.getElementById('edit-dvr-quality').value,
+            };
+            try {
+                var res = await fetch('/api/surv/dvrs/' + id, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    showMsg('DVR 설정이 저장되었습니다.', 'success');
+                    closeEditModal();
+                    loadDVRs();
+                } else {
+                    showMsg('DVR 저장 실패: ' + await res.text(), 'error');
+                }
+            } catch (err) {
+                showMsg('DVR 저장 중 오류가 발생했습니다.', 'error');
             }
         }
 

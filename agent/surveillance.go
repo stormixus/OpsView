@@ -132,15 +132,21 @@ func (m *SurveillanceManager) ListDVRs() ([]DVRConfig, error) {
 	return dvrs, nil
 }
 
-func (m *SurveillanceManager) AddDVR(name, addr string, port int, username, password, protocol string) (DVRConfig, error) {
+func (m *SurveillanceManager) AddDVR(name, addr string, port int, username, password, protocol string, refreshRate int, streamQuality string) (DVRConfig, error) {
 	if name == "" {
 		name = addr
 	}
 	if protocol == "" {
 		protocol = "isapi"
 	}
-	res, err := m.db.Exec(`INSERT INTO dvrs (name, addr, port, username, password, protocol) VALUES (?, ?, ?, ?, ?, ?)`,
-		name, addr, port, username, password, protocol)
+	if refreshRate <= 0 {
+		refreshRate = 2000
+	}
+	if streamQuality == "" {
+		streamQuality = "sub"
+	}
+	res, err := m.db.Exec(`INSERT INTO dvrs (name, addr, port, username, password, protocol, refresh_rate, stream_quality) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		name, addr, port, username, password, protocol, refreshRate, streamQuality)
 	if err != nil {
 		return DVRConfig{}, err
 	}
@@ -148,7 +154,7 @@ func (m *SurveillanceManager) AddDVR(name, addr string, port int, username, pass
 	if m.onChange != nil {
 		m.onChange()
 	}
-	return DVRConfig{ID: id, Name: name, Addr: addr, Port: port, Username: username, Password: password, RefreshRate: 2000, StreamQuality: "sub", Protocol: protocol}, nil
+	return DVRConfig{ID: id, Name: name, Addr: addr, Port: port, Username: username, Password: password, RefreshRate: refreshRate, StreamQuality: streamQuality, Protocol: protocol}, nil
 }
 
 func (m *SurveillanceManager) UpdateDVR(id int64, name, addr string, port int, username, password string, refreshRate int, streamQuality, protocol string) error {
