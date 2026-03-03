@@ -1,20 +1,33 @@
 ---
+import { getLangFromUrl, useTranslations } from '../i18n/ui';
+
+const lang = getLangFromUrl(Astro.url);
+const t = useTranslations(lang);
+
+const overviewImg = lang === 'ko' ? 'architecture-overview.png' : 'architecture-overview-en.png';
 ---
 
-<section id="architecture" class="py-20 px-6 bg-dark-900">
+<section id="architecture" class="w-full relative z-10 px-6 py-24 bg-[#020617]/80 backdrop-blur-sm border-y border-[#22d3ee]/10">
   <div class="max-w-7xl mx-auto">
-    <h2 class="text-3xl font-bold text-white text-center mb-4">아키텍처</h2>
-    <p class="text-gray-400 text-center mb-12 max-w-xl mx-auto">Agent — Relay — Viewer 3-tier 구조</p>
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-      <div class="rounded-xl border border-white/5 overflow-hidden bg-dark-800 p-2">
-        <h3 class="w-full text-left font-mono text-xs uppercase text-slate-400 tracking-widest mb-2 border-b border-white/10 pb-2 px-2 pt-2">Overview</h3>
-        <img src={`${import.meta.env.BASE_URL}architecture-overview-en.png`} alt="OpsView Architecture Overview"
-             class="arch-zoomable cursor-zoom-in w-full h-auto transition-transform duration-300 hover:scale-[1.02]" loading="lazy">
+    <div class="flex items-center gap-4 mb-16">
+      <div class="h-px bg-[#ec4899]/30 flex-1"></div>
+      <h2 class="font-mono text-2xl font-bold text-[#ec4899] tracking-[0.2em] uppercase text-magenta-glow">{t('arch.title')}</h2>
+      <div class="h-px bg-[#ec4899]/30 flex-1"></div>
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-12">
+      <div class="glass-panel p-2 flex flex-col group border-[#ec4899]/20 overflow-hidden">
+        <div class="bg-[#050a12] rounded-lg p-6 flex-1 flex flex-col items-center justify-center relative">
+          <h3 class="w-full text-left font-mono text-xs uppercase text-slate-400 tracking-widest mb-4 border-b border-white/10 pb-2">{t('arch.overview')}</h3>
+          <img src={`${import.meta.env.BASE_URL}${overviewImg}`} alt="OpsView Architecture Overview"
+             class="arch-zoomable cursor-zoom-in w-full h-auto object-contain rounded drop-shadow-[0_0_15px_rgba(236,72,153,0.1)] group-hover:scale-[1.02] transition-transform duration-500 ease-out" loading="lazy">
+        </div>
       </div>
-      <div class="rounded-xl border border-white/5 overflow-hidden bg-dark-800 p-2">
-        <h3 class="w-full text-left font-mono text-xs uppercase text-slate-400 tracking-widest mb-2 border-b border-white/10 pb-2 px-2 pt-2">Detail</h3>
-        <img src={`${import.meta.env.BASE_URL}architecture-detail.png`} alt="OpsView Architecture Detail"
-             class="arch-zoomable cursor-zoom-in w-full h-auto transition-transform duration-300 hover:scale-[1.02]" loading="lazy">
+      <div class="glass-panel p-2 flex flex-col group border-[#22d3ee]/20 overflow-hidden">
+        <div class="bg-[#050a12] rounded-lg p-6 flex-1 flex flex-col items-center justify-center relative">
+          <h3 class="w-full text-left font-mono text-xs uppercase text-slate-400 tracking-widest mb-4 border-b border-white/10 pb-2">{t('arch.detail')}</h3>
+          <img src={`${import.meta.env.BASE_URL}architecture-detail.png`} alt="OpsView Architecture Detail"
+             class="arch-zoomable cursor-zoom-in w-full h-auto object-contain rounded drop-shadow-[0_0_15px_rgba(34,211,238,0.1)] group-hover:scale-[1.02] transition-transform duration-500 ease-out" loading="lazy">
+        </div>
       </div>
     </div>
   </div>

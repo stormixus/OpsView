@@ -1,13 +1,21 @@
 ---
+import { getLangFromUrl, useTranslations } from '../i18n/ui';
+
+const lang = getLangFromUrl(Astro.url);
+const t = useTranslations(lang);
 ---
 
-<footer class="border-t border-white/5 py-10 px-6">
-  <div class="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-500">
-    <span>&copy; 2025 OpsView</span>
-    <div class="flex gap-6">
-      <a href="https://github.com/stormixus/OpsView" class="hover:text-white transition">GitHub</a>
-      <a href="https://github.com/stormixus/OpsView/releases" class="hover:text-white transition">Releases</a>
-      <a href="https://github.com/stormixus/OpsView/issues" class="hover:text-white transition">Issues</a>
+<footer class="w-full relative z-10 border-t border-[#22d3ee]/10 bg-[#020617] mt-auto">
+  <div class="max-w-7xl mx-auto px-6 py-8 flex flex-col md:flex-row items-center justify-between gap-4">
+    <div class="flex items-center gap-2">
+      <span class="w-2 h-2 rounded-full bg-[#22d3ee] shadow-[0_0_8px_rgba(34,211,238,0.8)]"></span>
+      <p class="font-mono text-xs text-slate-500 tracking-widest uppercase">&copy; 2025 {t('footer.text')}</p>
+    </div>
+    <div class="flex gap-6 font-mono text-xs text-slate-600">
+      <a href="https://github.com/stormixus/OpsView" class="hover:text-white transition">GITHUB</a>
+      <a href="https://github.com/stormixus/OpsView/releases" class="hover:text-white transition">RELEASES</a>
+      <a href="https://github.com/stormixus/OpsView/issues" class="hover:text-white transition">ISSUES</a>
+      <span>v1.0.0. [SYS_READY]</span>
     </div>
   </div>
 </footer>

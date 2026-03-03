@@ -1,4 +1,9 @@
 ---
+import { getLangFromUrl, useTranslations } from '../i18n/ui';
+
+const lang = getLangFromUrl(Astro.url);
+const t = useTranslations(lang);
+
 const downloads = [
   {
     name: 'Agent',
@@ -31,22 +36,25 @@ const downloads = [
 ];
 ---
 
-<section id="download" class="py-20 px-6">
-  <div class="max-w-5xl mx-auto">
-    <h2 class="text-3xl font-bold text-white text-center mb-4">다운로드</h2>
-    <p class="text-gray-400 text-center mb-14 max-w-xl mx-auto">GitHub Releases에서 최신 빌드를 받으세요</p>
+<section id="download" class="py-20 px-6 relative z-10">
+  <div class="max-w-7xl mx-auto">
+    <div class="flex items-center gap-4 mb-16">
+      <div class="h-px bg-[#3b82f6]/30 flex-1"></div>
+      <h2 class="font-mono text-2xl font-bold text-[#3b82f6] tracking-[0.2em] uppercase drop-shadow-[0_0_10px_rgba(59,130,246,0.4)]">{t('nav.download')}</h2>
+      <div class="h-px bg-[#3b82f6]/30 flex-1"></div>
+    </div>
     <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
       {downloads.map((d) => (
         <a href="https://github.com/stormixus/OpsView/releases/latest"
-           class="group p-6 rounded-xl bg-dark-800 border border-white/5 hover:border-brand-500/30 transition text-center">
-          <div class={`w-12 h-12 rounded-lg ${d.colorClass} flex items-center justify-center mx-auto mb-4`}>
+           class="glass-panel p-6 group hover:-translate-y-1 transition-transform duration-300 border border-[#3b82f6]/20 shadow-[0_0_15px_rgba(59,130,246,0.15)] text-center block">
+          <div class={`w-12 h-12 rounded-lg bg-[#020617] flex items-center justify-center mx-auto mb-4 border border-white/5 shadow-[inset_0_0_15px_Math.rgba(0,0,0,0.5)]`}>
             <svg class={`w-6 h-6 ${d.iconColorClass}`} fill="currentColor" viewBox="0 0 24 24">
               <Fragment set:html={d.icon} />
             </svg>
           </div>
-          <h3 class="text-white font-semibold mb-1">{d.name}</h3>
-          <p class="text-xs text-gray-500">{d.platform}</p>
-          <span class="inline-block mt-3 text-sm text-brand-500 group-hover:text-brand-400 transition">다운로드 &rarr;</span>
+          <h3 class="text-white font-mono tracking-widest font-semibold mb-1 uppercase">{d.name}</h3>
+          <p class="text-xs text-slate-500 font-mono tracking-wider">{d.platform}</p>
+          <span class="inline-block mt-4 text-xs font-mono tracking-widest text-[#3b82f6] group-hover:text-white transition-colors uppercase">{t('download.cta')} &rarr;</span>
         </a>
       ))}
     </div>
