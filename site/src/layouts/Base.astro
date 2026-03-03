@@ -172,8 +172,9 @@ const { title, lang = 'en' } = Astro.props;
 
     images.forEach(img => {
       img.addEventListener('click', (e) => {
-        const src = (e.currentTarget as HTMLImageElement).src;
-        openModal(src);
+        const el = e.currentTarget as HTMLImageElement;
+        const fullSrc = el.dataset.full || el.src;
+        openModal(fullSrc);
       });
     });
 
