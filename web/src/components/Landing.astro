@@ -76,14 +76,14 @@ const t = useTranslations(lang);
         <div class="glass-panel p-2 flex flex-col group border-cyber-magenta/20 overflow-hidden">
           <div class="bg-[#050a12] rounded-lg p-6 flex-1 flex flex-col items-center justify-center relative">
             <h3 class="w-full text-left font-mono text-xs uppercase text-slate-400 tracking-widest mb-4 border-b border-white/10 pb-2">{t('arch.overview')}</h3>
-            <img src={`${import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL}/${lang === 'ko' ? 'architecture-overview.png' : 'architecture-overview-en.png'}`} alt="Architecture Overview" class="w-full h-auto object-contain rounded drop-shadow-[0_0_15px_rgba(236,72,153,0.1)] group-hover:scale-[1.02] transition-transform duration-500 ease-out" />
+            <img src={`${import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL}/${lang === 'ko' ? 'architecture-overview.png' : 'architecture-overview-en.png'}`} alt="Architecture Overview" class="arch-zoomable cursor-zoom-in w-full h-auto object-contain rounded drop-shadow-[0_0_15px_rgba(236,72,153,0.1)] group-hover:scale-[1.02] transition-transform duration-500 ease-out" />
           </div>
         </div>
 
         <div class="glass-panel p-2 flex flex-col group border-cyber-cyan/20 overflow-hidden">
           <div class="bg-[#050a12] rounded-lg p-6 flex-1 flex flex-col items-center justify-center relative">
              <h3 class="w-full text-left font-mono text-xs uppercase text-slate-400 tracking-widest mb-4 border-b border-white/10 pb-2">{t('arch.detail')}</h3>
-            <img src={`${import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL}/architecture-detail.png`} alt="Architecture Detail" class="w-full h-auto object-contain rounded drop-shadow-[0_0_15px_rgba(34,211,238,0.1)] group-hover:scale-[1.02] transition-transform duration-500 ease-out" />
+            <img src={`${import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL}/architecture-detail.png`} alt="Architecture Detail" class="arch-zoomable cursor-zoom-in w-full h-auto object-contain rounded drop-shadow-[0_0_15px_rgba(34,211,238,0.1)] group-hover:scale-[1.02] transition-transform duration-500 ease-out" />
           </div>
         </div>
       </div>
@@ -179,4 +179,66 @@ const t = useTranslations(lang);
       <p class="font-mono text-xs text-slate-600">v1.0.0. [SYS_READY]</p>
     </div>
   </footer>
+
+  <!-- Image Modal Overlay -->
+  <div id="image-modal" class="fixed inset-0 z-[100] hidden items-center justify-center bg-[#020617]/95 backdrop-blur-md opacity-0 transition-opacity duration-300">
+    <button id="modal-close" class="absolute top-6 right-6 text-slate-400 hover:text-cyber-magenta transition-colors z-[101]">
+      <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+    </button>
+    <div class="relative w-[90vw] h-[90vh] flex items-center justify-center p-4">
+      <img id="modal-image" src="" alt="Enlarged Architecture View" class="max-w-full max-h-full object-contain rounded-lg shadow-[0_0_50px_rgba(34,211,238,0.15)] ring-1 ring-cyber-cyan/20 scale-95 transition-transform duration-300" />
+    </div>
+  </div>
 </Layout>
+
+<script>
+  const images = document.querySelectorAll('.arch-zoomable');
+  const modal = document.getElementById('image-modal');
+  const modalImg = document.getElementById('modal-image') as HTMLImageElement;
+  const closeBtn = document.getElementById('modal-close');
+
+  function openModal(src: string) {
+    if (!modal || !modalImg) return;
+    modalImg.src = src;
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    // Trigger reflow
+    void modal.offsetWidth;
+    modal.classList.remove('opacity-0');
+    modalImg.classList.remove('scale-95');
+    modalImg.classList.add('scale-100');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeModal() {
+    if (!modal || !modalImg) return;
+    modal.classList.add('opacity-0');
+    modalImg.classList.remove('scale-100');
+    modalImg.classList.add('scale-95');
+    
+    setTimeout(() => {
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+      modalImg.src = '';
+      document.body.style.overflow = '';
+    }, 300); // match transition duration
+  }
+
+  images.forEach(img => {
+    img.addEventListener('click', (e) => {
+      const src = (e.currentTarget as HTMLImageElement).src;
+      openModal(src);
+    });
+  });
+
+  closeBtn?.addEventListener('click', closeModal);
+  modal?.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+  
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal && !modal.classList.contains('hidden')) {
+      closeModal();
+    }
+  });
+</script>
