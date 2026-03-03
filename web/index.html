@@ -13,184 +13,850 @@
             theme: {
                 extend: {
                     colors: {
-                        surface: { 50: '#070f1a', 100: '#0d1829', 200: '#14233a', 300: '#1e3048' },
-                        brand: { 400: '#38bdf8', 500: '#0ea5e9', 600: '#0284c7' }
+                        cyber: {
+                            void: '#04060f',
+                            panel: '#0a1326',
+                            line: '#44d4ff',
+                            pink: '#ff4fd8',
+                            lime: '#8dff66'
+                        }
                     },
                     fontFamily: {
-                        sans: ['Pretendard Variable', '-apple-system', 'sans-serif'],
-                        mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace']
+                        sans: ['Chakra Petch', 'Pretendard Variable', '-apple-system', 'sans-serif'],
+                        display: ['Orbitron', 'Chakra Petch', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace']
                     }
                 }
             }
         }
     </script>
     <style>
-        body {
-            background-color: #030712;
-            background-image:
-                radial-gradient(100% 100% at 50% 0%, rgba(14,165,233,0.08) 0%, transparent 50%),
-                radial-gradient(100% 100% at 0% 100%, rgba(34,211,238,0.05) 0%, transparent 50%);
+        @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Orbitron:wght@500;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+
+        :root {
+            --bg-0: #03050d;
+            --bg-1: #050b18;
+            --bg-2: #0a1022;
+            --panel: rgba(10, 18, 38, 0.74);
+            --panel-strong: rgba(8, 14, 29, 0.9);
+            --line: rgba(68, 212, 255, 0.28);
+            --line-strong: rgba(68, 212, 255, 0.54);
+            --cyan: #55ecff;
+            --cyan-soft: rgba(85, 236, 255, 0.18);
+            --pink: #ff4fd8;
+            --pink-soft: rgba(255, 79, 216, 0.22);
+            --lime: #8dff66;
+            --text-main: #d6e8ff;
+            --text-muted: #7386a8;
+            --danger: #ff4d7d;
+            --warning: #ffb454;
+            --success: #3af6a3;
         }
-        .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #475569; transition: all 0.3s; }
-        .status-dot.connected { background: #10b981; box-shadow: 0 0 12px rgba(16,185,129,0.8); }
-        .status-dot.connecting { background: #f59e0b; animation: pulse 1.5s infinite; box-shadow: 0 0 12px rgba(245,158,11,0.6); }
-        .status-dot.error { background: #f43f5e; box-shadow: 0 0 12px rgba(244,63,94,0.8); }
-        @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.5 } }
-        canvas { image-rendering: auto; box-shadow: 0 0 40px rgba(0,0,0,0.5); border-radius: 8px; }
-        .tab { cursor: pointer; padding: 8px 16px; font-size: 13px; color: #64748b; border-bottom: 2px solid transparent; transition: all 0.2s; }
-        .tab:hover { color: #cbd5e1; }
-        .tab.active { color: #38bdf8; border-color: #38bdf8; }
-        .surv-cell { position: relative; background: #0a0f1a; border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; overflow: hidden; aspect-ratio: 16/9; }
-        .surv-cell img, .surv-cell video { width: 100%; height: 100%; object-fit: cover; background: #000; }
-        .surv-cell .label { position: absolute; bottom: 0; left: 0; right: 0; padding: 4px 8px; background: rgba(0,0,0,0.7); font-size: 11px; color: #94a3b8; }
-        .surv-mode-btn { display: flex; align-items: center; gap: 4px; padding: 4px 10px; font-size: 11px; color: #64748b; border-radius: 6px; cursor: pointer; border: 1px solid transparent; transition: all 0.2s; background: none; }
-        .surv-mode-btn:hover { color: #cbd5e1; background: rgba(255,255,255,0.04); }
-        .surv-mode-btn.active-mode { color: #38bdf8; background: rgba(56,189,248,0.1); border-color: rgba(56,189,248,0.2); font-weight: 600; }
-        .glass { background: rgba(13,24,41,0.8); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.05); }
-        .error-toast { position: fixed; top: 80px; left: 50%; transform: translateX(-50%); z-index: 100; padding: 12px 24px; background: rgba(244,63,94,0.9); color: white; border-radius: 12px; font-size: 13px; display: none; backdrop-filter: blur(8px); }
+
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(85, 236, 255, 0.35) transparent;
+        }
+
+        *::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        *::-webkit-scrollbar-thumb {
+            background: rgba(85, 236, 255, 0.32);
+            border-radius: 999px;
+        }
+
+        body {
+            position: relative;
+            background:
+                radial-gradient(120% 90% at 8% 0%, rgba(72, 202, 255, 0.18), transparent 58%),
+                radial-gradient(90% 110% at 92% 12%, rgba(255, 79, 216, 0.16), transparent 52%),
+                linear-gradient(155deg, var(--bg-0) 0%, var(--bg-1) 48%, var(--bg-2) 100%);
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background-image:
+                linear-gradient(rgba(95, 230, 255, 0.06) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(95, 230, 255, 0.06) 1px, transparent 1px);
+            background-size: 44px 44px;
+            opacity: 0.35;
+            mask-image: radial-gradient(circle at center, black 30%, transparent 86%);
+            animation: gridShift 24s linear infinite;
+            z-index: 0;
+        }
+
+        body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background: repeating-linear-gradient(
+                to bottom,
+                transparent 0px,
+                transparent 4px,
+                rgba(85, 236, 255, 0.05) 5px,
+                transparent 9px
+            );
+            mix-blend-mode: screen;
+            opacity: 0.4;
+            animation: scan 8s linear infinite;
+            z-index: 1;
+        }
+
+        body > * {
+            position: relative;
+            z-index: 2;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        @keyframes scan {
+            0% { transform: translateY(-40px); }
+            100% { transform: translateY(40px); }
+        }
+
+        @keyframes gridShift {
+            0% { transform: translate3d(0, 0, 0); }
+            100% { transform: translate3d(44px, 44px, 0); }
+        }
+
+        @keyframes riseIn {
+            from {
+                opacity: 0;
+                transform: translateY(12px);
+                filter: blur(4px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+                filter: blur(0);
+            }
+        }
+
+        .cyber-header,
+        .panel-shell,
+        .control-dock {
+            animation: riseIn 500ms ease-out both;
+        }
+
+        .cyber-header {
+            background:
+                linear-gradient(145deg, rgba(14, 28, 58, 0.84), rgba(8, 16, 34, 0.92));
+            border: 1px solid var(--line);
+            box-shadow:
+                0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+                0 18px 40px rgba(0, 0, 0, 0.55),
+                0 0 34px rgba(68, 212, 255, 0.12);
+            backdrop-filter: blur(18px) saturate(130%);
+        }
+
+        .cyber-header::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            pointer-events: none;
+            background: linear-gradient(120deg, transparent 0%, rgba(85, 236, 255, 0.1) 35%, transparent 60%);
+            opacity: 0.7;
+        }
+
+        .brand-mark {
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            display: grid;
+            place-items: center;
+            background:
+                radial-gradient(circle at 35% 30%, rgba(145, 255, 232, 0.5), rgba(88, 116, 255, 0.1) 65%),
+                linear-gradient(140deg, #0f1f40, #162f5e);
+            border: 1px solid rgba(85, 236, 255, 0.45);
+            box-shadow: 0 0 24px rgba(85, 236, 255, 0.24);
+        }
+
+        .brand-title {
+            font-family: 'Orbitron', sans-serif;
+            letter-spacing: 0.14em;
+            font-size: 14px;
+            text-transform: uppercase;
+            color: #eff7ff;
+        }
+
+        .brand-sub {
+            font-size: 10px;
+            line-height: 1;
+            letter-spacing: 0.24em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-top: 3px;
+        }
+
+        .tab-rail {
+            background: rgba(5, 11, 24, 0.78);
+            border: 1px solid rgba(85, 236, 255, 0.2);
+            border-radius: 999px;
+            box-shadow: inset 0 0 18px rgba(0, 0, 0, 0.35);
+        }
+
+        .tab {
+            cursor: pointer;
+            padding: 8px 14px;
+            border-radius: 999px;
+            font-size: 12px;
+            color: var(--text-muted);
+            border: 1px solid transparent;
+            transition: all 200ms ease;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .tab:hover {
+            color: var(--text-main);
+            border-color: rgba(85, 236, 255, 0.24);
+            background: rgba(85, 236, 255, 0.06);
+        }
+
+        .tab.active {
+            color: #e8f8ff;
+            border-color: rgba(85, 236, 255, 0.6);
+            background:
+                linear-gradient(130deg, rgba(85, 236, 255, 0.18), rgba(124, 96, 255, 0.2));
+            box-shadow:
+                0 0 18px rgba(85, 236, 255, 0.24),
+                inset 0 0 16px rgba(143, 120, 255, 0.18);
+        }
+
+        .status-pill {
+            border: 1px solid rgba(85, 236, 255, 0.22);
+            border-radius: 999px;
+            background: rgba(2, 8, 20, 0.78);
+            box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.45);
+        }
+
+        .status-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: #4f5975;
+            transition: all 0.3s ease;
+        }
+
+        .status-dot.connected {
+            background: var(--success);
+            box-shadow: 0 0 14px rgba(58, 246, 163, 0.9);
+        }
+
+        .status-dot.connecting {
+            background: var(--warning);
+            animation: pulse 1.4s infinite;
+            box-shadow: 0 0 13px rgba(255, 180, 84, 0.65);
+        }
+
+        .status-dot.error {
+            background: var(--danger);
+            box-shadow: 0 0 13px rgba(255, 77, 125, 0.8);
+        }
+
+        .panel-shell {
+            width: min(100%, 1680px);
+            height: 100%;
+            border-radius: 22px;
+            border: 1px solid var(--line);
+            background: linear-gradient(155deg, rgba(6, 13, 28, 0.74), rgba(6, 13, 26, 0.9));
+            box-shadow:
+                inset 0 0 0 1px rgba(255, 255, 255, 0.02),
+                0 0 24px rgba(85, 236, 255, 0.12),
+                0 26px 44px rgba(0, 0, 0, 0.5);
+            padding: 14px;
+            overflow: hidden;
+        }
+
+        #mainPanels {
+            position: relative;
+            flex: 1;
+            width: 100%;
+            height: 100%;
+        }
+
+        #mainPanels > #panel-ops,
+        #mainPanels > #panel-surv {
+            position: absolute;
+            inset: 0;
+        }
+
+        #mainPanels.split-layout {
+            display: flex;
+            align-items: stretch;
+            gap: 0;
+            padding: 0;
+        }
+
+        #mainPanels.split-layout > #panel-ops,
+        #mainPanels.split-layout > #panel-surv {
+            position: relative;
+            inset: auto;
+            width: auto;
+            display: flex !important;
+            min-width: 320px;
+        }
+
+        #mainPanels.split-layout > #panel-ops {
+            flex: 0 0 56%;
+            padding-right: 2px;
+        }
+
+        #mainPanels.split-layout > #panel-surv {
+            flex: 1 1 auto;
+            padding-left: 2px;
+        }
+
+        #mainPanels.split-layout .panel-shell {
+            border-radius: 18px;
+        }
+
+        .split-divider {
+            display: none;
+            width: 6px;
+            cursor: col-resize;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 6px;
+            user-select: none;
+            touch-action: none;
+        }
+
+        .split-divider::before {
+            content: '';
+            width: 2px;
+            height: 34px;
+            border-radius: 999px;
+            background: linear-gradient(180deg, rgba(85, 236, 255, 0.35), rgba(255, 79, 216, 0.45));
+            box-shadow: 0 0 14px rgba(85, 236, 255, 0.36);
+        }
+
+        #mainPanels.split-layout #splitDivider {
+            display: flex;
+        }
+
+        .ops-stage {
+            width: 100%;
+            height: 100%;
+            border-radius: 16px;
+            background:
+                linear-gradient(150deg, rgba(8, 16, 34, 0.9), rgba(4, 9, 20, 0.94));
+            border: 1px solid rgba(85, 236, 255, 0.24);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px;
+            position: relative;
+        }
+
+        .ops-stage::before,
+        .ops-stage::after {
+            content: '';
+            position: absolute;
+            width: 34px;
+            height: 34px;
+            border: 2px solid rgba(85, 236, 255, 0.62);
+            opacity: 0.58;
+        }
+
+        .ops-stage::before {
+            top: 12px;
+            left: 12px;
+            border-right: none;
+            border-bottom: none;
+            border-radius: 6px 0 0 0;
+        }
+
+        .ops-stage::after {
+            bottom: 12px;
+            right: 12px;
+            border-left: none;
+            border-top: none;
+            border-radius: 0 0 6px 0;
+        }
+
+        canvas {
+            image-rendering: auto;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow:
+                0 18px 32px rgba(0, 0, 0, 0.55),
+                0 0 32px rgba(85, 236, 255, 0.16);
+            background: #01040b;
+        }
+
+        .surv-toolbar {
+            background: rgba(6, 12, 26, 0.88);
+            border-bottom: 1px solid rgba(85, 236, 255, 0.18);
+            backdrop-filter: blur(12px);
+        }
+
+        .surv-mode-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 11px;
+            font-size: 11px;
+            color: var(--text-muted);
+            border-radius: 999px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.18s ease;
+            background: transparent;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .surv-mode-btn:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.04);
+            border-color: rgba(85, 236, 255, 0.24);
+        }
+
+        .surv-mode-btn.active-mode {
+            color: #e9f7ff;
+            background: linear-gradient(120deg, rgba(85, 236, 255, 0.16), rgba(255, 79, 216, 0.18));
+            border-color: rgba(85, 236, 255, 0.52);
+            font-weight: 700;
+            box-shadow: 0 0 16px rgba(85, 236, 255, 0.22);
+        }
+
+        .dvr-form {
+            background: rgba(8, 14, 30, 0.92);
+            border-bottom: 1px solid rgba(85, 236, 255, 0.2);
+        }
+
+        .dvr-tab {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            font-size: 11px;
+            line-height: 1;
+            color: var(--text-muted);
+            border-radius: 9px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            background: rgba(4, 10, 22, 0.64);
+            transition: all 160ms ease;
+            white-space: nowrap;
+        }
+
+        .dvr-tab:hover {
+            color: var(--text-main);
+            border-color: rgba(85, 236, 255, 0.28);
+            background: rgba(85, 236, 255, 0.08);
+        }
+
+        .dvr-tab.active {
+            color: #e8fbff;
+            border-color: rgba(85, 236, 255, 0.55);
+            background: linear-gradient(120deg, rgba(85, 236, 255, 0.16), rgba(255, 79, 216, 0.14));
+            box-shadow: 0 0 16px rgba(85, 236, 255, 0.2);
+        }
+
+        .dvr-tab-name {
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .dvr-tab-meta {
+            margin-left: 2px;
+            font-size: 9px;
+            color: #5f799d;
+        }
+
+        .dvr-tab.active .dvr-tab-meta {
+            color: #8cefff;
+        }
+
+        .dvr-tab-action {
+            width: 16px;
+            height: 16px;
+            display: grid;
+            place-items: center;
+            border-radius: 6px;
+            color: #6f82a3;
+            font-size: 10px;
+            transition: color 140ms ease, background-color 140ms ease;
+        }
+
+        .dvr-tab-action:hover {
+            color: #a4f3ff;
+            background: rgba(85, 236, 255, 0.14);
+        }
+
+        .dvr-tab-action.danger:hover {
+            color: #ff7a9d;
+            background: rgba(255, 77, 125, 0.14);
+        }
+
+        .surv-grid {
+            background:
+                radial-gradient(100% 100% at 50% 0%, rgba(15, 34, 62, 0.62), rgba(2, 7, 17, 0.86));
+            padding: 10px;
+            gap: 8px;
+        }
+
+        .surv-cell {
+            position: relative;
+            background:
+                linear-gradient(145deg, rgba(8, 15, 31, 0.96), rgba(4, 9, 19, 0.98));
+            border: 1px solid rgba(85, 236, 255, 0.2);
+            border-radius: 12px;
+            overflow: hidden;
+            aspect-ratio: 16 / 9;
+            box-shadow:
+                inset 0 0 0 1px rgba(255, 255, 255, 0.02),
+                0 8px 20px rgba(0, 0, 0, 0.44);
+        }
+
+        .surv-cell::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background: linear-gradient(180deg, transparent 60%, rgba(0, 0, 0, 0.4));
+        }
+
+        .surv-cell img,
+        .surv-cell video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            background: #000;
+        }
+
+        .surv-cell .label {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 5px 8px;
+            background: rgba(2, 6, 14, 0.8);
+            border-top: 1px solid rgba(85, 236, 255, 0.18);
+            font-size: 11px;
+            color: #9ab2d9;
+            z-index: 2;
+            backdrop-filter: blur(4px);
+        }
+
+        .cyber-input,
+        .cyber-select {
+            background: rgba(2, 9, 23, 0.78);
+            border: 1px solid rgba(85, 236, 255, 0.22);
+            color: var(--text-main);
+            border-radius: 10px;
+            transition: border-color 120ms ease, box-shadow 120ms ease;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.35);
+        }
+
+        .cyber-input::placeholder {
+            color: #54688b;
+        }
+
+        .cyber-input:focus,
+        .cyber-select:focus {
+            outline: none;
+            border-color: rgba(85, 236, 255, 0.64);
+            box-shadow:
+                inset 0 0 0 1px rgba(85, 236, 255, 0.24),
+                0 0 0 3px rgba(85, 236, 255, 0.12);
+        }
+
+        .neo-btn {
+            border-radius: 10px;
+            border: 1px solid rgba(125, 255, 176, 0.35);
+            background: linear-gradient(135deg, rgba(38, 190, 128, 0.32), rgba(8, 99, 74, 0.5));
+            color: #d9ffe9;
+            box-shadow: 0 0 18px rgba(74, 255, 161, 0.14);
+        }
+
+        .neo-btn:hover {
+            border-color: rgba(125, 255, 176, 0.58);
+            box-shadow: 0 0 20px rgba(74, 255, 161, 0.24);
+        }
+
+        .control-dock {
+            border-radius: 18px;
+            border: 1px solid rgba(85, 236, 255, 0.34);
+            background: linear-gradient(150deg, rgba(8, 16, 33, 0.9), rgba(5, 10, 21, 0.95));
+            box-shadow:
+                inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+                0 16px 34px rgba(0, 0, 0, 0.58),
+                0 0 28px rgba(85, 236, 255, 0.14);
+            backdrop-filter: blur(16px);
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 11px;
+            background: rgba(2, 8, 19, 0.76);
+            border: 1px solid rgba(85, 236, 255, 0.2);
+            border-radius: 12px;
+        }
+
+        #connectBtn {
+            border: 1px solid rgba(110, 235, 255, 0.46);
+            box-shadow:
+                0 8px 16px rgba(0, 0, 0, 0.35),
+                0 0 18px rgba(18, 191, 240, 0.34);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        #connectBtn:hover {
+            transform: translateY(-1px);
+            box-shadow:
+                0 10px 22px rgba(0, 0, 0, 0.38),
+                0 0 24px rgba(36, 228, 255, 0.4);
+        }
+
+        .error-toast {
+            position: fixed;
+            top: 82px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            padding: 11px 22px;
+            background: linear-gradient(120deg, rgba(255, 70, 109, 0.9), rgba(180, 35, 76, 0.9));
+            color: white;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            display: none;
+            border: 1px solid rgba(255, 150, 177, 0.45);
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.42);
+            backdrop-filter: blur(8px);
+        }
+
+        @media (max-width: 1024px) {
+            .cyber-header {
+                padding-top: 10px;
+                padding-bottom: 10px;
+            }
+
+            .brand-sub {
+                display: none;
+            }
+
+            #panel-ops {
+                padding-top: 130px;
+            }
+
+            #panel-surv {
+                padding-top: 120px;
+            }
+        }
+
+        @media (max-width: 720px) {
+            .tab {
+                padding: 7px 10px;
+                font-size: 11px;
+            }
+
+            #mainPanels.split-layout {
+                padding: 0;
+            }
+
+            #mainPanels.split-layout > #panel-ops,
+            #mainPanels.split-layout > #panel-surv {
+                min-width: 0;
+            }
+
+            #panel-ops {
+                padding-top: 150px;
+                padding-bottom: 150px;
+            }
+
+            #panel-surv {
+                padding-top: 142px;
+                padding-bottom: 150px;
+            }
+
+            .control-dock {
+                width: calc(100% - 18px);
+                left: 9px;
+                transform: none;
+            }
+        }
     </style>
 </head>
-<body class="text-slate-200 antialiased h-screen w-screen overflow-hidden flex flex-col">
+<body class="text-slate-100 antialiased h-screen w-screen overflow-hidden flex flex-col">
 
     <!-- Error Toast -->
     <div id="errorToast" class="error-toast"></div>
 
     <!-- Header -->
-    <header class="absolute top-4 inset-x-4 z-20 flex justify-between items-center px-6 py-3 glass rounded-2xl shadow-xl">
-        <div class="flex items-center gap-3">
-            <div class="p-1.5 bg-gradient-to-br from-brand-500 to-indigo-600 rounded-lg">
-                <i data-lucide="monitor-play" class="w-4 h-4 text-white"></i>
+    <header class="cyber-header absolute top-4 inset-x-4 z-20 flex flex-wrap lg:flex-nowrap justify-between items-center gap-3 px-4 lg:px-6 py-3 rounded-2xl">
+        <div class="flex items-center gap-3 min-w-[170px]">
+            <div class="brand-mark">
+                <i data-lucide="monitor-play" class="w-4 h-4 text-cyan-100"></i>
             </div>
-            <h1 class="text-sm font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent tracking-wide">OpsView</h1>
+            <div>
+                <h1 class="brand-title">OpsView</h1>
+                <p class="brand-sub">Neural Relay Console</p>
+            </div>
         </div>
 
         <!-- Tabs -->
-        <div class="flex items-center gap-1">
+        <div class="tab-rail flex items-center gap-1 p-1">
             <div class="tab active" data-panel="ops" onclick="switchTab('ops')">
                 <i data-lucide="monitor" class="w-3.5 h-3.5 inline mr-1"></i><span data-i18n="ops">Ops</span>
             </div>
             <div class="tab" data-panel="surv" onclick="switchTab('surv')">
                 <i data-lucide="camera" class="w-3.5 h-3.5 inline mr-1"></i><span data-i18n="cameras">Cameras</span>
             </div>
+            <div class="tab" data-panel="split" onclick="switchTab('split')">
+                <i data-lucide="columns-2" class="w-3.5 h-3.5 inline mr-1"></i><span data-i18n="split">Split</span>
+            </div>
         </div>
 
-        <div class="flex items-center gap-4">
-            <div id="stats" class="text-xs font-mono text-slate-400 hidden sm:block"></div>
-            <select id="langSelect" onchange="changeLang(this.value)" class="bg-black/40 border border-white/5 rounded-lg px-2 py-1 text-[11px] text-slate-300 outline-none">
+        <div class="flex items-center gap-2 lg:gap-3 ml-auto">
+            <div id="stats" class="text-xs font-mono text-cyan-200/70 hidden xl:block"></div>
+            <select id="langSelect" onchange="changeLang(this.value)" class="cyber-select px-2.5 py-1.5 text-[11px] font-semibold">
                 <option value="en">EN</option>
                 <option value="ko">한국어</option>
                 <option value="ja">日本語</option>
                 <option value="pt">PT</option>
                 <option value="es">ES</option>
             </select>
-            <div class="flex items-center gap-2 px-3 py-1.5 bg-black/40 rounded-full border border-white/5">
+            <div class="status-pill flex items-center gap-2 px-3 py-1.5">
                 <span id="statusDot" class="status-dot"></span>
-                <span id="statusText" class="text-xs font-medium text-slate-300 tracking-wide uppercase" data-i18n="disconnected">Disconnected</span>
+                <span id="statusText" class="text-[11px] font-semibold tracking-[0.15em] uppercase text-slate-300" data-i18n="disconnected">Disconnected</span>
             </div>
         </div>
     </header>
 
-    <!-- Ops Panel -->
-    <div id="panel-ops" class="flex-1 w-full h-full flex items-center justify-center p-6 pt-24 pb-28">
-        <div class="w-full h-full flex items-center justify-center">
-            <canvas id="screen" class="max-w-full max-h-full object-contain"></canvas>
-        </div>
-    </div>
-
-    <!-- Surveillance Panel -->
-    <div id="panel-surv" class="flex-1 w-full h-full flex flex-col pt-20 pb-24 overflow-hidden" style="display:none">
-        <!-- Mode Switcher + DVR Tabs Bar -->
-        <div class="flex items-center gap-1 px-4 py-2 border-b border-white/5 bg-surface-50/50 flex-shrink-0">
-            <div class="flex items-center gap-1 mr-3 border-r border-white/5 pr-3">
-                <button class="surv-mode-btn active-mode" data-mode="auto" onclick="setSurvMode('auto')" title="Auto (Relay HLS)">
-                    <i data-lucide="radio" class="w-3 h-3"></i>
-                    <span data-i18n="auto">Auto</span>
-                </button>
-                <button class="surv-mode-btn" data-mode="manual" onclick="setSurvMode('manual')" title="Manual DVR Config">
-                    <i data-lucide="settings" class="w-3 h-3"></i>
-                    <span data-i18n="manual">Manual</span>
-                </button>
-            </div>
-            <div id="dvrManualBar" class="flex items-center gap-1 flex-1" style="display:none">
-                <div id="dvrTabs" class="flex items-center gap-1 overflow-x-auto flex-1"></div>
-                <button onclick="showAddDVRForm()" class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-emerald-400 rounded-md hover:bg-emerald-500/10 transition-all font-medium whitespace-nowrap">
-                    <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> <span data-i18n="addDvr">Add DVR</span>
-                </button>
+    <main id="mainPanels" class="flex-1 w-full h-full">
+        <!-- Ops Panel -->
+        <div id="panel-ops" class="w-full h-full flex items-center justify-center px-4 lg:px-6 pt-28 pb-28">
+            <div class="panel-shell flex items-center justify-center">
+                <div class="ops-stage">
+                    <canvas id="screen" class="max-w-full max-h-full object-contain"></canvas>
+                </div>
             </div>
         </div>
 
-        <!-- Add/Edit DVR Form (hidden by default) -->
-        <div id="dvrForm" style="display:none" class="px-4 py-3 border-b border-white/5 bg-surface-100/60 flex-shrink-0">
-            <div class="max-w-3xl mx-auto space-y-3">
-                <div class="flex items-center justify-between">
-                    <h3 class="text-sm font-medium text-slate-300" id="dvrFormTitle" data-i18n="addDvrTitle">Add DVR</h3>
-                    <button onclick="hideDVRForm()" class="text-slate-500 hover:text-slate-300 transition-colors">
-                        <i data-lucide="x" class="w-4 h-4"></i>
+        <div id="splitDivider" class="split-divider" onmousedown="startSplitDrag(event)"></div>
+
+        <!-- Surveillance Panel -->
+        <div id="panel-surv" class="w-full h-full flex flex-col pt-24 pb-24 overflow-hidden px-4 lg:px-6" style="display:none">
+            <div class="panel-shell !p-0 flex flex-col">
+            <!-- Mode Switcher + DVR Tabs Bar -->
+            <div class="surv-toolbar flex items-center gap-1 px-4 py-2.5 flex-shrink-0">
+                <div class="flex items-center gap-1 mr-3 border-r border-cyan-300/20 pr-3">
+                    <button class="surv-mode-btn active-mode" data-mode="auto" onclick="setSurvMode('auto')" title="Auto (Relay HLS)">
+                        <i data-lucide="radio" class="w-3 h-3"></i>
+                        <span data-i18n="auto">Auto</span>
+                    </button>
+                    <button class="surv-mode-btn" data-mode="manual" onclick="setSurvMode('manual')" title="Manual DVR Config">
+                        <i data-lucide="settings" class="w-3 h-3"></i>
+                        <span data-i18n="manual">Manual</span>
                     </button>
                 </div>
-                <div class="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                    <input type="text" id="dvrName" placeholder="Name" value="DVR-1" data-i18n-placeholder="namePlaceholder" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600">
-                    <input type="text" id="dvrAddr" placeholder="IP Address" data-i18n-placeholder="ipPlaceholder" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600">
-                    <input type="number" id="dvrPort" value="80" placeholder="Port" data-i18n-placeholder="portPlaceholder" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600 w-full">
-                    <input type="text" id="dvrUser" placeholder="Username" data-i18n-placeholder="userPlaceholder" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600">
-                    <input type="password" id="dvrPass" placeholder="Password" data-i18n-placeholder="passPlaceholder" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[13px] text-slate-200 outline-none placeholder-slate-600">
-                    <select id="dvrChannels" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[12px] text-slate-300 outline-none">
-                        <option value="4">4ch</option>
-                        <option value="8">8ch</option>
-                        <option value="16" selected>16ch</option>
-                        <option value="32">32ch</option>
-                    </select>
-                </div>
-                <div class="flex items-center gap-2">
-                    <select id="dvrProto" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[12px] text-slate-300 outline-none">
-                        <option value="isapi" data-i18n="isapiSnapshot">ISAPI Snapshot</option>
-                        <option value="rtsp-hls" data-i18n="rtspHls">RTSP → HLS</option>
-                    </select>
-                    <select id="dvrQuality" class="bg-black/30 border border-white/5 rounded-lg px-3 py-2 text-[12px] text-slate-300 outline-none">
-                        <option value="01" data-i18n="mainStream">Main Stream</option>
-                        <option value="02" selected data-i18n="subStream">Sub Stream</option>
-                    </select>
-                    <div class="flex-1"></div>
-                    <button onclick="saveDVR()" class="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-[12px] rounded-lg transition-colors font-medium">
-                        <i data-lucide="check" class="w-3.5 h-3.5"></i> <span data-i18n="saveGenerate">Save & Generate</span>
+                <div id="dvrManualBar" class="flex items-center gap-1 flex-1" style="display:none">
+                    <div id="dvrTabs" class="flex items-center gap-1 overflow-x-auto flex-1"></div>
+                    <button onclick="showAddDVRForm()" class="neo-btn flex items-center gap-1.5 px-3 py-1.5 text-[11px] transition-all font-semibold whitespace-nowrap">
+                        <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> <span data-i18n="addDvr">Add DVR</span>
                     </button>
                 </div>
             </div>
-        </div>
 
-        <!-- Surv Grid -->
-        <div id="survGrid" class="flex-1 grid gap-1.5 p-2 overflow-y-auto bg-black/30 align-content-start" style="grid-template-columns: repeat(4, 1fr)"></div>
+            <!-- Add/Edit DVR Form (hidden by default) -->
+            <div id="dvrForm" style="display:none" class="dvr-form px-4 py-3 flex-shrink-0">
+                <div class="max-w-3xl mx-auto space-y-3">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-sm font-semibold text-cyan-100 tracking-[0.08em] uppercase" id="dvrFormTitle" data-i18n="addDvrTitle">Add DVR</h3>
+                        <button onclick="hideDVRForm()" class="text-slate-500 hover:text-cyan-200 transition-colors">
+                            <i data-lucide="x" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                        <input type="text" id="dvrName" placeholder="Name" value="DVR-1" data-i18n-placeholder="namePlaceholder" class="cyber-input px-3 py-2 text-[13px]">
+                        <input type="text" id="dvrAddr" placeholder="IP Address" data-i18n-placeholder="ipPlaceholder" class="cyber-input px-3 py-2 text-[13px]">
+                        <input type="number" id="dvrPort" value="80" placeholder="Port" data-i18n-placeholder="portPlaceholder" class="cyber-input px-3 py-2 text-[13px] w-full">
+                        <input type="text" id="dvrUser" placeholder="Username" data-i18n-placeholder="userPlaceholder" class="cyber-input px-3 py-2 text-[13px]">
+                        <input type="password" id="dvrPass" placeholder="Password" data-i18n-placeholder="passPlaceholder" class="cyber-input px-3 py-2 text-[13px]">
+                        <select id="dvrChannels" class="cyber-select px-3 py-2 text-[12px]">
+                            <option value="4">4ch</option>
+                            <option value="8">8ch</option>
+                            <option value="16" selected>16ch</option>
+                            <option value="32">32ch</option>
+                        </select>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <select id="dvrProto" class="cyber-select px-3 py-2 text-[12px]">
+                            <option value="isapi" data-i18n="isapiSnapshot">ISAPI Snapshot</option>
+                            <option value="rtsp-hls" data-i18n="rtspHls">RTSP → HLS</option>
+                        </select>
+                        <select id="dvrQuality" class="cyber-select px-3 py-2 text-[12px]">
+                            <option value="01" data-i18n="mainStream">Main Stream</option>
+                            <option value="02" selected data-i18n="subStream">Sub Stream</option>
+                        </select>
+                        <div class="flex-1"></div>
+                        <button onclick="saveDVR()" class="neo-btn flex items-center gap-2 px-5 py-2 text-[12px] font-semibold">
+                            <i data-lucide="check" class="w-3.5 h-3.5"></i> <span data-i18n="saveGenerate">Save & Generate</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
 
-        <!-- Empty state -->
-        <div id="survEmpty" class="flex-1 flex items-center justify-center text-slate-500 text-sm gap-2">
-            <i data-lucide="camera-off" class="w-5 h-5"></i>
-            <span data-i18n="noCameras">No cameras configured. Click "Add DVR" to get started.</span>
+            <!-- Surv Grid -->
+            <div id="survGrid" class="surv-grid flex-1 grid overflow-y-auto align-content-start" style="grid-template-columns: repeat(4, 1fr)"></div>
+
+            <!-- Empty state -->
+            <div id="survEmpty" class="flex-1 flex items-center justify-center text-slate-400 text-sm gap-2">
+                <i data-lucide="camera-off" class="w-5 h-5"></i>
+                <span data-i18n="noCameras">No cameras configured. Click "Add DVR" to get started.</span>
+            </div>
         </div>
-    </div>
+        </div>
+    </main>
 
     <!-- Bottom Settings Bar -->
-    <footer class="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 w-fit max-w-[90%] px-2 py-2 glass rounded-2xl shadow-2xl flex flex-wrap sm:flex-nowrap items-center gap-3">
+    <footer class="control-dock absolute bottom-5 left-1/2 -translate-x-1/2 z-20 w-fit max-w-[96%] px-2.5 py-2.5 flex flex-wrap sm:flex-nowrap items-center gap-2.5">
         <div class="flex items-center gap-1">
-            <select id="proto" class="bg-black/30 border border-white/5 rounded-lg px-2 py-2 text-[13px] text-slate-200 outline-none">
+            <select id="proto" class="cyber-select px-2 py-2 text-[13px]">
                 <option value="ws">ws://</option>
                 <option value="wss">wss://</option>
             </select>
         </div>
-        <div class="flex items-center gap-2 px-3 py-2 bg-black/30 border border-white/5 rounded-xl">
-            <i data-lucide="server" class="w-3.5 h-3.5 text-slate-400"></i>
+
+        <div class="control-group">
+            <i data-lucide="server" class="w-3.5 h-3.5 text-cyan-200/80"></i>
             <input type="text" id="relayIp" value="127.0.0.1"
-                   class="bg-transparent border-none outline-none text-[13px] text-slate-200 w-[130px] placeholder-slate-600" placeholder="IP">
-            <span class="text-slate-500 font-bold">:</span>
+                   class="cyber-input bg-transparent border-none shadow-none !p-0 text-[13px] w-[130px]" placeholder="IP">
+            <span class="text-cyan-300/60 font-bold">:</span>
             <input type="text" id="relayPort" value="8080"
-                   class="bg-transparent border-none outline-none text-[13px] text-slate-200 w-[50px] placeholder-slate-600 text-center" placeholder="Port">
+                   class="cyber-input bg-transparent border-none shadow-none !p-0 text-[13px] w-[50px] text-center" placeholder="Port">
         </div>
-        <div class="flex items-center gap-2 px-3 py-2 bg-black/30 border border-white/5 rounded-xl">
-            <i data-lucide="key-round" class="w-3.5 h-3.5 text-slate-400"></i>
+
+        <div class="control-group">
+            <i data-lucide="key-round" class="w-3.5 h-3.5 text-cyan-200/80"></i>
             <input type="text" id="pin" placeholder="6-digit PIN" data-i18n-placeholder="pinPlaceholder"
-                   class="bg-transparent border-none outline-none text-[13px] text-slate-200 w-[120px] placeholder-slate-600 tracking-widest font-mono">
+                   class="cyber-input bg-transparent border-none shadow-none !p-0 text-[13px] w-[120px] tracking-[0.18em] font-mono">
         </div>
+
         <button id="connectBtn" onclick="toggleConnection()"
-            class="px-5 py-2 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 text-white font-semibold text-[13px] tracking-wide transition-all shadow-lg shadow-brand-500/20 min-w-[110px]">
+            class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-500 hover:from-cyan-400 hover:to-indigo-400 text-white font-bold text-[12px] transition-all min-w-[116px]">
             <span id="connectBtnText" data-i18n="connect">Connect</span>
         </button>
     </footer>

@@ -4,6 +4,7 @@ const i18n = {
   en: {
     'ops': 'Ops',
     'cameras': 'Cameras',
+    'split': 'Split',
     'connect': 'Connect',
     'disconnect': 'Disconnect',
     'disconnected': 'Disconnected',
@@ -38,6 +39,7 @@ const i18n = {
   ko: {
     'ops': 'Ops',
     'cameras': '카메라',
+    'split': '분할',
     'connect': '연결',
     'disconnect': '연결 해제',
     'disconnected': '연결 안됨',
@@ -72,6 +74,7 @@ const i18n = {
   ja: {
     'ops': 'Ops',
     'cameras': 'カメラ',
+    'split': '分割',
     'connect': '接続',
     'disconnect': '切断',
     'disconnected': '未接続',
@@ -106,6 +109,7 @@ const i18n = {
   pt: {
     'ops': 'Ops',
     'cameras': 'Câmeras',
+    'split': 'Dividido',
     'connect': 'Conectar',
     'disconnect': 'Desconectar',
     'disconnected': 'Desconectado',
@@ -140,6 +144,7 @@ const i18n = {
   es: {
     'ops': 'Ops',
     'cameras': 'Cámaras',
+    'split': 'Dividido',
     'connect': 'Conectar',
     'disconnect': 'Desconectar',
     'disconnected': 'Desconectado',

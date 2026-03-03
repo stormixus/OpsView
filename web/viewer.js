@@ -15,12 +15,21 @@ const MSG_FRAME_DELTA = 3;
 const MSG_HEARTBEAT = 6;
 const MSG_ERROR = 7;
 const MSG_SURV_CONFIG = 8;
+const LS_PANEL_KEY = 'opsview_web_panel';
+const LS_SPLIT_RATIO_KEY = 'opsview_web_split_ratio';
+const LS_AUTO_RECONNECT_KEY = 'opsview_web_auto_reconnect';
 
 // --- State ---
 let ws = null;
 let connected = false;
 let canvas, ctx;
+let opsStage = null;
 let screenWidth = 0, screenHeight = 0;
+let activePanel = 'ops';
+let splitRatio = parseFloat(localStorage.getItem(LS_SPLIT_RATIO_KEY) || '56');
+const SPLIT_MIN = 28;
+const SPLIT_MAX = 72;
+let splitDragging = false;
 let frameCount = 0;
 let lastFpsTime = 0;
 let fps = 0;
@@ -39,6 +48,7 @@ let survMode = 'auto'; // 'auto' (relay HLS) or 'manual' (local DVR config)
 document.addEventListener('DOMContentLoaded', () => {
   canvas = document.getElementById('screen');
   ctx = canvas.getContext('2d');
+  opsStage = document.querySelector('.ops-stage');
 
   // Load saved settings
   const savedIp = localStorage.getItem('opsview_relay_ip');
@@ -55,16 +65,140 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('proto').value = 'wss';
   }
 
+  window.addEventListener('resize', fitCanvasToStage);
+  window.addEventListener('mousemove', onSplitDragMove);
+  window.addEventListener('mouseup', stopSplitDrag);
+  requestAnimationFrame(fitCanvasToStage);
+
   setInterval(updateStats, 1000);
   applyI18n();
+
+  const savedPanel = localStorage.getItem(LS_PANEL_KEY);
+  if (savedPanel === 'surv' || savedPanel === 'split' || savedPanel === 'ops') {
+    switchTab(savedPanel);
+  } else {
+    switchTab('ops');
+  }
+
+  // Restore last successful connection after refresh unless user explicitly disconnected.
+  if (
+    localStorage.getItem(LS_AUTO_RECONNECT_KEY) === '1' &&
+    savedIp && savedPort
+  ) {
+    setTimeout(() => connect(), 200);
+  }
 });
 
 // --- Tabs ---
 function switchTab(panel) {
+  activePanel = panel;
+  localStorage.setItem(LS_PANEL_KEY, panel);
+
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelector(`.tab[data-panel="${panel}"]`).classList.add('active');
-  document.getElementById('panel-ops').style.display = panel === 'ops' ? '' : 'none';
-  document.getElementById('panel-surv').style.display = panel === 'surv' ? '' : 'none';
+
+  const mainPanels = document.getElementById('mainPanels');
+  const opsPanel = document.getElementById('panel-ops');
+  const survPanel = document.getElementById('panel-surv');
+  const split = panel === 'split';
+
+  if (mainPanels) mainPanels.classList.toggle('split-layout', split);
+
+  opsPanel.style.display = (panel === 'ops' || split) ? 'flex' : 'none';
+  survPanel.style.display = (panel === 'surv' || split) ? 'flex' : 'none';
+
+  applySplitRatio();
+  if (panel === 'ops' || split) requestAnimationFrame(fitCanvasToStage);
+}
+
+function clampSplitRatio(ratio) {
+  if (!Number.isFinite(ratio)) return 56;
+  return Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, ratio));
+}
+
+function applySplitRatio() {
+  const mainPanels = document.getElementById('mainPanels');
+  const opsPanel = document.getElementById('panel-ops');
+  const survPanel = document.getElementById('panel-surv');
+  if (!mainPanels || !opsPanel || !survPanel) return;
+
+  splitRatio = clampSplitRatio(splitRatio);
+
+  if (mainPanels.classList.contains('split-layout')) {
+    opsPanel.style.flex = `0 0 ${splitRatio}%`;
+    survPanel.style.flex = '1 1 0';
+  } else {
+    opsPanel.style.flex = '';
+    survPanel.style.flex = '';
+  }
+}
+
+function startSplitDrag(event) {
+  const mainPanels = document.getElementById('mainPanels');
+  if (!mainPanels || !mainPanels.classList.contains('split-layout')) return;
+
+  splitDragging = true;
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+  event.preventDefault();
+}
+
+function onSplitDragMove(event) {
+  if (!splitDragging || activePanel !== 'split') return;
+
+  const mainPanels = document.getElementById('mainPanels');
+  if (!mainPanels) return;
+
+  const rect = mainPanels.getBoundingClientRect();
+  if (rect.width <= 0) return;
+
+  const x = event.clientX - rect.left;
+  splitRatio = (x / rect.width) * 100;
+  applySplitRatio();
+  requestAnimationFrame(fitCanvasToStage);
+}
+
+function stopSplitDrag() {
+  if (!splitDragging) return;
+  splitDragging = false;
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  localStorage.setItem(LS_SPLIT_RATIO_KEY, String(clampSplitRatio(splitRatio)));
+}
+
+function fitCanvasToStage() {
+  if (!canvas || !opsStage) return;
+
+  const stageRect = opsStage.getBoundingClientRect();
+  if (stageRect.width <= 0 || stageRect.height <= 0) return;
+
+  // Exclude stage padding so we fit to the actual drawable viewport.
+  const style = getComputedStyle(opsStage);
+  const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+  const padY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+  const availW = Math.max(1, stageRect.width - padX);
+  const availH = Math.max(1, stageRect.height - padY);
+
+  if (screenWidth <= 0 || screenHeight <= 0) {
+    canvas.style.width = `${Math.floor(availW)}px`;
+    canvas.style.height = `${Math.floor(availH)}px`;
+    return;
+  }
+
+  const sourceRatio = screenWidth / screenHeight;
+  const stageRatio = availW / availH;
+
+  let renderW, renderH;
+  if (stageRatio > sourceRatio) {
+    renderH = availH;
+    renderW = renderH * sourceRatio;
+  } else {
+    renderW = availW;
+    renderH = renderW / sourceRatio;
+  }
+
+  canvas.style.width = `${Math.floor(renderW)}px`;
+  canvas.style.height = `${Math.floor(renderH)}px`;
 }
 
 // --- Error toast ---
@@ -122,6 +256,7 @@ function connect() {
     connected = true;
     reconnectAttempts = 0;
     clearTimeout(reconnectTimer);
+    localStorage.setItem(LS_AUTO_RECONNECT_KEY, '1');
     setStatus('connected', t('connected'));
     document.getElementById('connectBtnText').textContent = t('disconnect');
     document.getElementById('connectBtn').classList.add('!from-rose-600', '!to-rose-500');
@@ -207,6 +342,7 @@ function connect() {
 function disconnect() {
   reconnectAttempts = MAX_RECONNECT; // prevent auto-reconnect
   clearTimeout(reconnectTimer);
+  localStorage.removeItem(LS_AUTO_RECONNECT_KEY);
   if (ws) { ws.close(); ws = null; }
   connected = false;
   setStatus('error', t('disconnected'));
@@ -248,6 +384,7 @@ function handleFrameDelta(buffer, offset, payloadLen) {
     screenHeight = height;
     canvas.width = width;
     canvas.height = height;
+    fitCanvasToStage();
   }
 
   for (let i = 0; i < tileCount; i++) {
@@ -459,13 +596,13 @@ function renderDVRTabs() {
   dvrs.forEach(d => {
     const isActive = d.id === activeDvrId;
     const tab = document.createElement('div');
-    tab.className = `flex items-center gap-1.5 px-3 py-1.5 text-[11px] rounded-md cursor-pointer transition-all whitespace-nowrap ${isActive ? 'text-cyan-300 bg-cyan-500/10 font-semibold' : 'text-slate-500 hover:text-slate-300 hover:bg-white/[0.04]'}`;
+    tab.className = `dvr-tab${isActive ? ' active' : ''}`;
     tab.innerHTML = `
       <i data-lucide="hard-drive" class="w-3 h-3"></i>
-      <span>${d.name}</span>
-      <span class="text-[9px] ${isActive ? 'text-cyan-500' : 'text-slate-600'} ml-1">${d.channelCount}ch</span>
-      <button class="edit-dvr ml-1 text-slate-600 hover:text-cyan-400 transition-colors text-[10px]" title="Edit">&#9998;</button>
-      <button class="del-dvr ml-0.5 text-slate-600 hover:text-rose-400 transition-colors text-[10px]" title="Delete">&times;</button>
+      <span class="dvr-tab-name">${d.name}</span>
+      <span class="dvr-tab-meta">${d.channelCount}ch</span>
+      <button class="edit-dvr dvr-tab-action" title="Edit">&#9998;</button>
+      <button class="del-dvr dvr-tab-action danger" title="Delete">&times;</button>
     `;
     tab.addEventListener('click', (e) => {
       if (e.target.closest('.del-dvr')) { e.stopPropagation(); deleteDVR(d.id); return; }
