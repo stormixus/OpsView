@@ -24,7 +24,7 @@ viewer:
 	cd viewer && wails build
 
 docker:
-	docker build -t opsview-relay -f relay/Dockerfile .
+	cd relay && docker compose build
 
 clean:
 	rm -rf build/

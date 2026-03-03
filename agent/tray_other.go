@@ -21,6 +21,11 @@ func runTray(cfg Config) {
 		TileSize: 128,
 	}
 	agent := NewAgent(agentCfg)
+	agent.survMgr = cfg.SurvMgr
+	webSurvMgr = cfg.SurvMgr
+	if agent.survMgr != nil {
+		agent.survMgr.onChange = func() { agent.sendSurvConfig() }
+	}
 	agent.Run()
 }
 

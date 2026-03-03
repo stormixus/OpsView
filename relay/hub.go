@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,10 +25,11 @@ var upgrader = websocket.Upgrader{
 type Hub struct {
 	cfg Config
 
-	mu         sync.RWMutex
-	publisher  *websocket.Conn
-	pubWriteMu sync.Mutex
-	watchers   map[*Watcher]struct{}
+	mu           sync.RWMutex
+	publisher    *websocket.Conn
+	pubWriteMu   sync.Mutex
+	watchers     map[*Watcher]struct{}
+	publisherPIN string // PIN set by the publisher; watchers must match
 
 	// Metrics
 	publishCount  atomic.Int64
@@ -41,10 +41,18 @@ type Hub struct {
 	broadcast   chan []byte
 	done        chan struct{}
 	testPattern *TestPattern
+
+	// Surveillance config cache (last MsgSurvConfig from publisher)
+	survConfig   []byte
+	survConfigMu sync.RWMutex
+
+	// Watcher ID counter for snapshot routing
+	watcherIDSeq atomic.Uint32
 }
 
 // Watcher wraps a viewer WebSocket connection with a send queue.
 type Watcher struct {
+	id   uint32
 	conn *websocket.Conn
 	send chan []byte
 	ip   string
@@ -109,7 +117,8 @@ func (h *Hub) HandlePublish(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[relay] publisher connecting from %s", ip)
 
 	// Read HELLO + AUTH
-	if !h.authenticatePublisher(conn) {
+	auth, ok := h.authenticatePublisher(conn)
+	if !ok {
 		conn.Close()
 		return
 	}
@@ -124,17 +133,23 @@ func (h *Hub) HandlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.publisher = conn
+	h.publisherPIN = auth.Token
 	h.mu.Unlock()
 
 	// Stop test pattern now that a real publisher is connected
 	h.testPattern.Stop()
 
-	log.Printf("[relay] publisher authenticated from %s", ip)
+	// Notify agent that authentication succeeded
+	readyMsg := proto.MarshalMessage(proto.MsgReady, nil)
+	conn.WriteMessage(websocket.BinaryMessage, readyMsg)
+
+	log.Printf("[relay] publisher authenticated from %s (PIN stored)", ip)
 
 	defer func() {
 		h.mu.Lock()
 		if h.publisher == conn {
 			h.publisher = nil
+			h.publisherPIN = ""
 		}
 		h.mu.Unlock()
 		conn.Close()
@@ -157,12 +172,39 @@ func (h *Hub) HandlePublish(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		hdr, hdrErr := proto.DecodeHeader(data)
+		if hdrErr != nil {
+			continue
+		}
+
 		h.publishCount.Add(1)
 		h.lastPublishAt.Store(time.Now().UnixMilli())
 		h.bytesIn.Add(int64(len(data)))
 
-		// Forward complete OVP message to all watchers
-		h.broadcast <- data
+		switch hdr.Type {
+		case proto.MsgSurvConfig:
+			// Cache and broadcast surveillance config
+			configData := make([]byte, len(data))
+			copy(configData, data)
+			h.survConfigMu.Lock()
+			h.survConfig = configData
+			h.survConfigMu.Unlock()
+			log.Printf("[relay] cached surveillance config (%d bytes)", len(data))
+			h.broadcast <- data
+
+		case proto.MsgSurvSnapshot:
+			// Snapshot response from publisher — route to specific watcher
+			if len(data) > proto.HeaderSize {
+				var resp proto.SnapshotResponse
+				if json.Unmarshal(data[proto.HeaderSize:], &resp) == nil {
+					h.routeSnapshotResponse(resp.ReqID, data)
+				}
+			}
+
+		default:
+			// Forward all other messages (frames, heartbeats, etc.)
+			h.broadcast <- data
+		}
 	}
 }
 
@@ -183,6 +225,7 @@ func (h *Hub) HandleWatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	watcher := &Watcher{
+		id:   h.watcherIDSeq.Add(1),
 		conn: conn,
 		send: make(chan []byte, h.cfg.MaxWatcherQueue),
 		ip:   ip,
@@ -193,7 +236,20 @@ func (h *Hub) HandleWatch(w http.ResponseWriter, r *http.Request) {
 	h.watcherCount.Add(1)
 	h.mu.Unlock()
 
-	log.Printf("[relay] watcher authenticated from %s (total: %d)", ip, h.watcherCount.Load())
+	// Notify watcher that authentication succeeded
+	readyMsg := proto.MarshalMessage(proto.MsgReady, nil)
+	conn.WriteMessage(websocket.BinaryMessage, readyMsg)
+
+	// Send cached surveillance config if available
+	h.survConfigMu.RLock()
+	cachedConfig := h.survConfig
+	h.survConfigMu.RUnlock()
+	if len(cachedConfig) > 0 {
+		conn.WriteMessage(websocket.BinaryMessage, cachedConfig)
+		log.Printf("[relay] sent cached surveillance config to watcher %s", ip)
+	}
+
+	log.Printf("[relay] watcher authenticated from %s (id=%d, total: %d)", ip, watcher.id, h.watcherCount.Load())
 
 	defer func() {
 		h.removeWatcher(watcher)
@@ -203,7 +259,7 @@ func (h *Hub) HandleWatch(w http.ResponseWriter, r *http.Request) {
 	// Write pump
 	go h.watcherWritePump(watcher)
 
-	// Read pump: just keep reading to detect close / handle CONTROL
+	// Read pump: just keep reading to detect close / handle CONTROL and SNAPSHOT
 	for {
 		msgType, data, err := conn.ReadMessage()
 		if err != nil {
@@ -211,15 +267,33 @@ func (h *Hub) HandleWatch(w http.ResponseWriter, r *http.Request) {
 		}
 		if msgType == websocket.BinaryMessage && len(data) >= proto.HeaderSize {
 			hdr, hdrErr := proto.DecodeHeader(data)
-			if hdrErr == nil && hdr.Type == proto.MsgControl {
-				// Forward control message to publisher.
+			if hdrErr != nil {
+				continue
+			}
+			switch hdr.Type {
+			case proto.MsgControl:
 				h.sendControlToPublisher(data)
+			case proto.MsgSurvSnapshot:
+				// Snapshot request from watcher — prefix req_id with watcher ID and forward to publisher
+				if len(data) > proto.HeaderSize {
+					var req proto.SnapshotRequest
+					if json.Unmarshal(data[proto.HeaderSize:], &req) == nil {
+						req.ReqID = fmt.Sprintf("%d:%s", watcher.id, req.ReqID)
+						payload, _ := json.Marshal(req)
+						msg := proto.MarshalMessage(proto.MsgSurvSnapshot, payload)
+						h.sendToPublisher(msg)
+					}
+				}
 			}
 		}
 	}
 }
 
 func (h *Hub) sendControlToPublisher(data []byte) {
+	h.sendToPublisher(data)
+}
+
+func (h *Hub) sendToPublisher(data []byte) {
 	h.mu.RLock()
 	pub := h.publisher
 	h.mu.RUnlock()
@@ -227,10 +301,59 @@ func (h *Hub) sendControlToPublisher(data []byte) {
 		return
 	}
 
-	// Gorilla WebSocket requires application-level write serialization per connection.
 	h.pubWriteMu.Lock()
 	defer h.pubWriteMu.Unlock()
 	_ = pub.WriteMessage(websocket.BinaryMessage, data)
+}
+
+// routeSnapshotResponse routes a snapshot response to the watcher whose ID is prefixed in reqID.
+func (h *Hub) routeSnapshotResponse(reqID string, rawMsg []byte) {
+	// reqID format: "{watcherID}:{originalReqID}"
+	parts := strings.SplitN(reqID, ":", 2)
+	if len(parts) != 2 {
+		return
+	}
+	watcherID, err := strconv.ParseUint(parts[0], 10, 32)
+	if err != nil {
+		return
+	}
+
+	// Rebuild message with original reqID (strip watcher prefix)
+	var resp proto.SnapshotResponse
+	if json.Unmarshal(rawMsg[proto.HeaderSize:], &resp) != nil {
+		return
+	}
+	resp.ReqID = parts[1]
+	payload, _ := json.Marshal(resp)
+	msg := proto.MarshalMessage(proto.MsgSurvSnapshot, payload)
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for w := range h.watchers {
+		if w.id == uint32(watcherID) {
+			select {
+			case w.send <- msg:
+			default:
+				log.Printf("[relay] snapshot response dropped for slow watcher %s", w.ip)
+			}
+			return
+		}
+	}
+}
+
+// HandleSurvConfig returns the cached surveillance config via REST.
+func (h *Hub) HandleSurvConfig(w http.ResponseWriter, r *http.Request) {
+	h.survConfigMu.RLock()
+	data := h.survConfig
+	h.survConfigMu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	if len(data) <= proto.HeaderSize {
+		w.Write([]byte(`{"dvrs":[],"channels":[]}`))
+		return
+	}
+	// Strip OVP header, return raw JSON payload
+	w.Write(data[proto.HeaderSize:])
 }
 
 func (h *Hub) watcherWritePump(w *Watcher) {
@@ -253,35 +376,22 @@ func (h *Hub) removeWatcher(w *Watcher) {
 	h.mu.Unlock()
 }
 
-func (h *Hub) authenticatePublisher(conn *websocket.Conn) bool {
+func (h *Hub) authenticatePublisher(conn *websocket.Conn) (proto.Auth, bool) {
 	// Expect HELLO then AUTH
 	_, hello, auth, err := h.readHelloAuth(conn)
 	if err != nil {
 		sendError(conn, 400, err.Error())
-		return false
+		return auth, false
 	}
 	if hello.Role != "publisher" {
 		sendError(conn, 403, "expected publisher role")
-		return false
+		return auth, false
 	}
-
-	// Publisher authenticates with the Agent PIN or fallback publisher token
-	if auth.Token != h.cfg.PublisherToken {
-		pinPath := getAgentPINPath()
-		b, err := os.ReadFile(pinPath)
-		validPin := false
-		if err == nil {
-			pin := strings.TrimSpace(string(b))
-			if pin != "" && auth.Token == pin {
-				validPin = true
-			}
-		}
-		if !validPin {
-			sendError(conn, 401, "invalid publisher token or PIN")
-			return false
-		}
+	if auth.Token == "" {
+		sendError(conn, 401, "missing PIN")
+		return auth, false
 	}
-	return true
+	return auth, true
 }
 
 func (h *Hub) authenticateWatcher(conn *websocket.Conn) bool {
@@ -294,33 +404,22 @@ func (h *Hub) authenticateWatcher(conn *websocket.Conn) bool {
 		sendError(conn, 403, "expected watcher role")
 		return false
 	}
-	if !h.cfg.WatcherTokens[auth.Token] {
-		// allow dynamic PIN generated by the local agent
-		pinPath := getAgentPINPath()
-		b, err := os.ReadFile(pinPath)
-		validPin := false
-		if err == nil {
-			pin := strings.TrimSpace(string(b))
-			if pin != "" && auth.Token == pin {
-				validPin = true
-			}
-		}
 
-		if !validPin {
-			sendError(conn, 401, "invalid watcher token or PIN")
-			return false
-		}
+	h.mu.RLock()
+	pin := h.publisherPIN
+	hasPub := h.publisher != nil
+	h.mu.RUnlock()
+
+	if !hasPub {
+		sendError(conn, 503, "no publisher connected")
+		return false
+	}
+	if auth.Token != pin {
+		sendError(conn, 401, "invalid PIN")
+		log.Printf("[relay] watcher PIN mismatch from %s", conn.RemoteAddr())
+		return false
 	}
 	return true
-}
-
-func getAgentPINPath() string {
-	appData := os.Getenv("APPDATA")
-	if appData == "" {
-		home, _ := os.UserHomeDir()
-		appData = filepath.Join(home, "AppData", "Roaming")
-	}
-	return filepath.Join(appData, "opsview-agent", "agent_pin.txt")
 }
 
 func (h *Hub) readHelloAuth(conn *websocket.Conn) (proto.Header, proto.Hello, proto.Auth, error) {

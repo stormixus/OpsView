@@ -14,6 +14,8 @@ const MSG_AUTH = 2;
 const MSG_FRAME_DELTA = 3;
 const MSG_HEARTBEAT = 6;
 const MSG_ERROR = 7;
+const MSG_SURV_CONFIG = 9;
+const MSG_SURV_SNAPSHOT = 10;
 
 // --- State ---
 let ws = null;
@@ -136,7 +138,56 @@ function handleBinaryMessage(buffer) {
     }
   } else if (msgType === MSG_HEARTBEAT) {
     // keepalive, no action needed
+  } else if (msgType === MSG_SURV_CONFIG) {
+    const payload = new Uint8Array(buffer, OVP_HEADER_SIZE, payloadLen);
+    const text = new TextDecoder().decode(payload);
+    try {
+      window.survConfig = JSON.parse(text);
+      document.dispatchEvent(new CustomEvent('surv-config-updated', { detail: window.survConfig }));
+      console.log('[surv] config received:', window.survConfig.dvrs?.length, 'DVRs,', window.survConfig.channels?.length, 'channels');
+    } catch (e) {
+      console.error('[surv] config parse error:', e);
+    }
+  } else if (msgType === MSG_SURV_SNAPSHOT) {
+    const payload = new Uint8Array(buffer, OVP_HEADER_SIZE, payloadLen);
+    const text = new TextDecoder().decode(payload);
+    try {
+      const resp = JSON.parse(text);
+      const cb = window._survSnapshotCallbacks && window._survSnapshotCallbacks[resp.req_id];
+      if (cb) {
+        delete window._survSnapshotCallbacks[resp.req_id];
+        if (resp.error) {
+          cb(null, resp.error);
+        } else {
+          cb(resp.data, null);
+        }
+      }
+    } catch (e) {
+      console.error('[surv] snapshot response parse error:', e);
+    }
   }
+}
+
+// Request a snapshot via WebSocket proxy (agent relay)
+function requestSnapshotProxy(dvrId, chNum, callback) {
+  if (!ws || !connected) {
+    callback(null, 'not connected');
+    return;
+  }
+  const reqId = 'snap_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+  if (!window._survSnapshotCallbacks) window._survSnapshotCallbacks = {};
+  window._survSnapshotCallbacks[reqId] = callback;
+
+  // Timeout after 15 seconds
+  setTimeout(() => {
+    if (window._survSnapshotCallbacks && window._survSnapshotCallbacks[reqId]) {
+      delete window._survSnapshotCallbacks[reqId];
+      callback(null, 'timeout');
+    }
+  }, 15000);
+
+  const req = JSON.stringify({ req_id: reqId, dvr_id: dvrId, ch_num: chNum });
+  sendOVPMessage(MSG_SURV_SNAPSHOT, req);
 }
 
 function handleFrameDelta(buffer, offset, payloadLen) {

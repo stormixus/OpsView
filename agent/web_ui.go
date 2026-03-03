@@ -9,11 +9,14 @@ import (
 	"net/http"
 	"os/exec"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 )
 
 var webSrv *http.Server
 var webPort int
+var webSurvMgr *SurveillanceManager
 
 type APIStatus struct {
 	PIN       string `json:"pin"`
@@ -45,6 +48,8 @@ func startWebUI() {
 	mux.HandleFunc("/", handleIndex)
 	mux.HandleFunc("/api/status", handleAPIStatus)
 	mux.HandleFunc("/api/save", handleAPISave)
+	mux.HandleFunc("/api/surv/dvrs", handleSurvDVRs)
+	mux.HandleFunc("/api/surv/dvrs/", handleSurvDVR)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -148,6 +153,136 @@ func handleAPISave(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// --- Surveillance DVR API ---
+
+func handleSurvDVRs(w http.ResponseWriter, r *http.Request) {
+	if webSurvMgr == nil {
+		http.Error(w, "surveillance manager not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	switch r.Method {
+	case http.MethodGet:
+		dvrs, err := webSurvMgr.ListDVRs()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(dvrs)
+	case http.MethodPost:
+		var req struct {
+			Name     string `json:"name"`
+			Addr     string `json:"addr"`
+			Port     int    `json:"port"`
+			Username string `json:"username"`
+			Password string `json:"password"`
+			Protocol string `json:"protocol"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.Port == 0 {
+			req.Port = 80
+		}
+		dvr, err := webSurvMgr.AddDVR(req.Name, req.Addr, req.Port, req.Username, req.Password, req.Protocol)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(dvr)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleSurvDVR(w http.ResponseWriter, r *http.Request) {
+	if webSurvMgr == nil {
+		http.Error(w, "surveillance manager not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Parse /api/surv/dvrs/{id}[/action]
+	path := strings.TrimPrefix(r.URL.Path, "/api/surv/dvrs/")
+	parts := strings.SplitN(path, "/", 2)
+	id, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		http.Error(w, "invalid DVR id", http.StatusBadRequest)
+		return
+	}
+
+	action := ""
+	if len(parts) > 1 {
+		action = parts[1]
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	switch action {
+	case "discover":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		chs, err := webSurvMgr.DiscoverChannels(id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(chs)
+
+	case "channels":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		chs, err := webSurvMgr.ListChannels(id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(chs)
+
+	case "":
+		switch r.Method {
+		case http.MethodPut:
+			var req struct {
+				Name          string `json:"name"`
+				Addr          string `json:"addr"`
+				Port          int    `json:"port"`
+				Username      string `json:"username"`
+				Password      string `json:"password"`
+				RefreshRate   int    `json:"refresh_rate"`
+				StreamQuality string `json:"stream_quality"`
+				Protocol      string `json:"protocol"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if err := webSurvMgr.UpdateDVR(id, req.Name, req.Addr, req.Port, req.Username, req.Password, req.RefreshRate, req.StreamQuality, req.Protocol); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		case http.MethodDelete:
+			if err := webSurvMgr.DeleteDVR(id); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+
+	default:
+		http.NotFound(w, r)
+	}
+}
+
 const htmlTemplate = `
 <!DOCTYPE html>
 <html lang="ko">
@@ -208,27 +343,44 @@ const htmlTemplate = `
 
         <!-- Settings Form -->
         <form id="settings-form" class="space-y-6">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <!-- Profile -->
-                <div>
-                    <label class="block text-sm font-medium text-slate-300 mb-2">화면 품질 (Profile)</label>
-                    <div class="relative">
-                        <select id="profile" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-xl py-3 px-4 appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition">
-                            <option value="1080">1080p (고화질)</option>
-                            <option value="720">720p (저사양/모바일 최적화)</option>
-                        </select>
-                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400">
-                            <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
-                        </div>
-                    </div>
+            <!-- Relay IP & Port -->
+            <div class="grid grid-cols-3 gap-4">
+                <div class="col-span-2">
+                    <label class="block text-sm font-medium text-slate-300 mb-2">Relay IP</label>
+                    <input type="text" id="relay-ip" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition" placeholder="192.168.0.100">
                 </div>
-
-                <!-- Relay URL -->
                 <div>
-                    <label class="block text-sm font-medium text-slate-300 mb-2">Relay URL (고급)</label>
-                    <input type="text" id="relay-url" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition" placeholder="ws://127.0.0.1:8080/publish">
+                    <label class="block text-sm font-medium text-slate-300 mb-2">Port</label>
+                    <input type="number" id="relay-port" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition" placeholder="28186">
                 </div>
             </div>
+
+            <!-- Profile -->
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-2">화면 품질 (Profile)</label>
+                <div class="relative">
+                    <select id="profile" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-xl py-3 px-4 appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition">
+                        <option value="1080">1080p (고화질)</option>
+                        <option value="720">720p (저사양/모바일 최적화)</option>
+                    </select>
+                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400">
+                        <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Advanced: Relay URL (collapsible) -->
+            <details class="group">
+                <summary class="text-sm text-slate-500 cursor-pointer hover:text-slate-300 transition select-none flex items-center gap-1">
+                    <svg class="w-4 h-4 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                    고급 설정
+                </summary>
+                <div class="mt-3">
+                    <label class="block text-sm font-medium text-slate-300 mb-2">Relay URL (직접 입력)</label>
+                    <input type="text" id="relay-url" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition font-mono text-sm" placeholder="ws://127.0.0.1:8080/publish">
+                    <p class="text-xs text-slate-500 mt-1">직접 URL을 입력하면 위 IP/Port 대신 이 값이 사용됩니다.</p>
+                </div>
+            </details>
 
             <!-- Auto Start -->
             <div class="flex items-center mt-4">
@@ -243,7 +395,65 @@ const htmlTemplate = `
                 </div>
             </div>
 
-            <!-- Status Message -->
+            <!-- Surveillance DVR Management -->
+        <div class="border-t border-slate-700/50 pt-6 mt-6">
+            <h2 class="text-lg font-semibold text-white mb-4">
+                <span class="gradient-text">Surveillance</span> DVR 관리
+            </h2>
+
+            <!-- DVR List -->
+            <div id="dvr-list" class="space-y-3 mb-4"></div>
+
+            <!-- Add DVR Form -->
+            <details class="group">
+                <summary class="text-sm text-slate-400 cursor-pointer hover:text-slate-200 transition select-none flex items-center gap-1">
+                    <svg class="w-4 h-4 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                    DVR 추가
+                </summary>
+                <div class="mt-3 space-y-3 bg-slate-800/40 rounded-xl p-4 border border-slate-700/50">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs text-slate-400 mb-1">이름</label>
+                            <input type="text" id="dvr-name" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="DVR 이름">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-slate-400 mb-1">프로토콜</label>
+                            <select id="dvr-protocol" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none">
+                                <option value="auto">자동 탐지</option>
+                                <option value="isapi">Hikvision (ISAPI)</option>
+                                <option value="dahua">Dahua</option>
+                                <option value="rtsp">RTSP</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-3">
+                        <div class="col-span-2">
+                            <label class="block text-xs text-slate-400 mb-1">주소</label>
+                            <input type="text" id="dvr-addr" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="192.168.0.100">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-slate-400 mb-1">포트</label>
+                            <input type="number" id="dvr-port" value="80" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs text-slate-400 mb-1">사용자명</label>
+                            <input type="text" id="dvr-username" value="admin" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-slate-400 mb-1">비밀번호</label>
+                            <input type="password" id="dvr-password" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                    </div>
+                    <button type="button" onclick="addDVR()" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 px-4 rounded-lg text-sm font-medium transition">
+                        추가
+                    </button>
+                </div>
+            </details>
+        </div>
+
+        <!-- Status Message -->
             <div id="status-msg" class="hidden text-sm py-3 px-4 rounded-xl mt-4 font-medium"></div>
 
             <!-- Actions -->
@@ -260,17 +470,56 @@ const htmlTemplate = `
     </div>
 
     <script>
+        // Parse relay URL into {ip, port}
+        function parseRelayURL(url) {
+            try {
+                const m = url.match(/^wss?:\/\/([^:/]+):(\d+)/);
+                if (m) return { ip: m[1], port: m[2] };
+                const m2 = url.match(/^wss?:\/\/([^:/]+)/);
+                if (m2) return { ip: m2[1], port: '8080' };
+            } catch(e) {}
+            return { ip: '127.0.0.1', port: '8080' };
+        }
+
+        // Build relay URL from IP/Port
+        function buildRelayURL(ip, port) {
+            return 'ws://' + ip + ':' + port + '/publish';
+        }
+
         // Load settings data
         async function loadSettings() {
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
-                
+
                 document.getElementById('pin-code').textContent = data.pin || '------';
                 document.getElementById('ip-address').textContent = data.ip || 'Unknown';
                 document.getElementById('profile').value = data.profile.toString();
                 document.getElementById('relay-url').value = data.relay_url;
                 document.getElementById('autostart').checked = data.autostart;
+
+                // Populate IP/Port from URL
+                const parsed = parseRelayURL(data.relay_url);
+                document.getElementById('relay-ip').value = parsed.ip;
+                document.getElementById('relay-port').value = parsed.port;
+
+                // Sync: when IP/Port changes, update the hidden URL
+                const syncURL = () => {
+                    const ip = document.getElementById('relay-ip').value.trim();
+                    const port = document.getElementById('relay-port').value.trim();
+                    if (ip && port) {
+                        document.getElementById('relay-url').value = buildRelayURL(ip, port);
+                    }
+                };
+                document.getElementById('relay-ip').addEventListener('input', syncURL);
+                document.getElementById('relay-port').addEventListener('input', syncURL);
+
+                // Reverse sync: when URL changes manually, update IP/Port
+                document.getElementById('relay-url').addEventListener('input', () => {
+                    const p = parseRelayURL(document.getElementById('relay-url').value);
+                    document.getElementById('relay-ip').value = p.ip;
+                    document.getElementById('relay-port').value = p.port;
+                });
             } catch (err) {
                 console.error('Failed to load settings:', err);
                 showMsg('데이터를 불러오는데 실패했습니다.', 'error');
@@ -280,10 +529,10 @@ const htmlTemplate = `
         // Save settings data
         document.getElementById('settings-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             const payload = {
                 profile: parseInt(document.getElementById('profile').value),
-                relay_url: document.getElementById('relay-url').value,
+                relay_url: document.getElementById('relay-url').value.trim(),
                 autostart: document.getElementById('autostart').checked
             };
 
@@ -325,8 +574,96 @@ const htmlTemplate = `
             setTimeout(() => el.classList.add('hidden'), 5000);
         }
 
+        // --- Surveillance DVR Management ---
+        async function loadDVRs() {
+            try {
+                const res = await fetch('/api/surv/dvrs');
+                const dvrs = await res.json();
+                const list = document.getElementById('dvr-list');
+                if (!dvrs || dvrs.length === 0) {
+                    list.innerHTML = '<p class="text-sm text-slate-500 text-center py-4">등록된 DVR이 없습니다.</p>';
+                    return;
+                }
+                list.innerHTML = dvrs.map(function(d) {
+                    return '<div class="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 flex items-center justify-between">' +
+                        '<div>' +
+                            '<div class="font-medium text-white text-sm">' + (d.name || d.addr) + '</div>' +
+                            '<div class="text-xs text-slate-400 mt-0.5">' + d.addr + ':' + d.port + ' \u00b7 ' + d.protocol + '</div>' +
+                        '</div>' +
+                        '<div class="flex gap-2">' +
+                            '<button onclick="discoverChannels(' + d.id + ')" class="text-xs bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600/30 px-3 py-1.5 rounded-lg transition">\ucc44\ub110 \ud0d0\uc0c9</button>' +
+                            '<button onclick="deleteDVR(' + d.id + ')" class="text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 px-3 py-1.5 rounded-lg transition">\uc0ad\uc81c</button>' +
+                        '</div>' +
+                    '</div>';
+                }).join('');
+            } catch (err) {
+                console.error('Failed to load DVRs:', err);
+            }
+        }
+
+        async function addDVR() {
+            const payload = {
+                name: document.getElementById('dvr-name').value.trim(),
+                addr: document.getElementById('dvr-addr').value.trim(),
+                port: parseInt(document.getElementById('dvr-port').value) || 80,
+                username: document.getElementById('dvr-username').value.trim(),
+                password: document.getElementById('dvr-password').value,
+                protocol: document.getElementById('dvr-protocol').value,
+            };
+            if (!payload.addr) { showMsg('DVR 주소를 입력하세요.', 'error'); return; }
+            try {
+                const res = await fetch('/api/surv/dvrs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    showMsg('DVR이 추가되었습니다.', 'success');
+                    document.getElementById('dvr-name').value = '';
+                    document.getElementById('dvr-addr').value = '';
+                    document.getElementById('dvr-password').value = '';
+                    loadDVRs();
+                } else {
+                    showMsg('DVR 추가 실패: ' + await res.text(), 'error');
+                }
+            } catch (err) {
+                showMsg('DVR 추가 중 오류가 발생했습니다.', 'error');
+            }
+        }
+
+        async function deleteDVR(id) {
+            if (!confirm('이 DVR을 삭제하시겠습니까?')) return;
+            try {
+                const res = await fetch('/api/surv/dvrs/' + id, { method: 'DELETE' });
+                if (res.ok) {
+                    showMsg('DVR이 삭제되었습니다.', 'success');
+                    loadDVRs();
+                } else {
+                    showMsg('삭제 실패', 'error');
+                }
+            } catch (err) {
+                showMsg('삭제 중 오류가 발생했습니다.', 'error');
+            }
+        }
+
+        async function discoverChannels(id) {
+            showMsg('채널 탐색 중...', 'success');
+            try {
+                const res = await fetch('/api/surv/dvrs/' + id + '/discover', { method: 'POST' });
+                if (res.ok) {
+                    const chs = await res.json();
+                    showMsg('채널 ' + (chs ? chs.length : 0) + '개 발견', 'success');
+                } else {
+                    showMsg('채널 탐색 실패: ' + await res.text(), 'error');
+                }
+            } catch (err) {
+                showMsg('채널 탐색 중 오류가 발생했습니다.', 'error');
+            }
+        }
+
         // Init
         loadSettings();
+        loadDVRs();
     </script>
 </body>
 </html>

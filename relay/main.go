@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/NebulousLabs/go-upnp"
@@ -25,6 +24,7 @@ func runServer() (stop func()) {
 	mux.HandleFunc("/watch", hub.HandleWatch)
 	mux.HandleFunc("/health", hub.HandleHealth)
 	mux.HandleFunc("/metrics", hub.HandleMetrics)
+	mux.HandleFunc("/api/surv", hub.HandleSurvConfig)
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: mux}
 
@@ -92,38 +92,14 @@ func getPort() string {
 // Config holds relay configuration loaded from environment variables.
 type Config struct {
 	Port            string
-	PublisherToken  string
-	WatcherTokens   map[string]bool
 	MaxWatcherQueue int
 }
 
 func loadConfig() Config {
 	port := getPort()
 
-	pubToken := os.Getenv("RELAY_PUBLISHER_TOKEN")
-	if pubToken == "" {
-		pubToken = "dev-publisher-token"
-		log.Println("[relay] WARNING: using default publisher token (set RELAY_PUBLISHER_TOKEN)")
-	}
-
-	watcherTokens := make(map[string]bool)
-	raw := os.Getenv("RELAY_WATCHER_TOKENS")
-	if raw == "" {
-		watcherTokens["dev-watcher-token"] = true
-		log.Println("[relay] WARNING: using default watcher token (set RELAY_WATCHER_TOKENS)")
-	} else {
-		for _, t := range strings.Split(raw, ",") {
-			t = strings.TrimSpace(t)
-			if t != "" {
-				watcherTokens[t] = true
-			}
-		}
-	}
-
 	return Config{
 		Port:            port,
-		PublisherToken:  pubToken,
-		WatcherTokens:   watcherTokens,
 		MaxWatcherQueue: 4,
 	}
 }

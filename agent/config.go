@@ -9,9 +9,10 @@ import (
 
 // Config represents the JSON configuration stored at %APPDATA%/opsview-agent/config.json.
 type Config struct {
-	RelayURL  string `json:"relay_url"`
-	Profile   int    `json:"profile"`
-	AutoStart bool   `json:"auto_start"`
+	RelayURL  string               `json:"relay_url"`
+	Profile   int                  `json:"profile"`
+	AutoStart bool                 `json:"auto_start"`
+	SurvMgr   *SurveillanceManager `json:"-"`
 }
 
 func defaultConfig() Config {

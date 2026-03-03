@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -19,6 +21,7 @@ type Agent struct {
 	seq      atomic.Uint32
 	profile  atomic.Int32
 	capturer Capturer
+	survMgr  *SurveillanceManager
 	stopped  chan struct{}
 }
 
@@ -109,11 +112,33 @@ func (a *Agent) connect() error {
 		return err
 	}
 
+	// Wait for relay response to confirm authentication
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_, data, err := conn.ReadMessage()
+	conn.SetReadDeadline(time.Time{}) // clear deadline
+	if err != nil {
+		conn.Close()
+		return fmt.Errorf("auth response: %w", err)
+	}
+	if len(data) >= proto.HeaderSize {
+		hdr, hdrErr := proto.DecodeHeader(data)
+		if hdrErr == nil && hdr.Type == proto.MsgError {
+			var errMsg proto.ErrorMsg
+			if json.Unmarshal(data[proto.HeaderSize:], &errMsg) == nil {
+				conn.Close()
+				return fmt.Errorf("relay rejected: %d %s", errMsg.Code, errMsg.Message)
+			}
+		}
+	}
+
 	a.connMu.Lock()
 	a.conn = conn
 	a.connMu.Unlock()
 
 	log.Println("[agent] connected and authenticated")
+
+	// Send surveillance config to relay
+	a.sendSurvConfig()
 
 	// Start reading control messages in background
 	go a.readPump(conn)
@@ -149,9 +174,94 @@ func (a *Agent) readPump(conn *websocket.Conn) {
 					} else {
 						a.profile.Store(1080)
 					}
-					// Capturer will pick up new profile on next init
 				}
 			}
+		} else if hdr.Type == proto.MsgSurvSnapshot {
+			go a.handleSnapshotRequest(data[proto.HeaderSize:])
+		}
+	}
+}
+
+func (a *Agent) handleSnapshotRequest(payload []byte) {
+	var req proto.SnapshotRequest
+	if err := json.Unmarshal(payload, &req); err != nil {
+		log.Printf("[agent] snapshot request parse error: %v", err)
+		return
+	}
+
+	resp := proto.SnapshotResponse{
+		ReqID: req.ReqID,
+		DVRID: req.DVRID,
+		ChNum: req.ChNum,
+	}
+
+	if a.survMgr == nil {
+		resp.Error = "surveillance manager not initialized"
+	} else {
+		data, err := a.survMgr.FetchSnapshot(req.DVRID, req.ChNum)
+		if err != nil {
+			resp.Error = err.Error()
+		} else {
+			resp.Data = base64.StdEncoding.EncodeToString(data)
+		}
+	}
+
+	respPayload, _ := json.Marshal(resp)
+	msg := proto.MarshalMessage(proto.MsgSurvSnapshot, respPayload)
+
+	a.connMu.Lock()
+	conn := a.conn
+	a.connMu.Unlock()
+	if conn != nil {
+		if err := conn.WriteMessage(websocket.BinaryMessage, msg); err != nil {
+			log.Printf("[agent] snapshot response send error: %v", err)
+		}
+	}
+}
+
+func (a *Agent) sendSurvConfig() {
+	if a.survMgr == nil {
+		return
+	}
+
+	dvrs, err := a.survMgr.ListDVRs()
+	if err != nil {
+		log.Printf("[agent] sendSurvConfig: list DVRs: %v", err)
+		return
+	}
+
+	cfg := proto.SurvConfig{}
+	for _, d := range dvrs {
+		cfg.DVRs = append(cfg.DVRs, proto.DVRInfo{
+			ID: d.ID, Name: d.Name, Addr: d.Addr, Port: d.Port,
+			Username: d.Username, Password: d.Password,
+			RefreshRate: d.RefreshRate, StreamQuality: d.StreamQuality, Protocol: d.Protocol,
+		})
+		chs, err := a.survMgr.ListChannels(d.ID)
+		if err != nil {
+			log.Printf("[agent] sendSurvConfig: list channels DVR %d: %v", d.ID, err)
+			continue
+		}
+		for _, ch := range chs {
+			cfg.Channels = append(cfg.Channels, proto.ChannelInfo{
+				ID: ch.ID, DVRID: ch.DVRID, ChNum: ch.ChNum,
+				Name: ch.Name, Order: ch.Order, Enabled: ch.Enabled,
+				Width: ch.Width, Height: ch.Height,
+			})
+		}
+	}
+
+	payload, _ := json.Marshal(cfg)
+	msg := proto.MarshalMessage(proto.MsgSurvConfig, payload)
+
+	a.connMu.Lock()
+	conn := a.conn
+	a.connMu.Unlock()
+	if conn != nil {
+		if err := conn.WriteMessage(websocket.BinaryMessage, msg); err != nil {
+			log.Printf("[agent] sendSurvConfig send error: %v", err)
+		} else {
+			log.Printf("[agent] sent surveillance config: %d DVRs, %d channels", len(cfg.DVRs), len(cfg.Channels))
 		}
 	}
 }

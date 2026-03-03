@@ -25,7 +25,10 @@ const (
 	MsgFullFrame  MessageType = 4
 	MsgControl    MessageType = 5
 	MsgHeartbeat  MessageType = 6
-	MsgError      MessageType = 7
+	MsgError        MessageType = 7
+	MsgReady        MessageType = 8
+	MsgSurvConfig   MessageType = 9  // Surveillance config (publisher→relay→watcher)
+	MsgSurvSnapshot MessageType = 10 // Snapshot request/response
 )
 
 func (m MessageType) String() string {
@@ -44,6 +47,12 @@ func (m MessageType) String() string {
 		return "HEARTBEAT"
 	case MsgError:
 		return "ERROR"
+	case MsgReady:
+		return "READY"
+	case MsgSurvConfig:
+		return "SURV_CONFIG"
+	case MsgSurvSnapshot:
+		return "SURV_SNAPSHOT"
 	default:
 		return fmt.Sprintf("UNKNOWN(%d)", m)
 	}

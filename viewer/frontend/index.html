@@ -534,6 +534,24 @@
 
     // This function is moved from viewer.js and modified to take ip, port, pin
     // and construct the URL.
+    const OVP_MAGIC = 0x4F565031;
+    const OVP_HEADER_SIZE = 12;
+    const MSG_SURV_CONFIG = 9;
+    const MSG_SURV_SNAPSHOT = 10;
+
+    function sendOVPMsg(type, jsonStr) {
+      if (!opsWs || opsWs.readyState !== WebSocket.OPEN) return;
+      const payload = new TextEncoder().encode(jsonStr);
+      const msg = new ArrayBuffer(OVP_HEADER_SIZE + payload.length);
+      const view = new DataView(msg);
+      view.setUint32(0, OVP_MAGIC, true);
+      view.setUint16(4, 1, true);
+      view.setUint16(6, type, true);
+      view.setUint32(8, payload.length, true);
+      new Uint8Array(msg, OVP_HEADER_SIZE).set(payload);
+      opsWs.send(msg);
+    }
+
     let opsWs = null;
     let opsConnected = false;
     let reconnectAttempts = 0;
@@ -573,24 +591,58 @@
 
       opsWs = new WebSocket(url);
 
+      opsWs.binaryType = 'arraybuffer';
       opsWs.onopen = () => {
         console.log('WebSocket Connected');
         opsConnected = true;
         reconnectAttempts = 0;
         clearTimeout(reconnectTimeout);
         setStatus('connected', '연결됨');
-        // Send PIN if available
-        if (pin) {
-          opsWs.send(JSON.stringify({ type: 'auth', token: pin }));
-        }
+        // Send OVP HELLO + AUTH
+        const hello = { role: 'watcher', client: 'opsview-web', client_version: '0.1.8', supports: ['zstd'], want_profile: null };
+        sendOVPMsg(1, JSON.stringify(hello));
+        const auth = { token: pin };
+        sendOVPMsg(2, JSON.stringify(auth));
       };
 
       opsWs.onmessage = (event) => {
-        // Handle messages from the relay
-        // This part would typically be in viewer.js, but for this specific change,
-        // we're only concerned with the connection logic.
-        // Assuming viewer.js will handle the actual data processing.
-        console.log('Message from relay:', event.data);
+        if (!(event.data instanceof ArrayBuffer)) return;
+        const buf = event.data;
+        if (buf.byteLength < OVP_HEADER_SIZE) return;
+        const view = new DataView(buf);
+        const magic = view.getUint32(0, true);
+        if (magic !== OVP_MAGIC) return;
+        const msgType = view.getUint16(6, true);
+        const payloadLen = view.getUint32(8, true);
+
+        if (msgType === MSG_SURV_CONFIG) {
+          const payload = new Uint8Array(buf, OVP_HEADER_SIZE, payloadLen);
+          const text = new TextDecoder().decode(payload);
+          try {
+            window.survConfig = JSON.parse(text);
+            document.dispatchEvent(new CustomEvent('surv-config-updated', { detail: window.survConfig }));
+            console.log('[surv] config received:', window.survConfig.dvrs?.length, 'DVRs,', window.survConfig.channels?.length, 'channels');
+          } catch (e) { console.error('[surv] config parse error:', e); }
+        } else if (msgType === MSG_SURV_SNAPSHOT) {
+          const payload = new Uint8Array(buf, OVP_HEADER_SIZE, payloadLen);
+          const text = new TextDecoder().decode(payload);
+          try {
+            const resp = JSON.parse(text);
+            const cb = window._survSnapshotCallbacks && window._survSnapshotCallbacks[resp.req_id];
+            if (cb) {
+              delete window._survSnapshotCallbacks[resp.req_id];
+              cb(resp.error ? null : resp.data, resp.error || null);
+            }
+          } catch (e) { console.error('[surv] snapshot parse error:', e); }
+        } else if (msgType === 7) { // MsgError
+          const payload = new Uint8Array(buf, OVP_HEADER_SIZE, payloadLen);
+          const text = new TextDecoder().decode(payload);
+          try {
+            const err = JSON.parse(text);
+            console.error('[ovp] error:', err.code, err.message);
+            setStatus('error', err.message);
+          } catch (e) { console.error('[ovp] error:', text); }
+        }
       };
 
       opsWs.onclose = () => {
@@ -1973,6 +2025,15 @@
 
     // Init CCTV
     loadDVRs();
+
+    // Surveillance config from agent (via relay WebSocket)
+    document.addEventListener('surv-config-updated', (e) => {
+      const cfg = e.detail;
+      if (!cfg) return;
+      console.log('[surv] remote config:', cfg.dvrs?.length, 'DVRs,', cfg.channels?.length, 'channels');
+      // Store for use by snapshot loading
+      window.survRemoteConfig = cfg;
+    });
   </script>
 </body>
 </html>

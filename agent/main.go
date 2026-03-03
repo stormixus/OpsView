@@ -32,6 +32,8 @@ func main() {
 
 	cfg := loadConfig()
 	log.Printf("[agent] relay=%s profile=%d", cfg.RelayURL, cfg.Profile)
+	cfg.SurvMgr = NewSurveillanceManager()
+	defer cfg.SurvMgr.Shutdown()
 	runTray(cfg)
 }
 
@@ -72,4 +74,3 @@ func loadOrCreateAgentPIN() (string, error) {
 	os.WriteFile(pinPath, []byte(pin+"\n"), 0644)
 	return pin, nil
 }
-

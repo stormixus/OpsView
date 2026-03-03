@@ -127,6 +127,11 @@ func startAgent(cfg Config) {
 	}
 
 	trayAgent = NewAgent(agentCfg)
+	trayAgent.survMgr = cfg.SurvMgr
+	webSurvMgr = cfg.SurvMgr
+	if trayAgent.survMgr != nil {
+		trayAgent.survMgr.onChange = func() { trayAgent.sendSurvConfig() }
+	}
 	go trayAgent.Run()
 
 	updateTrayStatus(true)
