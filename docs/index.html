@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpsView — 원격 모니터링 & 제어</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <style>
+    html { scroll-behavior: smooth; }
+    body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  </style>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50: '#eef2ff', 100: '#e0e7ff', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca' },
+            dark: { 800: '#1e1e2e', 900: '#11111b', 950: '#0a0a14' }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-dark-950 text-gray-200 antialiased">
+
+  <!-- Nav -->
+  <nav class="fixed top-0 w-full z-50 bg-dark-950/80 backdrop-blur border-b border-white/5">
+    <div class="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
+      <a href="#" class="text-lg font-bold text-white tracking-tight">OpsView</a>
+      <div class="hidden sm:flex gap-6 text-sm text-gray-400">
+        <a href="#features" class="hover:text-white transition">기능</a>
+        <a href="#architecture" class="hover:text-white transition">아키텍처</a>
+        <a href="#download" class="hover:text-white transition">다운로드</a>
+      </div>
+      <a href="https://github.com/stormixus/OpsView" target="_blank" class="text-gray-400 hover:text-white transition">
+        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+      </a>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="relative pt-32 pb-20 px-6">
+    <div class="max-w-4xl mx-auto text-center">
+      <h1 class="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-white leading-tight mb-6">
+        원격 모니터링 & 제어<br class="hidden sm:block">
+        <span class="text-brand-500">한 화면으로</span>
+      </h1>
+      <p class="text-lg sm:text-xl text-gray-400 max-w-2xl mx-auto mb-10">
+        타일 델타 전송, 해상도 프로파일, PIN 보안, CCTV 통합까지 —
+        어디서든 안전하고 빠르게 원격 데스크톱을 관리하세요.
+      </p>
+      <div class="flex flex-col sm:flex-row gap-4 justify-center">
+        <a href="https://github.com/stormixus/OpsView/releases/latest"
+           class="inline-flex items-center justify-center gap-2 px-8 py-3 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-semibold transition shadow-lg shadow-brand-600/25">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3"/></svg>
+          최신 버전 다운로드
+        </a>
+        <a href="https://github.com/stormixus/OpsView"
+           class="inline-flex items-center justify-center gap-2 px-8 py-3 rounded-lg border border-white/10 hover:border-white/25 text-gray-300 hover:text-white font-semibold transition">
+          GitHub에서 보기
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features" class="py-20 px-6">
+    <div class="max-w-6xl mx-auto">
+      <h2 class="text-3xl font-bold text-white text-center mb-4">핵심 기능</h2>
+      <p class="text-gray-400 text-center mb-14 max-w-xl mx-auto">고성능 원격 데스크톱을 위한 모든 것</p>
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+
+        <div class="p-6 rounded-xl bg-dark-800 border border-white/5 hover:border-brand-500/30 transition">
+          <div class="w-10 h-10 rounded-lg bg-brand-600/15 flex items-center justify-center mb-4">
+            <svg class="w-5 h-5 text-brand-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm0 8a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1v-2zm0 8a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1v-2z"/></svg>
+          </div>
+          <h3 class="text-white font-semibold mb-2">타일 델타 전송</h3>
+          <p class="text-sm text-gray-400">변경된 화면 영역만 전송하여 대역폭을 최소화하고 지연 시간을 줄입니다.</p>
+        </div>
+
+        <div class="p-6 rounded-xl bg-dark-800 border border-white/5 hover:border-brand-500/30 transition">
+          <div class="w-10 h-10 rounded-lg bg-brand-600/15 flex items-center justify-center mb-4">
+            <svg class="w-5 h-5 text-brand-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
+          </div>
+          <h3 class="text-white font-semibold mb-2">LAN / Public 모드</h3>
+          <p class="text-sm text-gray-400">내부 네트워크에서는 직접 연결, 외부에서는 릴레이 서버를 통해 접속합니다.</p>
+        </div>
+
+        <div class="p-6 rounded-xl bg-dark-800 border border-white/5 hover:border-brand-500/30 transition">
+          <div class="w-10 h-10 rounded-lg bg-brand-600/15 flex items-center justify-center mb-4">
+            <svg class="w-5 h-5 text-brand-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          </div>
+          <h3 class="text-white font-semibold mb-2">해상도 프로파일</h3>
+          <p class="text-sm text-gray-400">네트워크 상태에 맞춰 해상도와 프레임 레이트를 자동 조절합니다.</p>
+        </div>
+
+        <div class="p-6 rounded-xl bg-dark-800 border border-white/5 hover:border-brand-500/30 transition">
+          <div class="w-10 h-10 rounded-lg bg-brand-600/15 flex items-center justify-center mb-4">
+            <svg class="w-5 h-5 text-brand-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+          </div>
+          <h3 class="text-white font-semibold mb-2">PIN 보안</h3>
+          <p class="text-sm text-gray-400">4자리 PIN으로 무단 접근을 차단하고, 세션마다 인증을 요구합니다.</p>
+        </div>
+
+        <div class="p-6 rounded-xl bg-dark-800 border border-white/5 hover:border-brand-500/30 transition">
+          <div class="w-10 h-10 rounded-lg bg-brand-600/15 flex items-center justify-center mb-4">
+            <svg class="w-5 h-5 text-brand-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+          </div>
+          <h3 class="text-white font-semibold mb-2">CCTV 통합</h3>
+          <p class="text-sm text-gray-400">RTSP/HLS 스트림을 통합하여 감시 카메라와 원격 데스크톱을 한 곳에서 관리합니다.</p>
+        </div>
+
+        <div class="p-6 rounded-xl bg-dark-800 border border-white/5 hover:border-brand-500/30 transition">
+          <div class="w-10 h-10 rounded-lg bg-brand-600/15 flex items-center justify-center mb-4">
+            <svg class="w-5 h-5 text-brand-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          </div>
+          <h3 class="text-white font-semibold mb-2">실시간 제어</h3>
+          <p class="text-sm text-gray-400">키보드, 마우스, 클립보드를 실시간으로 전송하여 현장에 있는 것처럼 작업합니다.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Architecture -->
+  <section id="architecture" class="py-20 px-6 bg-dark-900">
+    <div class="max-w-5xl mx-auto">
+      <h2 class="text-3xl font-bold text-white text-center mb-4">아키텍처</h2>
+      <p class="text-gray-400 text-center mb-12 max-w-xl mx-auto">Agent — Relay — Viewer 3-tier 구조</p>
+      <div class="rounded-xl border border-white/5 overflow-hidden bg-dark-800">
+        <img src="architecture-overview.png" alt="OpsView Architecture Overview"
+             class="w-full h-auto" loading="lazy">
+      </div>
+    </div>
+  </section>
+
+  <!-- Download -->
+  <section id="download" class="py-20 px-6">
+    <div class="max-w-5xl mx-auto">
+      <h2 class="text-3xl font-bold text-white text-center mb-4">다운로드</h2>
+      <p class="text-gray-400 text-center mb-14 max-w-xl mx-auto">GitHub Releases에서 최신 빌드를 받으세요</p>
+      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+
+        <a href="https://github.com/stormixus/OpsView/releases/latest"
+           class="group p-6 rounded-xl bg-dark-800 border border-white/5 hover:border-brand-500/30 transition text-center">
+          <div class="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center mx-auto mb-4">
+            <svg class="w-6 h-6 text-blue-400" fill="currentColor" viewBox="0 0 24 24"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
+          </div>
+          <h3 class="text-white font-semibold mb-1">Agent</h3>
+          <p class="text-xs text-gray-500">Windows</p>
+          <span class="inline-block mt-3 text-sm text-brand-500 group-hover:text-brand-400 transition">다운로드 &rarr;</span>
+        </a>
+
+        <a href="https://github.com/stormixus/OpsView/releases/latest"
+           class="group p-6 rounded-xl bg-dark-800 border border-white/5 hover:border-brand-500/30 transition text-center">
+          <div class="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center mx-auto mb-4">
+            <svg class="w-6 h-6 text-blue-400" fill="currentColor" viewBox="0 0 24 24"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
+          </div>
+          <h3 class="text-white font-semibold mb-1">Viewer</h3>
+          <p class="text-xs text-gray-500">Windows</p>
+          <span class="inline-block mt-3 text-sm text-brand-500 group-hover:text-brand-400 transition">다운로드 &rarr;</span>
+        </a>
+
+        <a href="https://github.com/stormixus/OpsView/releases/latest"
+           class="group p-6 rounded-xl bg-dark-800 border border-white/5 hover:border-brand-500/30 transition text-center">
+          <div class="w-12 h-12 rounded-lg bg-gray-500/10 flex items-center justify-center mx-auto mb-4">
+            <svg class="w-6 h-6 text-gray-400" fill="currentColor" viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+          </div>
+          <h3 class="text-white font-semibold mb-1">Viewer</h3>
+          <p class="text-xs text-gray-500">macOS</p>
+          <span class="inline-block mt-3 text-sm text-brand-500 group-hover:text-brand-400 transition">다운로드 &rarr;</span>
+        </a>
+
+        <a href="https://github.com/stormixus/OpsView/releases/latest"
+           class="group p-6 rounded-xl bg-dark-800 border border-white/5 hover:border-brand-500/30 transition text-center">
+          <div class="w-12 h-12 rounded-lg bg-orange-500/10 flex items-center justify-center mx-auto mb-4">
+            <svg class="w-6 h-6 text-orange-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.3 1.953-1.05 3.02-.885 1.051-2.127 2.75-2.716 4.521-.278.832-.41 1.684-.287 2.489a.424.424 0 00-.11.135c-.26.268-.45.6-.663.839-.199.199-.485.267-.797.4-.313.136-.658.269-.864.68-.09.189-.136.394-.132.602 0 .199.027.4.055.536.058.399.116.728.04.97-.249.68-.28 1.145-.106 1.484.174.334.535.47.94.601.81.2 1.91.135 2.774.6.926.466 1.866.67 2.616.47.526-.116.97-.464 1.208-.946.587-.003 1.23-.269 2.26-.334.699-.058 1.574.267 2.577.2.025.134.063.198.114.333l.003.003c.391.778 1.113 1.368 1.884 1.43.868.065 1.544-.468 2.192-1.002l.005-.004c.329-.272.586-.6.881-.817.38-.281.813-.4 1.285-.4.413.064.59.164.987.266.376.1.812.164 1.383-.068.202-.078.41-.185.563-.334.326-.299.5-.647.506-1.033.007-.167-.026-.384-.107-.553a.988.988 0 00-.345-.391c-.204-.147-.523-.238-.978-.267-.543-.03-.993.062-1.418.166-.215.047-.4.074-.564.074h-.007c-.206 0-.385-.04-.536-.115-.15-.073-.298-.185-.42-.32-.122-.131-.198-.253-.253-.375-.058-.1-.199-.28-.199-.396a.54.54 0 01.2-.397c.406-.37.44-1.132-.044-1.556-.233-.21-.583-.305-.806-.405l-.003-.001a.902.902 0 01-.397-.291c-.146-.178-.182-.398-.182-.597 0-.028.002-.06.005-.082v-.003c.152-.331.383-.667.503-.999.12-.334.122-.665-.052-1.024-.238-.5-.536-.665-.807-.87-.393-.3-.744-.503-1.05-.934-.358-.537-.567-1.232-.567-2.148 0-2.068-1.178-3.42-2.38-4.233C14.404.632 12.952 0 12.504 0z"/></svg>
+          </div>
+          <h3 class="text-white font-semibold mb-1">Viewer</h3>
+          <p class="text-xs text-gray-500">Linux</p>
+          <span class="inline-block mt-3 text-sm text-brand-500 group-hover:text-brand-400 transition">다운로드 &rarr;</span>
+        </a>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="border-t border-white/5 py-10 px-6">
+    <div class="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-500">
+      <span>&copy; 2025 OpsView</span>
+      <div class="flex gap-6">
+        <a href="https://github.com/stormixus/OpsView" class="hover:text-white transition">GitHub</a>
+        <a href="https://github.com/stormixus/OpsView/releases" class="hover:text-white transition">Releases</a>
+        <a href="https://github.com/stormixus/OpsView/issues" class="hover:text-white transition">Issues</a>
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>
