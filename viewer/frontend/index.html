@@ -59,7 +59,10 @@
       background: linear-gradient(180deg, rgba(7, 14, 25, 0.9), rgba(7, 14, 25, 0.72));
       border-bottom-color: var(--line-soft);
       backdrop-filter: blur(10px);
+      --wails-draggable: drag;
+      padding-left: 78px;
     }
+    .tabs * { --wails-draggable: no-drag; }
     .ops-toolbar { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; z-index: 11; opacity: 0; transition: opacity 0.25s; pointer-events: none; }
     #panel-ops:hover .ops-toolbar.visible { opacity: 1; pointer-events: auto; }
 
