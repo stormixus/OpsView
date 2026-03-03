@@ -760,6 +760,8 @@
         try {
           document.getElementById('opsStreamStatus').textContent = 'RTSP 변환 시작 중...';
           const hlsUrl = await SP().StartStream(url);
+          document.getElementById('opsStreamStatus').textContent = 'HLS 세그먼트 대기 중...';
+          await new Promise(r => setTimeout(r, 2000));
           playHLS(hlsUrl, video, onPlaying, onError);
         } catch(e) {
           onError('RTSP 오류: ' + e);
@@ -782,7 +784,14 @@
 
     function playHLS(url, video, onPlaying, onError) {
       if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-        hlsInstance = new Hls({ enableWorker: true, lowLatencyMode: true });
+        hlsInstance = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          manifestLoadingMaxRetry: 10,
+          manifestLoadingRetryDelay: 1000,
+          levelLoadingMaxRetry: 6,
+          levelLoadingRetryDelay: 1000,
+        });
         hlsInstance.loadSource(url);
         hlsInstance.attachMedia(video);
         hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => { video.play(); onPlaying(); });
