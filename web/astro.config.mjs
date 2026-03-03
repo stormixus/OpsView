@@ -6,8 +6,8 @@ import tailwindcss from '@tailwindcss/vite';
 // https://astro.build/config
 export default defineConfig({
   output: 'static',
-  site: 'https://hwankishin.github.io', // Placeholder, but handles absolute URLs nicely
-  base: '/OpsView', // The repo name, assuming standard GitHub Pages setup for a project site
+  site: 'https://hwankishin.github.io', 
+  // base: '/OpsView', // 만약 깃허브 기본 주소(hwankishin.github.io/OpsView)를 사용하신다면 주석을 해제하세요. 개인 도메인이면 이대로 둡니다.
   vite: {
     plugins: [tailwindcss()]
   },
