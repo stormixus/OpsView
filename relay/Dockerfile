@@ -1,11 +1,10 @@
 # Build stage
-# Use: docker compose up --build (from relay/)
 FROM golang:1.25-alpine AS builder
 RUN apk add --no-cache git
 WORKDIR /src
-COPY --from=proto . ./proto/
-COPY go.mod go.sum ./relay/
-COPY *.go ./relay/
+COPY proto/ ./proto/
+COPY relay/go.mod relay/go.sum ./relay/
+COPY relay/*.go ./relay/
 WORKDIR /src/relay
 RUN go build -ldflags="-s -w" -o /opsview-relay .
 
