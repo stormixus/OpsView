@@ -882,9 +882,18 @@ func (m *CCTVManager) getDVR(id int64) (DVRConfig, error) {
 	return d, err
 }
 
-// Shutdown closes the database and releases resources.
+// Shutdown closes the database and releases resources with a timeout.
 func (m *CCTVManager) Shutdown() {
-	m.StopAllStreams()
+	done := make(chan struct{})
+	go func() {
+		m.StopAllStreams()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		log.Println("[cctv] shutdown: stream cleanup timed out, forcing close")
+	}
 	if m.db != nil {
 		m.db.Close()
 	}
