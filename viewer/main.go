@@ -5,8 +5,6 @@ import (
 	"embed"
 	"log"
 
-	"runtime"
-
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -23,23 +21,15 @@ func main() {
 	updater := NewUpdater()
 	proxy := NewAssetProxyMiddleware(cctv, stream)
 
-	isMac := runtime.GOOS == "darwin"
-
 	err := wails.Run(&options.App{
-		Title:            "OpsView",
-		Width:            1280,
-		Height:           800,
-		MinWidth:         800,
-		MinHeight:        600,
-		Frameless:        isMac,
+		Title:     "OpsView",
+		Width:     1280,
+		Height:    800,
+		MinWidth:  800,
+		MinHeight: 600,
+		Frameless: false,
 		Mac: &mac.Options{
-			TitleBar: &mac.TitleBar{
-				TitlebarAppearsTransparent: true,
-				HideTitle:                 true,
-				HideTitleBar:              false,
-				FullSizeContent:           true,
-				UseToolbar:               false,
-			},
+			TitleBar:            mac.TitleBarHidden(),
 			WindowIsTranslucent: false,
 			About: &mac.AboutInfo{
 				Title:   "OpsView",
