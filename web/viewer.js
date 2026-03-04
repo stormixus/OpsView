@@ -41,8 +41,6 @@ let reconnectTimer = null;
 
 // Surv state
 let survPlayers = {}; // id -> { hls, interval }
-let relayStreams = []; // from /api/surv/streams
-let survMode = 'auto'; // 'auto' (relay HLS) or 'manual' (local DVR config)
 
 // --- Init ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -476,104 +474,30 @@ function saveDVRData() {
 
 function handleSurvConfig(cfg) {
   console.log('[surv] config received:', cfg);
-  if (survMode === 'auto') {
-    fetchRelayStreams();
+  window.survRemoteConfig = cfg;
+
+  const remoteDvrs = [];
+  for (const d of (cfg.dvrs || [])) {
+    // Treat as remote (HLS via relay)
+    remoteDvrs.push({ ...d, _remote: true, channelCount: (cfg.channels || []).filter(c => c.dvr_id === d.id && c.enabled).length });
   }
+
+  // Merge remote DVRs into local DVRs
+  dvrs = dvrs.filter(d => !d._remote).concat(remoteDvrs);
+  
+  if (!activeDvrId || !dvrs.find(d => d.id === activeDvrId)) {
+    if (dvrs.length > 0) activeDvrId = dvrs[0].id;
+  }
+  
+  renderDVRTabs();
+  if (activeDvrId) renderSurvGrid(); 
 }
 
-// --- Relay HLS auto mode ---
 function getHttpBase() {
   const proto = document.getElementById('proto').value === 'wss' ? 'https' : 'http';
   const ip = document.getElementById('relayIp').value.trim();
   const port = document.getElementById('relayPort').value.trim();
   return `${proto}://${ip}:${port}`;
-}
-
-function fetchRelayStreams() {
-  const base = getHttpBase();
-  fetch(`${base}/api/surv/streams`)
-    .then(r => r.json())
-    .then(streams => {
-      relayStreams = streams || [];
-      if (survMode === 'auto') renderRelayGrid();
-    })
-    .catch(err => console.log('[surv] streams fetch error:', err));
-}
-
-function renderRelayGrid() {
-  const grid = document.getElementById('survGrid');
-  const empty = document.getElementById('survEmpty');
-
-  if (relayStreams.length === 0) {
-    empty.style.display = 'flex';
-    grid.style.display = 'none';
-    empty.innerHTML = '<i data-lucide="camera-off" class="w-5 h-5"></i> ' + t('waitingStreams');
-    lucide.createIcons();
-    return;
-  }
-
-  empty.style.display = 'none';
-  grid.style.display = 'grid';
-
-  const cols = relayStreams.length <= 4 ? 2 : relayStreams.length <= 9 ? 3 : 4;
-  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-
-  stopAllStreams();
-
-  grid.innerHTML = relayStreams.map(s => `
-    <div class="surv-cell" id="cell-relay-${s.id}">
-      <div class="label">
-        <span class="text-slate-300 font-medium">${s.name || s.id}</span>
-        <span class="text-emerald-500 text-[9px] ml-2">${t('live')}</span>
-      </div>
-    </div>
-  `).join('');
-
-  const base = getHttpBase();
-  relayStreams.forEach(s => {
-    const cellId = `relay-${s.id}`;
-    const cell = document.getElementById('cell-' + cellId);
-    if (!cell) return;
-
-    const hlsUrl = `${base}/surv/${s.id}/index.m3u8`;
-    const video = document.createElement('video');
-    video.autoplay = true; video.muted = true; video.playsInline = true;
-    cell.prepend(video);
-
-    if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
-      hls.loadSource(hlsUrl);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) console.error('[surv] HLS error:', data);
-      });
-      survPlayers[cellId] = { hls };
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = hlsUrl; video.play();
-      survPlayers[cellId] = {};
-    }
-  });
-}
-
-function setSurvMode(mode) {
-  survMode = mode;
-  stopAllStreams();
-
-  document.querySelectorAll('.surv-mode-btn').forEach(b => b.classList.remove('active-mode'));
-  const btn = document.querySelector(`.surv-mode-btn[data-mode="${mode}"]`);
-  if (btn) btn.classList.add('active-mode');
-
-  const dvrBar = document.getElementById('dvrManualBar');
-
-  if (mode === 'auto') {
-    dvrBar.style.display = 'none';
-    fetchRelayStreams();
-  } else {
-    dvrBar.style.display = 'flex';
-    renderDVRTabs();
-    if (activeDvrId) renderSurvGrid();
-  }
 }
 
 // --- DVR Tabs ---
@@ -597,21 +521,49 @@ function renderDVRTabs() {
     const isActive = d.id === activeDvrId;
     const tab = document.createElement('div');
     tab.className = `dvr-tab${isActive ? ' active' : ''}`;
+    const icon = d._remote ? 'cloud' : 'hard-drive';
+    let actionBtns = '';
+    if (!d._remote) {
+      actionBtns = `
+        <button class="edit-dvr dvr-tab-action" title="Edit">&#9998;</button>
+        <button class="del-dvr dvr-tab-action danger" title="Delete">&times;</button>
+      `;
+    }
     tab.innerHTML = `
-      <i data-lucide="hard-drive" class="w-3 h-3"></i>
+      <i data-lucide="${icon}" class="w-3 h-3"></i>
       <span class="dvr-tab-name">${d.name}</span>
       <span class="dvr-tab-meta">${d.channelCount}ch</span>
-      <button class="edit-dvr dvr-tab-action" title="Edit">&#9998;</button>
-      <button class="del-dvr dvr-tab-action danger" title="Delete">&times;</button>
+      ${actionBtns}
     `;
     tab.addEventListener('click', (e) => {
-      if (e.target.closest('.del-dvr')) { e.stopPropagation(); deleteDVR(d.id); return; }
-      if (e.target.closest('.edit-dvr')) { e.stopPropagation(); showEditDVRForm(d.id); return; }
+      if (!d._remote) {
+        if (e.target.closest('.del-dvr')) { e.stopPropagation(); deleteDVR(d.id); return; }
+        if (e.target.closest('.edit-dvr')) { e.stopPropagation(); showEditDVRForm(d.id); return; }
+      }
       selectDVR(d.id);
     });
     bar.appendChild(tab);
   });
   lucide.createIcons();
+
+  if (!window.dvrTabsSortable) {
+    window.dvrTabsSortable = Sortable.create(bar, {
+      animation: 250,
+      easing: "cubic-bezier(1, 0, 0, 1)",
+      ghostClass: "sortable-ghost",
+      chosenClass: "sortable-chosen",
+      dragClass: "sortable-drag",
+      direction: 'horizontal',
+      onEnd: function(evt) {
+        const oldIndex = evt.oldIndex;
+        const newIndex = evt.newIndex;
+        if (oldIndex === newIndex) return;
+        const movedItem = dvrs.splice(oldIndex, 1)[0];
+        dvrs.splice(newIndex, 0, movedItem);
+        saveDVRData();
+      }
+    });
+  }
 }
 
 function selectDVR(id) {
@@ -724,13 +676,21 @@ function saveDVR() {
 function renderSurvGrid() {
   const grid = document.getElementById('survGrid');
   const dvr = dvrs.find(d => d.id === activeDvrId);
-  if (!dvr || !dvr.channels) { grid.innerHTML = ''; return; }
+  if (!dvr) { grid.innerHTML = ''; return; }
 
-  const cols = dvr.channels.length <= 4 ? 2 : dvr.channels.length <= 9 ? 3 : 4;
+  let channelsToRender = [];
+  if (dvr._remote) {
+    const cfg = window.survRemoteConfig || {};
+    channelsToRender = (cfg.channels || []).filter(c => c.dvr_id === dvr.id && c.enabled);
+  } else {
+    channelsToRender = dvr.channels || [];
+  }
+
+  const cols = channelsToRender.length <= 4 ? 2 : channelsToRender.length <= 9 ? 3 : 4;
   grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
 
-  grid.innerHTML = dvr.channels.map(ch => `
-    <div class="surv-cell" id="cell-${dvr.id}-${ch.ch}">
+  grid.innerHTML = channelsToRender.map(ch => `
+    <div class="surv-cell" id="cell-${dvr.id}-${ch.ch_num || ch.ch}">
       <div class="label">
         <span class="text-slate-300 font-medium">${ch.name}</span>
         <span class="text-slate-600 text-[9px] ml-2">${dvr.name}</span>
@@ -738,47 +698,73 @@ function renderSurvGrid() {
     </div>
   `).join('');
 
-  dvr.channels.forEach(ch => startStream(dvr, ch));
+  stopAllStreams();
+  channelsToRender.forEach(ch => startStream(dvr, ch));
 }
 
 function startStream(dvr, ch) {
-  const cellId = `${dvr.id}-${ch.ch}`;
+  const chNum = ch.ch_num || ch.ch;
+  const cellId = `${dvr.id}-${chNum}`;
   stopSurvPlayer(cellId);
   const cell = document.getElementById('cell-' + cellId);
   if (!cell) return;
 
-  if (ch.type === 'hls') {
+  if (dvr._remote) {
+    const base = getHttpBase();
+    const streamId = `dvr${dvr.id}_ch${chNum}`;
+    const hlsUrl = `${base}/surv/${streamId}/index.m3u8`;
+
     const video = document.createElement('video');
     video.autoplay = true; video.muted = true; video.playsInline = true;
     cell.prepend(video);
+
     if (typeof Hls !== 'undefined' && Hls.isSupported()) {
       const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
-      hls.loadSource(ch.url);
+      hls.loadSource(hlsUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+      hls.on(Hls.Events.ERROR, (evt, data) => {
+        if (data.fatal) console.warn('[surv] HLS error:', data);
+      });
       survPlayers[cellId] = { hls };
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = ch.url; video.play();
+      video.src = hlsUrl; video.play();
       survPlayers[cellId] = {};
     }
-  } else if (ch.type === 'mjpeg') {
-    const img = document.createElement('img');
-    img.src = ch.url;
-    cell.prepend(img);
-    survPlayers[cellId] = {};
-  } else if (ch.type === 'snapshot') {
-    const img = document.createElement('img');
-    const sep = ch.url.includes('?') ? '&' : '?';
-    img.src = ch.url + sep + '_t=' + Date.now();
-    img.onerror = () => { img.style.opacity = '0.2'; };
-    img.onload = () => { img.style.opacity = '1'; };
-    cell.prepend(img);
-    const interval = setInterval(() => {
-      const fresh = new Image();
-      fresh.src = ch.url + sep + '_t=' + Date.now();
-      fresh.onload = () => { img.src = fresh.src; img.style.opacity = '1'; };
-    }, 2000);
-    survPlayers[cellId] = { interval };
+  } else {
+    if (ch.type === 'hls') {
+      const video = document.createElement('video');
+      video.autoplay = true; video.muted = true; video.playsInline = true;
+      cell.prepend(video);
+      if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+        const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+        hls.loadSource(ch.url);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+        survPlayers[cellId] = { hls };
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = ch.url; video.play();
+        survPlayers[cellId] = {};
+      }
+    } else if (ch.type === 'mjpeg') {
+      const img = document.createElement('img');
+      img.src = ch.url;
+      cell.prepend(img);
+      survPlayers[cellId] = {};
+    } else if (ch.type === 'snapshot') {
+      const img = document.createElement('img');
+      const sep = ch.url.includes('?') ? '&' : '?';
+      img.src = ch.url + sep + '_t=' + Date.now();
+      img.onerror = () => { img.style.opacity = '0.2'; };
+      img.onload = () => { img.style.opacity = '1'; };
+      cell.prepend(img);
+      const interval = setInterval(() => {
+        const fresh = new Image();
+        fresh.src = ch.url + sep + '_t=' + Date.now();
+        fresh.onload = () => { img.src = fresh.src; img.style.opacity = '1'; };
+      }, 2000);
+      survPlayers[cellId] = { interval };
+    }
   }
 }
 
@@ -796,5 +782,5 @@ function stopAllStreams() {
 
 // --- Init Surv ---
 loadDVRData();
-// Start in auto mode by default (relay HLS)
-setSurvMode('auto');
+renderDVRTabs();
+if (activeDvrId) renderSurvGrid();
