@@ -1122,7 +1122,9 @@
         renderDVRTabs();
         updateCCTVStatus();
         if (dvrs.length > 0 && !activeDvrId) {
-          selectDVR(dvrs[0].id);
+          const savedDvrId = parseInt(localStorage.getItem('opsview_active_dvr'));
+          const target = savedDvrId && dvrs.find(d => d.id === savedDvrId) ? savedDvrId : dvrs[0].id;
+          selectDVR(target);
         }
       } catch(e) { console.error('loadDVRs:', e); }
     }
@@ -1169,19 +1171,15 @@
           direction: 'horizontal',
           filter: '.add-dvr',
           onEnd: async function(evt) {
-            const itemEl = evt.item;
-            const newIndex = evt.newIndex;
-            // Reorder dvrs array
             const oldIndex = evt.oldIndex;
+            const newIndex = evt.newIndex;
             if (oldIndex === newIndex) return;
             const movedItem = dvrs.splice(oldIndex, 1)[0];
             dvrs.splice(newIndex, 0, movedItem);
-            
-            // Re-render UI to keep active tab synced and save to backend
-            // In Desktop, we should update backend order if supported. For now, just re-order array.
-            // CM().UpdateDVROrder(dvrs.map(d => d.id)) etc. 
-            // For now, just save locally if we had localStorage, but Desktop relies on DB.
-            // Wait, does database maintain order? If not, we might need a custom order field.
+            renderDVRTabs();
+            if (CM()) {
+              CM().ReorderDVRs(dvrs.filter(d => !d._remote).map(d => d.id)).catch(e => console.error('reorder dvrs:', e));
+            }
           }
         });
       }
@@ -1218,6 +1216,7 @@
         }
       }
       activeDvrId = id;
+      localStorage.setItem('opsview_active_dvr', id);
       renderDVRTabs();
       hideDVRForm();
 

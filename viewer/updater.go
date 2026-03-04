@@ -137,7 +137,8 @@ func (u *Updater) DownloadAndInstall(downloadURL string) (string, error) {
 		if err := cmd.Start(); err != nil {
 			return "", err
 		}
-		return "DMG가 열렸습니다. Applications 폴더로 드래그하세요.", nil
+		os.Exit(0)
+		return "", nil
 
 	case "linux":
 		execPath, err := os.Executable()

@@ -123,12 +123,14 @@ func (m *CCTVManager) migrate() {
 	}
 	// Add protocol column for existing databases
 	m.db.Exec(`ALTER TABLE dvrs ADD COLUMN protocol TEXT NOT NULL DEFAULT 'isapi'`)
+	// Add display_order column for DVR tab ordering
+	m.db.Exec(`ALTER TABLE dvrs ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0`)
 }
 
 // --- DVR CRUD ---
 
 func (m *CCTVManager) ListDVRs() ([]DVRConfig, error) {
-	rows, err := m.db.Query(`SELECT id, name, addr, port, username, password, refresh_rate, stream_quality, protocol, created_at FROM dvrs ORDER BY id`)
+	rows, err := m.db.Query(`SELECT id, name, addr, port, username, password, refresh_rate, stream_quality, protocol, created_at FROM dvrs ORDER BY display_order, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -239,6 +241,17 @@ func (m *CCTVManager) UpdateChannel(id int, name string, order int, enabled bool
 	}
 	_, err := m.db.Exec(`UPDATE channels SET name=?, display_order=?, enabled=? WHERE id=?`, name, order, en, id)
 	return err
+}
+
+func (m *CCTVManager) ReorderDVRs(orderedIDs []int64) error {
+	tx, err := m.db.Begin()
+	if err != nil {
+		return err
+	}
+	for i, id := range orderedIDs {
+		tx.Exec(`UPDATE dvrs SET display_order=? WHERE id=?`, i, id)
+	}
+	return tx.Commit()
 }
 
 func (m *CCTVManager) ReorderChannels(dvrID int64, orderedChNums []int) error {
