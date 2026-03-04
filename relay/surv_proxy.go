@@ -66,8 +66,13 @@ func (sp *SurvProxy) HandleSurvConfig(payload []byte) {
 		dvrMap[d.ID] = d
 	}
 
-	// Determine desired channel set
+	// Determine desired channel set, grouped by DVR for staggered connection
 	desired := make(map[string]bool)
+	type pendingCh struct {
+		chID, name, rtspURL string
+	}
+	perDVR := make(map[int64][]pendingCh)
+
 	for _, ch := range cfg.Channels {
 		if !ch.Enabled {
 			continue
@@ -76,22 +81,39 @@ func (sp *SurvProxy) HandleSurvConfig(payload []byte) {
 		if !ok {
 			continue
 		}
-		chID := fmt.Sprintf("ch%d", ch.ChNum)
+		chID := fmt.Sprintf("dvr%d_ch%d", ch.DVRID, ch.ChNum)
 		desired[chID] = true
 
 		sp.mu.RLock()
 		_, exists := sp.streams[chID]
 		sp.mu.RUnlock()
 
-		if exists {
-			continue
-		}
-
-		rtspURL := buildSurvRTSPURL(dvr, ch.ChNum)
-		if err := sp.StartChannel(chID, ch.Name, rtspURL); err != nil {
-			log.Printf("[surv] failed to start %s: %v", chID, err)
+		if !exists {
+			perDVR[ch.DVRID] = append(perDVR[ch.DVRID], pendingCh{
+				chID:    chID,
+				name:    ch.Name,
+				rtspURL: buildSurvRTSPURL(dvr, ch.ChNum),
+			})
 		}
 	}
+
+	// Start channels per DVR in parallel, but stagger within each DVR
+	var wg sync.WaitGroup
+	for _, channels := range perDVR {
+		wg.Add(1)
+		go func(chs []pendingCh) {
+			defer wg.Done()
+			for i, ch := range chs {
+				if i > 0 {
+					time.Sleep(300 * time.Millisecond)
+				}
+				if err := sp.StartChannel(ch.chID, ch.name, ch.rtspURL); err != nil {
+					log.Printf("[surv] failed to start %s: %v", ch.chID, err)
+				}
+			}
+		}(channels)
+	}
+	wg.Wait()
 
 	// Stop channels no longer in config
 	sp.mu.RLock()
@@ -142,16 +164,21 @@ func (sp *SurvProxy) StartChannel(id, name, rawURL string) error {
 
 	entry := &streamEntry{id: id, name: name}
 
-	track, err := setupSurvCodec(c, desc, entry)
+	track, isH265, err := setupSurvCodec(c, desc, entry)
 	if err != nil {
 		c.Close()
 		return err
 	}
 
+	variant := gohlslib.MuxerVariantMPEGTS
+	if isH265 {
+		variant = gohlslib.MuxerVariantFMP4
+	}
+
 	muxer := &gohlslib.Muxer{
-		Variant:            gohlslib.MuxerVariantMPEGTS,
+		Variant:            variant,
 		SegmentCount:       5,
-		SegmentMinDuration: 4 * time.Second,
+		SegmentMinDuration: 5 * time.Second,
 		Tracks:             []*gohlslib.Track{track},
 	}
 	if err := muxer.Start(); err != nil {
@@ -232,7 +259,17 @@ func (sp *SurvProxy) ListStreams() []StreamInfo {
 
 // ServeHLS handles /surv/{chID}/... requests by delegating to the appropriate muxer.
 func (sp *SurvProxy) ServeHLS(w http.ResponseWriter, r *http.Request) {
-	// Path: /surv/ch1/index.m3u8 or /surv/ch1/segment123.ts
+	// CORS headers for all responses (including errors)
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Range, Origin, Content-Type")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Path: /surv/dvr1_ch1/index.m3u8 or /surv/dvr1_ch1/segment123.ts
 	path := strings.TrimPrefix(r.URL.Path, "/surv/")
 	parts := strings.SplitN(path, "/", 2)
 	if len(parts) < 2 {
@@ -256,7 +293,6 @@ func (sp *SurvProxy) ServeHLS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	// Rewrite path so muxer sees /index.m3u8 or /segment.ts
 	r.URL.Path = "/" + remainder
@@ -265,18 +301,20 @@ func (sp *SurvProxy) ServeHLS(w http.ResponseWriter, r *http.Request) {
 
 // --- Codec setup (ported from viewer/stream_proxy.go) ---
 
-func setupSurvCodec(c *gortsplib.Client, desc *description.Session, entry *streamEntry) (*gohlslib.Track, error) {
+func setupSurvCodec(c *gortsplib.Client, desc *description.Session, entry *streamEntry) (*gohlslib.Track, bool, error) {
 	var formaH264 *format.H264
 	if medi := desc.FindFormat(&formaH264); medi != nil {
-		return setupSurvH264(c, desc, medi, formaH264, entry)
+		track, err := setupSurvH264(c, desc, medi, formaH264, entry)
+		return track, false, err
 	}
 
 	var formaH265 *format.H265
 	if medi := desc.FindFormat(&formaH265); medi != nil {
-		return setupSurvH265(c, desc, medi, formaH265, entry)
+		track, err := setupSurvH265(c, desc, medi, formaH265, entry)
+		return track, true, err
 	}
 
-	return nil, fmt.Errorf("no H264/H265 track found in RTSP stream")
+	return nil, false, fmt.Errorf("no H264/H265 track found in RTSP stream")
 }
 
 func setupSurvH264(c *gortsplib.Client, desc *description.Session, medi *description.Media, forma *format.H264, entry *streamEntry) (*gohlslib.Track, error) {

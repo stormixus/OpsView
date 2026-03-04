@@ -62,17 +62,21 @@ func (p *StreamProxy) StartStream(rawURL string) (string, error) {
 		return "", fmt.Errorf("RTSP describe: %w", err)
 	}
 
-	track, err := p.setupCodec(c, desc)
+	track, isH265, err := p.setupCodec(c, desc)
 	if err != nil {
 		c.Close()
 		return "", err
 	}
 
+	variant := gohlslib.MuxerVariantMPEGTS
+	if isH265 {
+		variant = gohlslib.MuxerVariantFMP4
+	}
+
 	muxer := &gohlslib.Muxer{
-		Variant:      gohlslib.MuxerVariantMPEGTS,
-		SegmentCount: 5,
-		// Keep target duration stable for strict HLS clients (iOS Safari).
-		SegmentMinDuration: 4 * time.Second,
+		Variant:            variant,
+		SegmentCount:       5,
+		SegmentMinDuration: 5 * time.Second,
 		Tracks:             []*gohlslib.Track{track},
 	}
 	if err := muxer.Start(); err != nil {
@@ -104,20 +108,22 @@ func (p *StreamProxy) StartStream(rawURL string) (string, error) {
 }
 
 // setupCodec detects H264/H265 in the RTSP stream and wires up the RTP→HLS pipeline.
-func (p *StreamProxy) setupCodec(c *gortsplib.Client, desc *description.Session) (*gohlslib.Track, error) {
+func (p *StreamProxy) setupCodec(c *gortsplib.Client, desc *description.Session) (*gohlslib.Track, bool, error) {
 	// Try H264
 	var formaH264 *format.H264
 	if medi := desc.FindFormat(&formaH264); medi != nil {
-		return p.setupH264(c, desc, medi, formaH264)
+		track, err := p.setupH264(c, desc, medi, formaH264)
+		return track, false, err
 	}
 
 	// Try H265
 	var formaH265 *format.H265
 	if medi := desc.FindFormat(&formaH265); medi != nil {
-		return p.setupH265(c, desc, medi, formaH265)
+		track, err := p.setupH265(c, desc, medi, formaH265)
+		return track, true, err
 	}
 
-	return nil, fmt.Errorf("no H264/H265 track found in RTSP stream")
+	return nil, false, fmt.Errorf("no H264/H265 track found in RTSP stream")
 }
 
 func (p *StreamProxy) setupH264(c *gortsplib.Client, desc *description.Session, medi *description.Media, forma *format.H264) (*gohlslib.Track, error) {

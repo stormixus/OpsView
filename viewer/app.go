@@ -18,6 +18,16 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
+// GetAutoStart returns whether the app is configured to start at login.
+func (a *App) GetAutoStart() bool {
+	return isAutoStartEnabled()
+}
+
+// SetAutoStart enables or disables starting the app at login.
+func (a *App) SetAutoStart(enabled bool) error {
+	return setAutoStart(enabled)
+}
+
 // GetConfig returns saved relay configuration for the frontend.
 func (a *App) GetConfig() map[string]string {
 	url := os.Getenv("WATCH_URL")

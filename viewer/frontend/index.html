@@ -254,6 +254,14 @@
             <option value="es">Español</option>
           </select>
         </div>
+        <!-- Auto Start -->
+        <div class="flex items-center justify-between">
+          <label class="text-[11px] font-medium text-gray-400 uppercase tracking-wider" data-i18n="autoStart">Start at Login</label>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" id="autoStartToggle" class="sr-only peer" onchange="toggleAutoStart(this.checked)">
+            <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:bg-cyan-600 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+          </label>
+        </div>
         <!-- Update -->
         <div>
           <label class="block text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-2" id="updateLabel" data-i18n="update">Update</label>
@@ -875,9 +883,15 @@
       mixedPeerConns.forEach(pc => { try { pc.close(); } catch(e) {} });
       mixedPeerConns = [];
     }
+    let remoteHlsInstances = [];
+    function cleanupRemoteHLS() {
+      remoteHlsInstances.forEach(h => { try { h.destroy(); } catch(e) {} });
+      remoteHlsInstances = [];
+    }
     function cleanupAllStreams() {
       cleanupChannelPCs();
       cleanupMixedPCs();
+      cleanupRemoteHLS();
       channelStreams = {};
       channelConnecting = new Set();
     }
@@ -1116,14 +1130,20 @@
       dvrs.forEach(d => {
         const tab = document.createElement('div');
         tab.className = 'dvr-tab flex items-center gap-1 px-3 py-1.5 text-[11px] text-gray-500 cursor-pointer rounded-md transition-all hover:text-gray-300 hover:bg-white/[0.04]' + (d.id === activeDvrId ? ' active !text-cyan-300 bg-cyan-500/10' : '');
-        tab.innerHTML = '<i data-lucide="hard-drive" style="width:12px;height:12px;display:inline-block;"></i> ' + d.name
-          + '<span class="rescan-btn ml-1.5 text-gray-600 text-[10px] cursor-pointer hover:text-emerald-400 transition-colors" title="' + t('rescanChannels') + '">&#8635;</span>'
-          + '<span class="edit-btn ml-0.5 text-gray-600 text-[10px] cursor-pointer hover:text-cyan-300 transition-colors" title="' + t('editDvr') + '">&#9998;</span>'
-          + '<span class="del-btn ml-0.5 text-gray-600 text-[10px] cursor-pointer hover:text-red-400 transition-colors" title="' + t('deleteDvr') + '">&times;</span>';
+        const icon = d._remote ? 'cloud' : 'hard-drive';
+        let actionBtns = '';
+        if (!d._remote) {
+          actionBtns = '<span class="rescan-btn ml-1.5 text-gray-600 text-[10px] cursor-pointer hover:text-emerald-400 transition-colors" title="' + t('rescanChannels') + '">&#8635;</span>'
+            + '<span class="edit-btn ml-0.5 text-gray-600 text-[10px] cursor-pointer hover:text-cyan-300 transition-colors" title="' + t('editDvr') + '">&#9998;</span>'
+            + '<span class="del-btn ml-0.5 text-gray-600 text-[10px] cursor-pointer hover:text-red-400 transition-colors" title="' + t('deleteDvr') + '">&times;</span>';
+        }
+        tab.innerHTML = '<i data-lucide="' + icon + '" style="width:12px;height:12px;display:inline-block;"></i> ' + d.name + actionBtns;
         tab.addEventListener('click', e => {
-          if (e.target.closest('.del-btn')) { e.stopPropagation(); deleteDVR(d.id); return; }
-          if (e.target.closest('.edit-btn')) { e.stopPropagation(); showEditDVR(d.id); return; }
-          if (e.target.closest('.rescan-btn')) { e.stopPropagation(); rediscoverChannels(d.id); return; }
+          if (!d._remote) {
+            if (e.target.closest('.del-btn')) { e.stopPropagation(); deleteDVR(d.id); return; }
+            if (e.target.closest('.edit-btn')) { e.stopPropagation(); showEditDVR(d.id); return; }
+            if (e.target.closest('.rescan-btn')) { e.stopPropagation(); rediscoverChannels(d.id); return; }
+          }
           selectDVR(d.id);
         });
         bar.appendChild(tab);
@@ -1160,7 +1180,9 @@
       // Stop previous RTSP streams when switching DVRs
       if (activeDvrId && activeDvrId !== id) {
         const prevDvr = dvrs.find(d => d.id === activeDvrId);
-        if (prevDvr && prevDvr.protocol === 'rtsp' && CM()) {
+        if (prevDvr && prevDvr._remote) {
+          cleanupRemoteHLS();
+        } else if (prevDvr && prevDvr.protocol === 'rtsp' && CM()) {
           cleanupAllStreams();
           CM().StopDVRStreams(activeDvrId).catch(() => {});
         }
@@ -1168,6 +1190,32 @@
       activeDvrId = id;
       renderDVRTabs();
       hideDVRForm();
+
+      const dvr = dvrs.find(d => d.id === id);
+
+      // Remote DVR: use survRemoteConfig channels, no Go backend needed
+      if (dvr && dvr._remote) {
+        const cfg = window.survRemoteConfig;
+        if (cfg && cfg.channels) {
+          cctvChannels = cfg.channels.filter(ch => ch.dvr_id === id || id === '_remote_default');
+        } else {
+          cctvChannels = [];
+        }
+        const activePanel = document.querySelector('.panel.active');
+        if (activePanel && activePanel.id === 'panel-mixed') {
+          cctvRenderedDvrId = null;
+          renderMixedCCTV();
+        } else if (activePanel && activePanel.id === 'panel-cctv') {
+          mixedRenderedDvrId = null;
+          renderCCTVGrid(dvr);
+        } else {
+          cctvRenderedDvrId = null;
+          mixedRenderedDvrId = null;
+        }
+        updateCCTVStatus();
+        return;
+      }
+
       if (!CM()) return;
       try {
         cctvChannels = await CM().ListChannels(id) || [];
@@ -1176,7 +1224,6 @@
           cctvChannels = await CM().DiscoverChannels(id) || [];
           setDVRStatus(cctvChannels.length + t('nChannels'), '#22c55e');
         }
-        const dvr = dvrs.find(d => d.id === id);
         const activePanel = document.querySelector('.panel.active');
         if (activePanel && activePanel.id === 'panel-mixed') {
           cctvRenderedDvrId = null;
@@ -1514,13 +1561,44 @@
       const isRTSP = dvr && dvr.protocol === 'rtsp';
       const refreshMs = (dvr && dvr.refresh_rate) ? dvr.refresh_rate : 2000;
 
+      const isRemote = dvr && dvr._remote;
+
       enabled.forEach(ch => {
         const cell = document.createElement('div');
         cell.className = 'cctv-cell';
         cell.dataset.chnum = ch.ch_num;
         cell.style.aspectRatio = '16/9';
 
-        if (isRTSP) {
+        if (isRemote) {
+          // Remote DVR: HLS via relay proxy
+          const video = document.createElement('video');
+          video.autoplay = true;
+          video.muted = true;
+          video.playsInline = true;
+          video.style.width = '100%';
+          video.style.height = '100%';
+          video.style.objectFit = 'contain';
+          video.style.background = '#000';
+          const ip = document.getElementById('relayIp').value.trim();
+          const port = document.getElementById('relayPort').value.trim();
+          const hlsUrl = 'http://' + ip + ':' + port + '/surv/dvr' + ch.dvr_id + '_ch' + ch.ch_num + '/index.m3u8';
+          if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+            const hls = new Hls({ enableWorker: true, lowLatencyMode: true, manifestLoadingMaxRetry: 2, manifestLoadingRetryDelay: 3000 });
+            hls.loadSource(hlsUrl);
+            hls.attachMedia(video);
+            hls.on(Hls.Events.ERROR, (evt, data) => {
+              if (data.fatal) {
+                console.warn('[surv] HLS fatal error ch' + ch.ch_num + ':', data.type, data.details);
+                hls.destroy();
+              }
+            });
+            remoteHlsInstances.push(hls);
+          } else {
+            // Safari native HLS
+            video.src = hlsUrl;
+          }
+          cell.appendChild(video);
+        } else if (isRTSP) {
           // RTSP: <video> (WebRTC or HLS depending on codec)
           const video = document.createElement('video');
           video.autoplay = true;
@@ -1552,12 +1630,21 @@
         // Label (common)
         const label = document.createElement('div');
         label.className = 'ch-label';
-        const nameInput = document.createElement('input');
-        nameInput.className = 'ch-name';
-        nameInput.value = ch.name;
-        nameInput.addEventListener('change', () => renameChannel(ch.id, nameInput.value, ch));
-        nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') nameInput.blur(); });
-        label.appendChild(nameInput);
+        if (isRemote) {
+          // Remote channels: read-only label
+          const nameSpan = document.createElement('span');
+          nameSpan.className = 'ch-name';
+          nameSpan.textContent = ch.name;
+          nameSpan.style.cursor = 'default';
+          label.appendChild(nameSpan);
+        } else {
+          const nameInput = document.createElement('input');
+          nameInput.className = 'ch-name';
+          nameInput.value = ch.name;
+          nameInput.addEventListener('change', () => renameChannel(ch.id, nameInput.value, ch));
+          nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') nameInput.blur(); });
+          label.appendChild(nameInput);
+        }
 
         const info = document.createElement('span');
         info.className = 'ch-id';
@@ -1580,7 +1667,7 @@
       });
 
       // Start RTSP streams with staggered connections (after grid is built)
-      console.log('[cctv] renderCCTVGrid: isRTSP=' + isRTSP + ' CM=' + !!CM() + ' enabled=' + enabled.length);
+      console.log('[cctv] renderCCTVGrid: isRTSP=' + isRTSP + ' isRemote=' + !!isRemote + ' CM=' + !!CM() + ' enabled=' + enabled.length);
       if (isRTSP && CM()) {
         console.log('[cctv] renderCCTVGrid: starting staggered connections for ' + enabled.length + ' channels');
         startRTSPChannelsStaggered(dvr.id, enabled,
@@ -2029,7 +2116,7 @@
     const UPD = () => window.go && window.go.main && window.go.main.Updater;
     // ── i18n ──
     const i18n = {
-      en: { 'settings': 'Settings', 'lang': 'Language', 'update': 'Update', 'upToDate': 'Up to date', 'updateNow': 'Update Now', 'downloading': 'Downloading...', 'done': 'Done!', 'error': 'Error', 'newVersion': 'New version {ver} available (current: {cur})', 'ops': 'Ops', 'cctv': 'CCTV', 'mixed': 'Mixed', 'refresh': 'Refresh', 'settings_btn': 'Settings', 'setup': 'Settings', 'disconnect': 'Disconnect',
+      en: { 'settings': 'Settings', 'lang': 'Language', 'autoStart': 'Start at Login', 'update': 'Update', 'upToDate': 'Up to date', 'updateNow': 'Update Now', 'downloading': 'Downloading...', 'done': 'Done!', 'error': 'Error', 'newVersion': 'New version {ver} available (current: {cur})', 'ops': 'Ops', 'cctv': 'CCTV', 'mixed': 'Mixed', 'refresh': 'Refresh', 'settings_btn': 'Settings', 'setup': 'Settings', 'disconnect': 'Disconnect',
         'screenSource': 'Screen Source', 'opsRelay': 'OpsView Relay', 'pinLabel': 'PIN Code', 'pinPlaceholder': '6-digit PIN (e.g. 482193)', 'connectRelay': 'Connect Relay', 'or': 'or', 'directStream': 'Direct Stream', 'playStream': 'Play Stream',
         'addDvr': 'Add DVR', 'name': 'Name:', 'myDvr': 'My DVR', 'port': 'Port:', 'username': 'Username:', 'password': 'Password:', 'protocol': 'Protocol:', 'autoProtocol': 'Auto', 'quality': 'Quality:', 'subStream': 'Sub', 'mainStream': 'Main', 'refreshRate': 'Refresh:', 'saveAndConnect': 'Save & Connect', 'cancel': 'Cancel', 'rtspTest': 'RTSP Test',
         'grid': 'Grid:', 'noChannelsAddDvr': 'Add a DVR to view channels', 'layout': 'Layout:', 'horizontal': 'Horizontal', 'vertical': 'Vertical', 'swap': 'Swap', 'noCctvChannels': 'No CCTV channels', 'selectRegion': 'Select Region', 'resetRegion': 'Reset',
@@ -2039,7 +2126,7 @@
         'chConnWait': 'Waiting...', 'chConnecting': 'Connecting...', 'retry': 'retry', 'webrtcFail': 'WebRTC offer SDP generation failed',
         'scanning': 'Scanning channels...', 'nChannels': ' channels', 'saving': 'Saving...', 'updateDone': 'Update complete', 'updateBtn': 'Update', 'rescanning': 'Rescanning channels...', 'nChannelsFound': ' channels found', 'rescanFail': 'Rescan failed', 'selectDvrFirst': 'Please select a DVR first', 'rtspTesting': 'Testing RTSP...', 'enterDvrAddr': 'Please enter DVR address',
         'selecting': 'Selecting...', 'rtspGeneric': 'RTSP (Generic)', 'noCctvMixed': 'No CCTV channels' },
-      ko: { 'settings': '설정', 'lang': '언어', 'update': '업데이트', 'upToDate': '최신 버전입니다', 'updateNow': '업데이트', 'downloading': '다운로드 중...', 'done': '완료!', 'error': '오류', 'newVersion': '새 버전 {ver} 사용 가능 (현재: {cur})', 'ops': 'Ops', 'cctv': 'CCTV', 'mixed': '같이보기', 'refresh': '새로고침', 'settings_btn': '설정', 'setup': '설정', 'disconnect': '연결 해제',
+      ko: { 'settings': '설정', 'lang': '언어', 'autoStart': '시스템 시작 시 자동실행', 'update': '업데이트', 'upToDate': '최신 버전입니다', 'updateNow': '업데이트', 'downloading': '다운로드 중...', 'done': '완료!', 'error': '오류', 'newVersion': '새 버전 {ver} 사용 가능 (현재: {cur})', 'ops': 'Ops', 'cctv': 'CCTV', 'mixed': '같이보기', 'refresh': '새로고침', 'settings_btn': '설정', 'setup': '설정', 'disconnect': '연결 해제',
         'screenSource': '화면 소스', 'opsRelay': 'OpsView 릴레이', 'pinLabel': 'PIN 번호', 'pinPlaceholder': '6자리 PIN (예: 482193)', 'connectRelay': '릴레이 연결', 'or': '또는', 'directStream': '직접 스트림', 'playStream': '스트림 재생',
         'addDvr': 'DVR 추가', 'name': '이름:', 'myDvr': '내 DVR', 'port': '포트:', 'username': '계정:', 'password': '비밀번호:', 'protocol': '프로토콜:', 'autoProtocol': 'Auto(자동)', 'quality': '화질:', 'subStream': '보조', 'mainStream': '메인', 'refreshRate': '갱신:', 'saveAndConnect': '저장 후 연결', 'cancel': '취소', 'rtspTest': 'RTSP 테스트',
         'grid': '그리드:', 'noChannelsAddDvr': '채널을 보려면 DVR을 추가하세요', 'layout': '레이아웃:', 'horizontal': '가로', 'vertical': '세로', 'swap': '전환', 'noCctvChannels': 'CCTV 채널 없음', 'selectRegion': '영역 선택', 'resetRegion': '초기화',
@@ -2049,7 +2136,7 @@
         'chConnWait': '연결 대기...', 'chConnecting': '연결 중...', 'retry': '재시도', 'webrtcFail': 'WebRTC offer SDP 생성 실패',
         'scanning': '채널 탐색 중...', 'nChannels': '개 채널', 'saving': '저장 중...', 'updateDone': '업데이트 완료', 'updateBtn': '업데이트', 'rescanning': '채널 재탐색 중...', 'nChannelsFound': '개 채널 발견', 'rescanFail': '재탐색 실패', 'selectDvrFirst': 'DVR을 먼저 선택하세요', 'rtspTesting': 'RTSP 테스트 중...', 'enterDvrAddr': 'DVR 주소를 입력하세요',
         'selecting': '선택 중...', 'rtspGeneric': 'RTSP(범용)', 'noCctvMixed': 'CCTV 채널 없음' },
-      ja: { 'settings': '設定', 'lang': '言語', 'update': 'アップデート', 'upToDate': '最新です', 'updateNow': 'アップデート', 'downloading': 'ダウンロード中...', 'done': '完了!', 'error': 'エラー', 'newVersion': '新バージョン {ver} 利用可能 (現在: {cur})', 'ops': 'Ops', 'cctv': 'CCTV', 'mixed': '同時表示', 'refresh': '更新', 'settings_btn': '設定', 'setup': '設定', 'disconnect': '切断',
+      ja: { 'settings': '設定', 'lang': '言語', 'autoStart': 'ログイン時に起動', 'update': 'アップデート', 'upToDate': '最新です', 'updateNow': 'アップデート', 'downloading': 'ダウンロード中...', 'done': '完了!', 'error': 'エラー', 'newVersion': '新バージョン {ver} 利用可能 (現在: {cur})', 'ops': 'Ops', 'cctv': 'CCTV', 'mixed': '同時表示', 'refresh': '更新', 'settings_btn': '設定', 'setup': '設定', 'disconnect': '切断',
         'screenSource': '画面ソース', 'opsRelay': 'OpsView リレー', 'pinLabel': 'PINコード', 'pinPlaceholder': '6桁のPIN (例: 482193)', 'connectRelay': 'リレー接続', 'or': 'または', 'directStream': 'ダイレクトストリーム', 'playStream': 'ストリーム再生',
         'addDvr': 'DVR追加', 'name': '名前:', 'myDvr': 'マイDVR', 'port': 'ポート:', 'username': 'アカウント:', 'password': 'パスワード:', 'protocol': 'プロトコル:', 'autoProtocol': '自動', 'quality': '画質:', 'subStream': 'サブ', 'mainStream': 'メイン', 'refreshRate': '更新:', 'saveAndConnect': '保存して接続', 'cancel': 'キャンセル', 'rtspTest': 'RTSPテスト',
         'grid': 'グリッド:', 'noChannelsAddDvr': 'チャンネルを見るにはDVRを追加してください', 'layout': 'レイアウト:', 'horizontal': '横', 'vertical': '縦', 'swap': '切替', 'noCctvChannels': 'CCTVチャンネルなし', 'selectRegion': '領域選択', 'resetRegion': 'リセット',
@@ -2059,7 +2146,7 @@
         'chConnWait': '接続待機中...', 'chConnecting': '接続中...', 'retry': '再試行', 'webrtcFail': 'WebRTC offer SDP生成失敗',
         'scanning': 'チャンネル探索中...', 'nChannels': 'チャンネル', 'saving': '保存中...', 'updateDone': '更新完了', 'updateBtn': '更新', 'rescanning': 'チャンネル再探索中...', 'nChannelsFound': 'チャンネル発見', 'rescanFail': '再探索失敗', 'selectDvrFirst': 'DVRを先に選択してください', 'rtspTesting': 'RTSPテスト中...', 'enterDvrAddr': 'DVRアドレスを入力してください',
         'selecting': '選択中...', 'rtspGeneric': 'RTSP(汎用)', 'noCctvMixed': 'CCTVチャンネルなし' },
-      pt: { 'settings': 'Configurações', 'lang': 'Idioma', 'update': 'Atualização', 'upToDate': 'Atualizado', 'updateNow': 'Atualizar', 'downloading': 'Baixando...', 'done': 'Concluído!', 'error': 'Erro', 'newVersion': 'Nova versão {ver} disponível (atual: {cur})', 'ops': 'Ops', 'cctv': 'CCTV', 'mixed': 'Misto', 'refresh': 'Atualizar', 'settings_btn': 'Config.', 'setup': 'Configurações', 'disconnect': 'Desconectar',
+      pt: { 'settings': 'Configurações', 'lang': 'Idioma', 'autoStart': 'Iniciar no Login', 'update': 'Atualização', 'upToDate': 'Atualizado', 'updateNow': 'Atualizar', 'downloading': 'Baixando...', 'done': 'Concluído!', 'error': 'Erro', 'newVersion': 'Nova versão {ver} disponível (atual: {cur})', 'ops': 'Ops', 'cctv': 'CCTV', 'mixed': 'Misto', 'refresh': 'Atualizar', 'settings_btn': 'Config.', 'setup': 'Configurações', 'disconnect': 'Desconectar',
         'screenSource': 'Fonte da Tela', 'opsRelay': 'OpsView Relay', 'pinLabel': 'Código PIN', 'pinPlaceholder': 'PIN de 6 dígitos (ex: 482193)', 'connectRelay': 'Conectar Relay', 'or': 'ou', 'directStream': 'Stream Direto', 'playStream': 'Reproduzir Stream',
         'addDvr': 'Adicionar DVR', 'name': 'Nome:', 'myDvr': 'Meu DVR', 'port': 'Porta:', 'username': 'Usuário:', 'password': 'Senha:', 'protocol': 'Protocolo:', 'autoProtocol': 'Auto', 'quality': 'Qualidade:', 'subStream': 'Sub', 'mainStream': 'Principal', 'refreshRate': 'Atualização:', 'saveAndConnect': 'Salvar e Conectar', 'cancel': 'Cancelar', 'rtspTest': 'Teste RTSP',
         'grid': 'Grade:', 'noChannelsAddDvr': 'Adicione um DVR para ver canais', 'layout': 'Layout:', 'horizontal': 'Horizontal', 'vertical': 'Vertical', 'swap': 'Trocar', 'noCctvChannels': 'Sem canais CCTV', 'selectRegion': 'Selecionar Região', 'resetRegion': 'Redefinir',
@@ -2069,7 +2156,7 @@
         'chConnWait': 'Aguardando...', 'chConnecting': 'Conectando...', 'retry': 'tentativa', 'webrtcFail': 'Falha na geração do WebRTC offer SDP',
         'scanning': 'Escaneando canais...', 'nChannels': ' canais', 'saving': 'Salvando...', 'updateDone': 'Atualização concluída', 'updateBtn': 'Atualizar', 'rescanning': 'Reescaneando canais...', 'nChannelsFound': ' canais encontrados', 'rescanFail': 'Falha no reescaneamento', 'selectDvrFirst': 'Selecione um DVR primeiro', 'rtspTesting': 'Testando RTSP...', 'enterDvrAddr': 'Digite o endereço do DVR',
         'selecting': 'Selecionando...', 'rtspGeneric': 'RTSP (Genérico)', 'noCctvMixed': 'Sem canais CCTV' },
-      es: { 'settings': 'Ajustes', 'lang': 'Idioma', 'update': 'Actualización', 'upToDate': 'Actualizado', 'updateNow': 'Actualizar', 'downloading': 'Descargando...', 'done': '¡Listo!', 'error': 'Error', 'newVersion': 'Nueva versión {ver} disponible (actual: {cur})', 'ops': 'Ops', 'cctv': 'CCTV', 'mixed': 'Mixto', 'refresh': 'Actualizar', 'settings_btn': 'Ajustes', 'setup': 'Ajustes', 'disconnect': 'Desconectar',
+      es: { 'settings': 'Ajustes', 'lang': 'Idioma', 'autoStart': 'Iniciar al Login', 'update': 'Actualización', 'upToDate': 'Actualizado', 'updateNow': 'Actualizar', 'downloading': 'Descargando...', 'done': '¡Listo!', 'error': 'Error', 'newVersion': 'Nueva versión {ver} disponible (actual: {cur})', 'ops': 'Ops', 'cctv': 'CCTV', 'mixed': 'Mixto', 'refresh': 'Actualizar', 'settings_btn': 'Ajustes', 'setup': 'Ajustes', 'disconnect': 'Desconectar',
         'screenSource': 'Fuente de Pantalla', 'opsRelay': 'OpsView Relay', 'pinLabel': 'Código PIN', 'pinPlaceholder': 'PIN de 6 dígitos (ej: 482193)', 'connectRelay': 'Conectar Relay', 'or': 'o', 'directStream': 'Stream Directo', 'playStream': 'Reproducir Stream',
         'addDvr': 'Agregar DVR', 'name': 'Nombre:', 'myDvr': 'Mi DVR', 'port': 'Puerto:', 'username': 'Usuario:', 'password': 'Contraseña:', 'protocol': 'Protocolo:', 'autoProtocol': 'Auto', 'quality': 'Calidad:', 'subStream': 'Sub', 'mainStream': 'Principal', 'refreshRate': 'Actualización:', 'saveAndConnect': 'Guardar y Conectar', 'cancel': 'Cancelar', 'rtspTest': 'Prueba RTSP',
         'grid': 'Cuadrícula:', 'noChannelsAddDvr': 'Agregue un DVR para ver canales', 'layout': 'Diseño:', 'horizontal': 'Horizontal', 'vertical': 'Vertical', 'swap': 'Intercambiar', 'noCctvChannels': 'Sin canales CCTV', 'selectRegion': 'Seleccionar Región', 'resetRegion': 'Restablecer',
@@ -2115,6 +2202,12 @@
     function openSettings() {
       const overlay = document.getElementById('settingsOverlay');
       document.getElementById('langSelect').value = currentLang;
+      // Load auto-start state
+      try {
+        window.go.main.App.GetAutoStart().then(v => {
+          document.getElementById('autoStartToggle').checked = !!v;
+        }).catch(() => {});
+      } catch(e) {}
       if (pendingUpdate) {
         document.getElementById('settingsUpdateStatus').style.display = 'none';
         document.getElementById('settingsUpdateAvailable').style.display = 'block';
@@ -2124,6 +2217,17 @@
       overlay.style.display = 'flex';
       applyI18n();
       lucide.createIcons();
+    }
+
+    function toggleAutoStart(checked) {
+      try {
+        window.go.main.App.SetAutoStart(checked).catch(err => {
+          console.error('SetAutoStart failed:', err);
+          document.getElementById('autoStartToggle').checked = !checked;
+        });
+      } catch(e) {
+        document.getElementById('autoStartToggle').checked = !checked;
+      }
     }
 
     function closeSettings() {
@@ -2181,12 +2285,61 @@
     loadDVRs();
 
     // Surveillance config from agent (via relay WebSocket)
-    document.addEventListener('surv-config-updated', (e) => {
+    document.addEventListener('surv-config-updated', async (e) => {
       const cfg = e.detail;
       if (!cfg) return;
       console.log('[surv] remote config:', cfg.dvrs?.length, 'DVRs,', cfg.channels?.length, 'channels');
-      // Store for use by snapshot loading
       window.survRemoteConfig = cfg;
+
+      const remoteDvrs = [];
+      let localAdded = false;
+
+      for (const d of (cfg.dvrs || [])) {
+        // Skip if this DVR already exists locally (same addr + port)
+        const existsLocally = dvrs.some(ld => !ld._remote && ld.addr === d.addr && ld.port === d.port);
+        if (existsLocally) {
+          console.log('[surv] DVR', d.name, 'already exists locally, skipping');
+          continue;
+        }
+
+        // Try to register locally if Go backend is available
+        if (CM()) {
+          try {
+            const localDvr = await CM().AddDVR(d.name, d.addr, d.port, d.username, d.password, d.protocol || 'rtsp');
+            await CM().UpdateDVR(localDvr.id, d.name, d.addr, d.port, d.username, d.password,
+              d.refresh_rate || 2000, d.stream_quality || 'sub', d.protocol || 'rtsp');
+            // Test if DVR is reachable by discovering channels
+            const chs = await CM().DiscoverChannels(localDvr.id);
+            if (chs && chs.length > 0) {
+              console.log('[surv] DVR', d.name, 'reachable locally:', chs.length, 'channels');
+              localAdded = true;
+              continue; // registered as local DVR successfully
+            }
+            // Not reachable: remove the local entry
+            await CM().DeleteDVR(localDvr.id);
+            console.log('[surv] DVR', d.name, 'not reachable locally, using relay');
+          } catch(err) {
+            console.log('[surv] DVR', d.name, 'local registration failed, using relay:', err);
+          }
+        }
+
+        // Fallback: treat as remote (HLS via relay)
+        remoteDvrs.push({ ...d, _remote: true });
+      }
+
+      // Reload local DVRs if any were added
+      if (localAdded && CM()) {
+        try { dvrs = await CM().ListDVRs() || []; } catch(e) {}
+      }
+
+      // Merge: remove old remote DVRs, add new remote ones
+      dvrs = dvrs.filter(d => !d._remote).concat(remoteDvrs);
+      renderDVRTabs();
+
+      // Auto-select first DVR if no active DVR or active DVR gone
+      if (!activeDvrId || !dvrs.find(d => d.id === activeDvrId)) {
+        if (dvrs.length > 0) selectDVR(dvrs[0].id);
+      }
     });
   </script>
 </body>
