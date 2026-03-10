@@ -72,17 +72,16 @@
     #panel-ops:hover .ops-toolbar.visible { opacity: 1; pointer-events: auto; }
 
     /* === CCTV Grid columns (JS toggles .grid-2/3/4) === */
-    .cctv-grid { flex: 1; display: grid; gap: 6px; padding: 6px; background: rgba(2, 6, 12, 0.88); overflow-y: auto; align-content: start; }
-    .cctv-grid.grid-2 { grid-template-columns: repeat(2, 1fr); }
-    .cctv-grid.grid-3 { grid-template-columns: repeat(3, 1fr); }
-    .cctv-grid.grid-4 { grid-template-columns: repeat(4, 1fr); }
+    .cctv-grid { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; background: rgba(2, 6, 12, 0.88); overflow-y: auto; align-content: start; }
+    .cctv-grid.grid-2 .cctv-cell { width: calc(50% - 3px); }
+    .cctv-grid.grid-3 .cctv-cell { width: calc(33.333% - 4px); }
+    .cctv-grid.grid-4 .cctv-cell { width: calc(25% - 4.5px); }
 
     /* === CCTV Cell === */
     .cctv-cell {
       position: relative; background: #071021; border: 1px solid var(--line-soft);
       border-radius: 6px; overflow: hidden; cursor: grab;
-      transition: transform 0.45s cubic-bezier(0.4,0,0.2,1), opacity 0.45s cubic-bezier(0.4,0,0.2,1), border-color 0.25s, box-shadow 0.25s;
-      content-visibility: auto;
+      transition: opacity 0.45s cubic-bezier(0.4,0,0.2,1), border-color 0.25s, box-shadow 0.25s;
     }
     .cctv-cell:hover { border-color: rgba(34, 211, 238, 0.35); box-shadow: 0 0 22px rgba(14, 165, 233, 0.17); }
     .cctv-cell:active { cursor: grabbing; }
@@ -100,10 +99,11 @@
     .cctv-cell.cell-shrink { transform: scale(0.3); opacity: 0; pointer-events: none; }
 
     /* === Sortable states === */
-    .sortable-ghost { opacity: 0.25; border-color: #22d3ee; box-shadow: 0 0 24px rgba(14, 165, 233, 0.35); }
-    .sortable-chosen { border-color: #67e8f9; box-shadow: 0 4px 24px rgba(0,0,0,0.5); }
-    .sortable-drag { opacity: 0.9; transform: scale(1.03); border-color: #22d3ee; box-shadow: 0 8px 32px rgba(14, 165, 233, 0.45); }
-    .sortable-fallback { opacity: 0.85; transform: scale(1.05); border-color: #67e8f9; box-shadow: 0 12px 40px rgba(14, 165, 233, 0.5); }
+    .sortable-ghost { opacity: 0.3; border: 2px dashed #22d3ee; box-shadow: inset 0 0 20px rgba(14, 165, 233, 0.15); background: rgba(14, 165, 233, 0.05); }
+    .sortable-ghost img, .sortable-ghost video { opacity: 0.2; }
+    .sortable-chosen { border-color: #67e8f9; box-shadow: 0 8px 32px rgba(0,0,0,0.6); z-index: 10; }
+    .sortable-drag { opacity: 1; transform: scale(1.05); border-color: #22d3ee; box-shadow: 0 12px 40px rgba(14, 165, 233, 0.5); z-index: 100; transition: none !important; }
+    .sortable-fallback { opacity: 0.95; transform: scale(1.05); border-color: #67e8f9; box-shadow: 0 16px 48px rgba(14, 165, 233, 0.5); border-radius: 8px; transition: none !important; }
 
     /* === Expand overlay === */
     .cctv-expand-overlay {
@@ -127,11 +127,19 @@
     .mixed-left { display: flex; flex-direction: column; overflow: hidden; min-width: 200px; flex-shrink: 0; flex-grow: 0; }
     .mixed-divider { width: 4px; background: #1f2f49; cursor: col-resize; flex-shrink: 0; transition: all 0.2s; }
     .mixed-divider:hover, .mixed-divider.dragging { background: linear-gradient(180deg, #22d3ee, #0284c7); box-shadow: 0 0 8px rgba(14, 165, 233, 0.35); }
-    .mixed-right { flex: 1; display: flex; position: relative; overflow: hidden; min-width: 200px; background: #000; }
-    .mixed-right .canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; }
-    .mixed-right canvas { width: 100%; height: 100%; object-fit: contain; }
+    .mixed-right { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 200px; background: #000; }
+    .mixed-main-area { flex: 1; display: flex; position: relative; overflow: hidden; }
+    .mixed-main-area .canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; }
+    .mixed-main-area canvas { width: 100%; height: 100%; object-fit: contain; }
+    .mixed-overflow-row { display: flex; gap: 2px; background: #000; flex-shrink: 0; }
+    .mixed-overflow-row:empty { display: none; }
+    .mixed-sortable-item { cursor: grab; }
+    .mixed-sortable-item:active { cursor: grabbing; }
+    .mixed-overflow-row .cctv-cell { flex: 1; position: relative; overflow: hidden; cursor: default; }
+    .mixed-overflow-row .cctv-cell img,
+    .mixed-overflow-row .cctv-cell video { width: 100%; height: 100%; object-fit: contain; }
     .mixed-cctv-grid, .cctv-grid { position: relative; }
-    .mixed-cctv-grid { flex: 1; display: grid; gap: 2px; padding: 2px; background: #000; overflow-y: auto; align-content: center; width: 100%; }
+    .mixed-cctv-grid { flex: 1; display: grid; gap: 2px; padding: 2px; background: #000; overflow-y: auto; align-content: start; width: 100%; }
     .mixed-cctv-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
     .mixed-cctv-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
     .mixed-cctv-grid .cctv-cell { cursor: default; }
@@ -457,6 +465,9 @@
       <button class="layout-toggle-btn" data-layout="vertical" onclick="setMixedLayout('vertical')">
         <i data-lucide="rows-2" class="w-3 h-3"></i> <span data-i18n="vertical">Vertical</span>
       </button>
+      <button class="layout-toggle-btn" data-layout="collage" onclick="setMixedLayout('collage')">
+        <i data-lucide="layout-grid" class="w-3 h-3"></i> <span data-i18n="collage">Collage</span>
+      </button>
       <span class="text-gray-700 text-[10px] mx-1">|</span>
       <button class="layout-toggle-btn" id="swapBtn" onclick="swapMixedPanes()">
         <i data-lucide="arrow-left-right" class="w-3 h-3"></i> <span data-i18n="swap">Swap</span>
@@ -473,22 +484,26 @@
       </div>
       <div class="mixed-divider" id="mixedDivider"></div>
       <div class="mixed-right" id="mixedRight">
-        <div class="region-toolbar" id="regionToolbar">
-          <button class="region-btn" id="regionSelectBtn" onclick="toggleRegionSelect()">
-            <i data-lucide="scan" class="w-3 h-3"></i>
-            <span class="region-btn-label" data-i18n="selectRegion">Select Region</span>
-          </button>
-          <button class="region-btn" id="regionResetBtn" onclick="resetRegion()" style="display:none;">
-            <i data-lucide="rotate-ccw" class="w-3 h-3"></i>
-            <span class="region-btn-label" data-i18n="resetRegion">Reset</span>
-          </button>
+        <div class="mixed-overflow-row mixed-sortable-item" id="mixedCctvTopRow"></div>
+        <div class="mixed-main-area mixed-sortable-item">
+          <div class="region-toolbar" id="regionToolbar">
+            <button class="region-btn" id="regionSelectBtn" onclick="toggleRegionSelect()">
+              <i data-lucide="scan" class="w-3 h-3"></i>
+              <span class="region-btn-label" data-i18n="selectRegion">Select Region</span>
+            </button>
+            <button class="region-btn" id="regionResetBtn" onclick="resetRegion()" style="display:none;">
+              <i data-lucide="rotate-ccw" class="w-3 h-3"></i>
+              <span class="region-btn-label" data-i18n="resetRegion">Reset</span>
+            </button>
+          </div>
+          <div class="region-select-overlay" id="regionOverlay">
+            <div class="region-rect" id="regionRect"></div>
+          </div>
+          <div class="canvas-wrap">
+            <canvas id="mixedScreen"></canvas>
+          </div>
         </div>
-        <div class="region-select-overlay" id="regionOverlay">
-          <div class="region-rect" id="regionRect"></div>
-        </div>
-        <div class="canvas-wrap">
-          <canvas id="mixedScreen"></canvas>
-        </div>
+        <div class="mixed-overflow-row mixed-sortable-item" id="mixedCctvBottomRow"></div>
       </div>
     </div>
   </div>
@@ -1707,16 +1722,17 @@
 
       // Initialize SortableJS on the grid
       sortableInstance = new Sortable(grid, {
-        animation: 200,
+        animation: 300,
         easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
         ghostClass: 'sortable-ghost',
         chosenClass: 'sortable-chosen',
         dragClass: 'sortable-drag',
         forceFallback: true,
         fallbackClass: 'sortable-fallback',
-        delay: 80,
+        fallbackOnBody: true,
+        delay: 50,
         delayOnTouchOnly: false,
-        swapThreshold: 0.65,
+        swapThreshold: 0.5,
         filter: '.ch-name',
         preventOnFilter: false,
         draggable: '.cctv-cell',
@@ -1756,14 +1772,21 @@
 
       if (layout === 'vertical') {
         split.classList.add('vertical');
+        split.classList.remove('collage');
         const saved = localStorage.getItem('opsview_mixed_split_v');
         left.style.flexBasis = saved ? saved + '%' : '40%';
-      } else {
+      } else if (layout === 'collage') {
         split.classList.remove('vertical');
+        split.classList.add('collage');
+        const saved = localStorage.getItem('opsview_mixed_split');
+        left.style.flexBasis = saved ? saved + '%' : '40%';
+      } else {
+        split.classList.remove('vertical', 'collage');
         const saved = localStorage.getItem('opsview_mixed_split');
         left.style.flexBasis = saved ? saved + '%' : '40%';
       }
       applyMixedOrder();
+      if (window._mixedReady) renderMixedCCTV();
     }
 
     let mixedSwapped = localStorage.getItem('opsview_mixed_swapped') === 'true';
@@ -1843,6 +1866,7 @@
     // Mixed CCTV grid (read-only, no DND)
     let dvrTabsSortable = null;
     let mixedCctvTimers = [];
+    window._mixedReady = true;
     function getMissingMixedChannels(channels) {
       return channels.filter(ch => {
         const video = document.getElementById('mixed-video-' + ch.ch_num);
@@ -1871,6 +1895,8 @@
     }
     function renderMixedCCTV() {
       const grid = document.getElementById('mixedCctvGrid');
+      const topRow = document.getElementById('mixedCctvTopRow');
+      const bottomRow = document.getElementById('mixedCctvBottomRow');
       mixedRenderedDvrId = activeDvrId || null;
       mixedCctvTimers.forEach(t => clearInterval(t));
       mixedCctvTimers = [];
@@ -1880,26 +1906,38 @@
       const enabled = cctvChannels.filter(ch => ch.enabled);
       enabled.sort((a, b) => a.order - b.order);
 
+      topRow.innerHTML = '';
+      bottomRow.innerHTML = '';
+
       if (enabled.length === 0 || !activeDvrId) {
         grid.innerHTML = '<div class="cctv-no-channels"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-600"><path d="M2 2l20 20"/><path d="M7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16"/><path d="M9.5 4h5L17 7h3a2 2 0 0 1 2 2v7.5"/><path d="M14.121 9.879A3 3 0 0 1 15 12"/></svg>' + t('noCctvMixed') + '</div>';
         grid.classList.remove('cols-3', 'cols-4');
         return;
       }
 
-      grid.innerHTML = '';
-      grid.classList.remove('cols-3', 'cols-4');
-      grid.classList.add(enabled.length <= 9 ? 'cols-3' : 'cols-4');
-      // Mixed grid always uses auto cols based on channel count
+      // Collage mode: first 2 → top right, last 2 → bottom right, rest → left grid
+      // Other modes: all channels go to left grid
+      const isCollage = mixedLayout === 'collage';
+      const overflowCount = isCollage ? 2 : 0;
+      const topChannels = isCollage ? enabled.slice(0, overflowCount) : [];
+      const bottomChannels = isCollage
+        ? (enabled.length > overflowCount * 2
+            ? enabled.slice(enabled.length - overflowCount)
+            : enabled.slice(overflowCount, overflowCount * 2))
+        : [];
+      const gridChannels = enabled.filter(ch =>
+        !topChannels.includes(ch) && !bottomChannels.includes(ch)
+      );
+
       const dvr = dvrs.find(d => d.id === activeDvrId);
       const isRTSP = dvr && dvr.protocol === 'rtsp';
       const refreshMs = (dvr && dvr.refresh_rate) ? dvr.refresh_rate : 2000;
 
-      enabled.forEach(ch => {
+      function createCell(ch, container) {
         const cell = document.createElement('div');
         cell.className = 'cctv-cell';
         cell.dataset.chnum = ch.ch_num;
-        // Keep uniform tile height for stable mixed-grid layout.
-        cell.style.aspectRatio = '16/9';
+        if (container === grid) cell.style.aspectRatio = '16/9';
 
         if (isRTSP) {
           const video = document.createElement('video');
@@ -1908,7 +1946,6 @@
           video.playsInline = true;
           video.id = 'mixed-video-' + ch.ch_num;
           cell.appendChild(video);
-          // Connections started via staggered function after grid is built
         } else {
           const img = document.createElement('img');
           img.alt = ch.name;
@@ -1933,9 +1970,83 @@
         label.innerHTML = '<span style="font-size:11px;color:#d1d5db;">' + ch.name + '</span><span class="ch-id">CH' + ch.ch_num + '</span>';
         cell.appendChild(label);
         cell.addEventListener('dblclick', () => {
-          expandCell(ch.ch_num, ch.name, grid, cell);
+          expandCell(ch.ch_num, ch.name, container, cell);
         });
-        grid.appendChild(cell);
+        container.appendChild(cell);
+      }
+
+      // Render overflow rows (right side top/bottom)
+      topChannels.forEach(ch => createCell(ch, topRow));
+      bottomChannels.forEach(ch => createCell(ch, bottomRow));
+
+      // Render left grid (remaining channels)
+      grid.innerHTML = '';
+      grid.classList.remove('cols-3', 'cols-4');
+      if (gridChannels.length > 0) {
+        grid.classList.add((isCollage || gridChannels.length <= 9) ? 'cols-3' : 'cols-4');
+        gridChannels.forEach(ch => createCell(ch, grid));
+      }
+
+      // Initialize SortableJS on mixed containers (shared group for cross-container drag)
+      if (window._mixedSortables) window._mixedSortables.forEach(s => s.destroy());
+      window._mixedSortables = [];
+      const mixedSortOpts = {
+        group: 'mixed-cctv',
+        animation: 300,
+        easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
+        ghostClass: 'sortable-ghost',
+        chosenClass: 'sortable-chosen',
+        dragClass: 'sortable-drag',
+        forceFallback: true,
+        fallbackClass: 'sortable-fallback',
+        fallbackOnBody: true,
+        delay: 50,
+        swapThreshold: 0.5,
+        draggable: '.cctv-cell',
+        onEnd: function() {
+          // Collect new order from all containers: top → grid → bottom
+          const allCells = [
+            ...topRow.querySelectorAll('.cctv-cell'),
+            ...grid.querySelectorAll('.cctv-cell'),
+            ...bottomRow.querySelectorAll('.cctv-cell')
+          ];
+          const newOrder = allCells.map(c => parseInt(c.dataset.chnum));
+          newOrder.forEach((num, i) => {
+            const ch = cctvChannels.find(c => c.ch_num === num);
+            if (ch) ch.order = i;
+          });
+          if (CM() && activeDvrId) {
+            CM().ReorderChannels(activeDvrId, newOrder).catch(e => console.error('mixed reorder:', e));
+          }
+        }
+      };
+      [topRow, grid, bottomRow].forEach(el => {
+        if (el.children.length > 0 || el === grid) {
+          window._mixedSortables.push(new Sortable(el, mixedSortOpts));
+        }
+      });
+
+      // Vertical sortable on mixed-right: reorder top row / Ops / bottom row
+      const mixedRight = document.getElementById('mixedRight');
+      if (window._mixedRightSortable) window._mixedRightSortable.destroy();
+      window._mixedRightSortable = new Sortable(mixedRight, {
+        animation: 300,
+        easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
+        direction: 'vertical',
+        ghostClass: 'sortable-ghost',
+        chosenClass: 'sortable-chosen',
+        dragClass: 'sortable-drag',
+        forceFallback: true,
+        fallbackClass: 'sortable-fallback',
+        fallbackOnBody: true,
+        draggable: '.mixed-sortable-item',
+        handle: '.mixed-sortable-item',
+        delay: 100,
+        onEnd: function() {
+          // Save right-side order
+          const order = Array.from(mixedRight.querySelectorAll('.mixed-sortable-item')).map(el => el.id || 'ops');
+          localStorage.setItem('opsview_mixed_right_order', JSON.stringify(order));
+        }
       });
 
       // Start RTSP streams with staggered connections (after grid is built)
@@ -2159,7 +2270,7 @@
       ko: { 'settings': '설정', 'lang': '언어', 'autoStart': '시스템 시작 시 자동실행', 'update': '업데이트', 'upToDate': '최신 버전입니다', 'updateNow': '업데이트', 'downloading': '다운로드 중...', 'done': '완료!', 'error': '오류', 'newVersion': '새 버전 {ver} 사용 가능 (현재: {cur})', 'ops': 'Ops', 'cctv': '카메라', 'mixed': '같이보기', 'refresh': '새로고침', 'settings_btn': '설정', 'setup': '설정', 'disconnect': '연결 해제',
         'screenSource': '화면 소스', 'opsRelay': 'OpsView 릴레이', 'pinLabel': 'PIN 번호', 'pinPlaceholder': '6자리 PIN (예: 482193)', 'connectRelay': '릴레이 연결', 'or': '또는', 'directStream': '직접 스트림', 'playStream': '스트림 재생',
         'addDvr': '카메라 그룹 추가', 'name': '이름:', 'myDvr': '내 카메라 그룹', 'port': '포트:', 'username': '계정:', 'password': '비밀번호:', 'protocol': '프로토콜:', 'autoProtocol': 'Auto(자동)', 'quality': '화질:', 'subStream': '보조', 'mainStream': '메인', 'refreshRate': '갱신:', 'saveAndConnect': '저장 후 연결', 'cancel': '취소', 'rtspTest': 'RTSP 테스트',
-        'grid': '그리드:', 'noChannelsAddDvr': '채널을 보려면 카메라 그룹을 추가하세요', 'layout': '레이아웃:', 'horizontal': '가로', 'vertical': '세로', 'swap': '전환', 'noCctvChannels': '카메라 채널 없음', 'selectRegion': '영역 선택', 'resetRegion': '초기화',
+        'grid': '그리드:', 'noChannelsAddDvr': '채널을 보려면 카메라 그룹을 추가하세요', 'layout': '레이아웃:', 'horizontal': '가로', 'vertical': '세로', 'collage': '콜라쥬', 'swap': '전환', 'noCctvChannels': '카메라 채널 없음', 'selectRegion': '영역 선택', 'resetRegion': '초기화',
         'rescanChannels': '채널 재탐색', 'editDvr': '카메라 그룹 편집', 'deleteDvr': '카메라 그룹 삭제', 'expandHint': '더블클릭: 돌아가기 (ESC)', 'noChannelsFound': '채널을 찾을 수 없음',
         'enterIpPort': 'IP와 포트를 입력하세요', 'connecting': '연결 중...', 'connected': '연결됨', 'disconnected': '연결 끊김', 'reconnecting': '재연결 시도 중', 'maxReconnect': '연결 실패. 최대 재연결 시도 횟수 초과.', 'connError': '연결 오류', 'connFailed': '연결 실패',
         'enterStreamUrl': '스트림 URL을 입력하세요', 'loading': '로딩 중...', 'rtspConverting': 'RTSP 변환 시작 중...', 'hlsWaiting': 'HLS 세그먼트 대기 중...', 'rtspError': 'RTSP 오류', 'streamLoadFail': '스트림 로드 실패', 'hlsError': 'HLS 오류', 'hlsLoadFail': 'HLS 로드 실패', 'hlsNotSupported': 'HLS 미지원', 'streamProxyUnavailable': '스트림 프록시를 사용할 수 없음',
