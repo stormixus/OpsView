@@ -38,6 +38,7 @@ type DVRInfo struct {
 	Name          string `json:"name"`
 	Addr          string `json:"addr"`
 	Port          int    `json:"port"`
+	RTSPPort      int    `json:"rtsp_port,omitempty"` // explicit RTSP port; 0 means derive from protocol default (554)
 	Username      string `json:"username"`
 	Password      string `json:"password"`
 	RefreshRate   int    `json:"refresh_rate"`

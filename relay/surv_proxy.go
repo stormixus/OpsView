@@ -28,9 +28,15 @@ import (
 type streamEntry struct {
 	id     string
 	name   string
+	mu     sync.Mutex // protects muxer access in RTP callbacks vs stop
 	muxer  *gohlslib.Muxer
 	client *gortsplib.Client
 	cancel context.CancelFunc
+
+	// reconnection fields
+	rtspURL string
+	proxy   *SurvProxy
+	stopped bool // true when explicitly stopped (no reconnect)
 }
 
 // SurvProxy manages multiple RTSP→HLS streams, one per surveillance channel.
@@ -196,11 +202,16 @@ func (sp *SurvProxy) StartChannel(id, name, rawURL string) error {
 	entry.client = c
 	entry.muxer = muxer
 	entry.cancel = cancel
+	entry.rtspURL = rawURL
+	entry.proxy = sp
 
 	go func() {
 		<-ctx.Done()
 		c.Close()
 	}()
+
+	// Monitor RTSP client for disconnection and auto-reconnect
+	go entry.monitorAndReconnect(ctx)
 
 	sp.mu.Lock()
 	sp.streams[id] = entry
@@ -233,11 +244,17 @@ func (sp *SurvProxy) StopAll() {
 }
 
 func (sp *SurvProxy) stopEntryLocked(e *streamEntry) {
+	e.mu.Lock()
+	e.stopped = true
+	mux := e.muxer
+	e.muxer = nil
+	e.mu.Unlock()
+
 	if e.cancel != nil {
 		e.cancel()
 	}
-	if e.muxer != nil {
-		e.muxer.Close()
+	if mux != nil {
+		mux.Close()
 	}
 	// client is closed by the context goroutine
 }
@@ -284,8 +301,17 @@ func (sp *SurvProxy) ServeHLS(w http.ResponseWriter, r *http.Request) {
 	entry, ok := sp.streams[chID]
 	sp.mu.RUnlock()
 
-	if !ok || entry.muxer == nil {
+	if !ok {
 		http.Error(w, "no active stream for "+chID, http.StatusNotFound)
+		return
+	}
+
+	entry.mu.Lock()
+	mux := entry.muxer
+	entry.mu.Unlock()
+
+	if mux == nil {
+		http.Error(w, "stream reconnecting for "+chID, http.StatusServiceUnavailable)
 		return
 	}
 
@@ -296,7 +322,7 @@ func (sp *SurvProxy) ServeHLS(w http.ResponseWriter, r *http.Request) {
 
 	// Rewrite path so muxer sees /index.m3u8 or /segment.ts
 	r.URL.Path = "/" + remainder
-	entry.muxer.Handle(w, r)
+	mux.Handle(w, r)
 }
 
 // --- Codec setup (ported from viewer/stream_proxy.go) ---
@@ -353,9 +379,11 @@ func setupSurvH264(c *gortsplib.Client, desc *description.Session, medi *descrip
 			}
 			return
 		}
+		entry.mu.Lock()
 		if entry.muxer != nil {
 			entry.muxer.WriteH264(track, time.Now(), pts, au)
 		}
+		entry.mu.Unlock()
 	})
 
 	return track, nil
@@ -400,9 +428,11 @@ func setupSurvH265(c *gortsplib.Client, desc *description.Session, medi *descrip
 			}
 			return
 		}
+		entry.mu.Lock()
 		if entry.muxer != nil {
 			entry.muxer.WriteH265(track, time.Now(), pts, au)
 		}
+		entry.mu.Unlock()
 	})
 
 	return track, nil
@@ -411,26 +441,96 @@ func setupSurvH265(c *gortsplib.Client, desc *description.Session, medi *descrip
 // --- Helpers ---
 
 func buildSurvRTSPURL(dvr proto.DVRInfo, chNum int) string {
-	streamID := "02" // default: sub stream
-	if dvr.StreamQuality == "main" {
-		streamID = "01"
+	port := resolveRTSPPort(dvr)
+	host := fmt.Sprintf("%s:%d", dvr.Addr, port)
+
+	var path string
+	switch dvr.Protocol {
+	case "dahua":
+		subtype := 1
+		if dvr.StreamQuality == "sub" || dvr.StreamQuality == "" {
+			subtype = 1
+		} else {
+			subtype = 0 // main stream
+		}
+		path = fmt.Sprintf("/cam/realmonitor?channel=%d&subtype=%d", chNum, subtype)
+	default: // "isapi", "rtsp", "", or any other
+		streamID := "02"
+		if dvr.StreamQuality == "main" {
+			streamID = "01"
+		}
+		path = fmt.Sprintf("/Streaming/Channels/%d%s", chNum, streamID)
 	}
+
 	u := &url.URL{
 		Scheme: "rtsp",
 		User:   url.UserPassword(dvr.Username, dvr.Password),
-		Host:   fmt.Sprintf("%s:%d", dvr.Addr, rtspPort(dvr.Port)),
-		Path:   fmt.Sprintf("/Streaming/Channels/%d%s", chNum, streamID),
+		Host:   host,
+		Path:   path,
 	}
 	return u.String()
 }
 
-func rtspPort(httpPort int) int {
-	if httpPort == 80 || httpPort == 0 {
-		return 554
+// resolveRTSPPort determines the RTSP port for a DVR.
+// Priority: explicit RTSPPort > default 554.
+func resolveRTSPPort(dvr proto.DVRInfo) int {
+	if dvr.RTSPPort > 0 {
+		return dvr.RTSPPort
 	}
-	return httpPort
+	return 554
 }
 
 func ptrProto(v gortsplib.Protocol) *gortsplib.Protocol {
 	return &v
+}
+
+const (
+	reconnectMinDelay = 2 * time.Second
+	reconnectMaxDelay = 30 * time.Second
+	reconnectMaxRetries = 10
+)
+
+// monitorAndReconnect waits for the RTSP client to disconnect, then retries with backoff.
+func (e *streamEntry) monitorAndReconnect(ctx context.Context) {
+	// Wait for the RTSP client to finish (disconnect or error)
+	err := e.client.Wait()
+
+	e.mu.Lock()
+	stopped := e.stopped
+	e.mu.Unlock()
+	if stopped {
+		return // explicitly stopped, no reconnect
+	}
+
+	log.Printf("[surv] %s disconnected: %v — will attempt reconnect", e.id, err)
+
+	delay := reconnectMinDelay
+	for attempt := 1; attempt <= reconnectMaxRetries; attempt++ {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+
+		e.mu.Lock()
+		if e.stopped {
+			e.mu.Unlock()
+			return
+		}
+		e.mu.Unlock()
+
+		log.Printf("[surv] %s reconnect attempt %d/%d", e.id, attempt, reconnectMaxRetries)
+		if err := e.proxy.StartChannel(e.id, e.name, e.rtspURL); err != nil {
+			log.Printf("[surv] %s reconnect failed: %v", e.id, err)
+			delay *= 2
+			if delay > reconnectMaxDelay {
+				delay = reconnectMaxDelay
+			}
+			continue
+		}
+		log.Printf("[surv] %s reconnected successfully", e.id)
+		return
+	}
+
+	log.Printf("[surv] %s gave up reconnecting after %d attempts", e.id, reconnectMaxRetries)
 }
