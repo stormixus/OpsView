@@ -114,7 +114,9 @@ func (sp *SurvProxy) HandleSurvConfig(payload []byte) {
 					time.Sleep(300 * time.Millisecond)
 				}
 				if err := sp.StartChannel(ch.chID, ch.name, ch.rtspURL); err != nil {
-					log.Printf("[surv] failed to start %s: %v", ch.chID, err)
+					if !isRTSPNotFound(err) {
+						log.Printf("[surv] failed to start %s: %v", ch.chID, err)
+					}
 				}
 			}
 		}(channels)
@@ -484,6 +486,11 @@ func ptrProto(v gortsplib.Protocol) *gortsplib.Protocol {
 	return &v
 }
 
+// isRTSPNotFound returns true if the error indicates the RTSP stream does not exist (404).
+func isRTSPNotFound(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "404")
+}
+
 const (
 	reconnectMinDelay = 2 * time.Second
 	reconnectMaxDelay = 30 * time.Second
@@ -521,6 +528,10 @@ func (e *streamEntry) monitorAndReconnect(ctx context.Context) {
 
 		log.Printf("[surv] %s reconnect attempt %d/%d", e.id, attempt, reconnectMaxRetries)
 		if err := e.proxy.StartChannel(e.id, e.name, e.rtspURL); err != nil {
+			if isRTSPNotFound(err) {
+				log.Printf("[surv] %s channel not found on DVR, stopping reconnect", e.id)
+				return
+			}
 			log.Printf("[surv] %s reconnect failed: %v", e.id, err)
 			delay *= 2
 			if delay > reconnectMaxDelay {
