@@ -411,17 +411,17 @@ type isAPIVideoInput struct {
 }
 
 func (m *SurveillanceManager) discoverFromDVRISAPI(dvr DVRConfig) ([]ChannelConfig, error) {
-	// Prefer endpoints that expose the real channel IDs. Some DVRs start at
-	// channel 3/33 rather than 1, and deviceInfo only reports a total count.
-	channels, err := m.discoverISAPIStreaming(dvr)
+	// Prefer videoInputs — returns physical analog inputs only (no IP cameras).
+	// Streaming includes all active streams (IP cameras too) so use as fallback.
+	channels, err := m.discoverISAPIVideoInputs(dvr)
 	if err != nil {
-		log.Printf("[surv] ISAPI streaming discovery failed: %v", err)
+		log.Printf("[surv] ISAPI video inputs discovery failed: %v", err)
 	}
 	if len(channels) == 0 {
-		log.Printf("[surv] trying video inputs fallback")
-		channels, err = m.discoverISAPIVideoInputs(dvr)
+		log.Printf("[surv] trying streaming fallback")
+		channels, err = m.discoverISAPIStreaming(dvr)
 		if err != nil {
-			log.Printf("[surv] ISAPI video inputs discovery failed: %v", err)
+			log.Printf("[surv] ISAPI streaming discovery failed: %v", err)
 		}
 	}
 	if len(channels) == 0 {

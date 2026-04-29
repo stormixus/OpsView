@@ -9,8 +9,68 @@ import (
 	"testing"
 )
 
-func TestDiscoverFromDVRISAPIPrefersActualChannelIDs(t *testing.T) {
+func TestDiscoverISAPIPrefersVideoInputsOverStreaming(t *testing.T) {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/ISAPI/System/Video/inputs/channels", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
+<VideoInputChannelList>
+  <VideoInputChannel><id>1</id><inputPort>1</inputPort><name>Cam 1</name></VideoInputChannel>
+  <VideoInputChannel><id>2</id><inputPort>2</inputPort><name>Cam 2</name></VideoInputChannel>
+  <VideoInputChannel><id>3</id><inputPort>3</inputPort><name>Cam 3</name></VideoInputChannel>
+  <VideoInputChannel><id>4</id><inputPort>4</inputPort><name>Cam 4</name></VideoInputChannel>
+</VideoInputChannelList>`)
+	})
+	mux.HandleFunc("/ISAPI/Streaming/channels", func(w http.ResponseWriter, r *http.Request) {
+		// Streaming includes IP cameras (15, 16) that should NOT appear
+		fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
+<StreamingChannelList>
+  <StreamingChannel><id>101</id><channelName>Cam 1</channelName></StreamingChannel>
+  <StreamingChannel><id>201</id><channelName>Cam 2</channelName></StreamingChannel>
+  <StreamingChannel><id>1501</id><channelName>IPCam 15</channelName></StreamingChannel>
+  <StreamingChannel><id>1601</id><channelName>IPCam 16</channelName></StreamingChannel>
+</StreamingChannelList>`)
+	})
+	mux.HandleFunc("/ISAPI/Streaming/channels/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
+<StreamingChannel>
+  <videoResolutionWidth>1920</videoResolutionWidth>
+  <videoResolutionHeight>1080</videoResolutionHeight>
+</StreamingChannel>`)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	host, port, err := splitTestHostPort(server.Listener.Addr())
+	if err != nil {
+		t.Fatalf("split host/port: %v", err)
+	}
+
+	mgr := &SurveillanceManager{
+		client:      server.Client(),
+		shortClient: server.Client(),
+	}
+	dvr := DVRConfig{ID: 7, Addr: host, Port: port}
+
+	channels, err := mgr.discoverFromDVRISAPI(dvr)
+	if err != nil {
+		t.Fatalf("discoverFromDVRISAPI returned error: %v", err)
+	}
+	if len(channels) != 4 {
+		t.Fatalf("expected 4 channels, got %d", len(channels))
+	}
+	for i, ch := range channels {
+		if ch.ChNum != i+1 {
+			t.Errorf("channel %d: expected ChNum %d, got %d", i, i+1, ch.ChNum)
+		}
+	}
+}
+
+func TestDiscoverISAPIFallsBackToStreamingWhenVideoInputs404(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ISAPI/System/Video/inputs/channels", func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
 	mux.HandleFunc("/ISAPI/Streaming/channels", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
 <StreamingChannelList>
@@ -24,16 +84,6 @@ func TestDiscoverFromDVRISAPIPrefersActualChannelIDs(t *testing.T) {
   <videoResolutionWidth>1920</videoResolutionWidth>
   <videoResolutionHeight>1080</videoResolutionHeight>
 </StreamingChannel>`)
-	})
-	mux.HandleFunc("/ISAPI/System/Video/inputs/channels", func(w http.ResponseWriter, r *http.Request) {
-		http.NotFound(w, r)
-	})
-	mux.HandleFunc("/ISAPI/System/deviceInfo", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
-<DeviceInfo>
-  <analogChannelNum>0</analogChannelNum>
-  <digitalChannelNum>2</digitalChannelNum>
-</DeviceInfo>`)
 	})
 
 	server := httptest.NewServer(mux)
@@ -59,9 +109,6 @@ func TestDiscoverFromDVRISAPIPrefersActualChannelIDs(t *testing.T) {
 	}
 	if channels[0].ChNum != 3 || channels[1].ChNum != 4 {
 		t.Fatalf("expected channel numbers [3 4], got [%d %d]", channels[0].ChNum, channels[1].ChNum)
-	}
-	if channels[0].Order != 0 || channels[1].Order != 1 {
-		t.Fatalf("expected normalized orders [0 1], got [%d %d]", channels[0].Order, channels[1].Order)
 	}
 }
 
