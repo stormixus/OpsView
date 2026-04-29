@@ -222,6 +222,10 @@
       class="fullscreen-btn ml-2 w-7 h-7 flex items-center justify-center rounded-md border border-white/[0.06] text-gray-500 hover:text-gray-200 hover:bg-white/[0.05] hover:border-white/10 transition-all">
       <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
     </button>
+    <button id="fullscreenBtn" onclick="toggleFullscreen()" data-i18n-title="fullscreen" title="Fullscreen"
+      class="fullscreen-btn ml-1 w-7 h-7 flex items-center justify-center rounded-md border border-white/[0.06] text-gray-500 hover:text-gray-200 hover:bg-white/[0.05] hover:border-white/10 transition-all">
+      <i id="fullscreenIcon" data-lucide="maximize" class="w-3.5 h-3.5"></i>
+    </button>
 
     <div class="tab-status-area ml-auto flex items-center gap-3 pr-3 text-[11px]">
       <div class="tab-status flex items-center gap-1.5" id="opsStatus">
@@ -530,6 +534,57 @@
     function refreshCurrentTab() {
       window.location.reload();
     }
+
+    function getBrowserFullscreenElement() {
+      return document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement || null;
+    }
+
+    async function isFullscreenActive() {
+      if (window.runtime && typeof window.runtime.WindowIsFullscreen === 'function') {
+        try { return !!(await window.runtime.WindowIsFullscreen()); } catch(e) {}
+      }
+      return !!getBrowserFullscreenElement();
+    }
+
+    async function setFullscreenActive(active) {
+      if (window.runtime && typeof window.runtime.WindowFullscreen === 'function' && typeof window.runtime.WindowUnfullscreen === 'function') {
+        if (active) await window.runtime.WindowFullscreen();
+        else await window.runtime.WindowUnfullscreen();
+        return;
+      }
+
+      if (active) {
+        const el = document.documentElement;
+        const request = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+        if (request) await request.call(el);
+      } else {
+        const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+        if (exit) await exit.call(document);
+      }
+    }
+
+    async function syncFullscreenButton() {
+      const btn = document.getElementById('fullscreenBtn');
+      const icon = document.getElementById('fullscreenIcon');
+      if (!btn || !icon) return;
+
+      const active = await isFullscreenActive();
+      const key = active ? 'exitFullscreen' : 'fullscreen';
+      btn.dataset.i18nTitle = key;
+      btn.title = t(key);
+      icon.dataset.lucide = active ? 'minimize' : 'maximize';
+      lucide.createIcons({ nodes: [btn] });
+    }
+
+    async function toggleFullscreen() {
+      const active = await isFullscreenActive();
+      await setFullscreenActive(!active);
+      setTimeout(syncFullscreenButton, 50);
+    }
+
+    document.addEventListener('fullscreenchange', syncFullscreenButton);
+    document.addEventListener('webkitfullscreenchange', syncFullscreenButton);
+    document.addEventListener('msfullscreenchange', syncFullscreenButton);
 
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape' && expandedOverlay) {
@@ -2257,7 +2312,7 @@
     const UPD = () => window.go && window.go.main && window.go.main.Updater;
     // ── i18n ──
     const i18n = {
-      en: { 'settings': 'Settings', 'lang': 'Language', 'autoStart': 'Start at Login', 'update': 'Update', 'upToDate': 'Up to date', 'updateNow': 'Update Now', 'downloading': 'Downloading...', 'done': 'Done!', 'error': 'Error', 'newVersion': 'New version {ver} available (current: {cur})', 'ops': 'Ops', 'cctv': 'Cameras', 'mixed': 'Mixed', 'refresh': 'Refresh', 'settings_btn': 'Settings', 'setup': 'Settings', 'disconnect': 'Disconnect',
+      en: { 'settings': 'Settings', 'lang': 'Language', 'autoStart': 'Start at Login', 'update': 'Update', 'upToDate': 'Up to date', 'updateNow': 'Update Now', 'downloading': 'Downloading...', 'done': 'Done!', 'error': 'Error', 'newVersion': 'New version {ver} available (current: {cur})', 'ops': 'Ops', 'cctv': 'Cameras', 'mixed': 'Mixed', 'refresh': 'Refresh', 'fullscreen': 'Fullscreen', 'exitFullscreen': 'Exit Fullscreen', 'settings_btn': 'Settings', 'setup': 'Settings', 'disconnect': 'Disconnect',
         'screenSource': 'Screen Source', 'opsRelay': 'OpsView Relay', 'pinLabel': 'PIN Code', 'pinPlaceholder': '6-digit PIN (e.g. 482193)', 'connectRelay': 'Connect Relay', 'or': 'or', 'directStream': 'Direct Stream', 'playStream': 'Play Stream',
         'addDvr': 'Add Camera Group', 'name': 'Name:', 'myDvr': 'My Camera Group', 'port': 'Port:', 'username': 'Username:', 'password': 'Password:', 'protocol': 'Protocol:', 'autoProtocol': 'Auto', 'quality': 'Quality:', 'subStream': 'Sub', 'mainStream': 'Main', 'refreshRate': 'Refresh:', 'saveAndConnect': 'Save & Connect', 'cancel': 'Cancel', 'rtspTest': 'RTSP Test',
         'grid': 'Grid:', 'noChannelsAddDvr': 'Add a camera group to view channels', 'layout': 'Layout:', 'horizontal': 'Horizontal', 'vertical': 'Vertical', 'swap': 'Swap', 'noCctvChannels': 'No cameras', 'selectRegion': 'Select Region', 'resetRegion': 'Reset',
@@ -2267,7 +2322,7 @@
         'chConnWait': 'Waiting...', 'chConnecting': 'Connecting...', 'retry': 'retry', 'webrtcFail': 'WebRTC offer SDP generation failed',
         'scanning': 'Scanning channels...', 'nChannels': ' channels', 'saving': 'Saving...', 'updateDone': 'Update complete', 'updateBtn': 'Update', 'rescanning': 'Rescanning channels...', 'nChannelsFound': ' channels found', 'rescanFail': 'Rescan failed', 'selectDvrFirst': 'Please select a camera group first', 'rtspTesting': 'Testing RTSP...', 'enterDvrAddr': 'Please enter camera group address',
         'selecting': 'Selecting...', 'rtspGeneric': 'RTSP (Generic)', 'noCctvMixed': 'No cameras' },
-      ko: { 'settings': '설정', 'lang': '언어', 'autoStart': '시스템 시작 시 자동실행', 'update': '업데이트', 'upToDate': '최신 버전입니다', 'updateNow': '업데이트', 'downloading': '다운로드 중...', 'done': '완료!', 'error': '오류', 'newVersion': '새 버전 {ver} 사용 가능 (현재: {cur})', 'ops': 'Ops', 'cctv': '카메라', 'mixed': '같이보기', 'refresh': '새로고침', 'settings_btn': '설정', 'setup': '설정', 'disconnect': '연결 해제',
+      ko: { 'settings': '설정', 'lang': '언어', 'autoStart': '시스템 시작 시 자동실행', 'update': '업데이트', 'upToDate': '최신 버전입니다', 'updateNow': '업데이트', 'downloading': '다운로드 중...', 'done': '완료!', 'error': '오류', 'newVersion': '새 버전 {ver} 사용 가능 (현재: {cur})', 'ops': 'Ops', 'cctv': '카메라', 'mixed': '같이보기', 'refresh': '새로고침', 'fullscreen': '전체화면', 'exitFullscreen': '전체화면 종료', 'settings_btn': '설정', 'setup': '설정', 'disconnect': '연결 해제',
         'screenSource': '화면 소스', 'opsRelay': 'OpsView 릴레이', 'pinLabel': 'PIN 번호', 'pinPlaceholder': '6자리 PIN (예: 482193)', 'connectRelay': '릴레이 연결', 'or': '또는', 'directStream': '직접 스트림', 'playStream': '스트림 재생',
         'addDvr': '카메라 그룹 추가', 'name': '이름:', 'myDvr': '내 카메라 그룹', 'port': '포트:', 'username': '계정:', 'password': '비밀번호:', 'protocol': '프로토콜:', 'autoProtocol': 'Auto(자동)', 'quality': '화질:', 'subStream': '보조', 'mainStream': '메인', 'refreshRate': '갱신:', 'saveAndConnect': '저장 후 연결', 'cancel': '취소', 'rtspTest': 'RTSP 테스트',
         'grid': '그리드:', 'noChannelsAddDvr': '채널을 보려면 카메라 그룹을 추가하세요', 'layout': '레이아웃:', 'horizontal': '가로', 'vertical': '세로', 'collage': '콜라쥬', 'swap': '전환', 'noCctvChannels': '카메라 채널 없음', 'selectRegion': '영역 선택', 'resetRegion': '초기화',
@@ -2277,7 +2332,7 @@
         'chConnWait': '연결 대기...', 'chConnecting': '연결 중...', 'retry': '재시도', 'webrtcFail': 'WebRTC offer SDP 생성 실패',
         'scanning': '채널 탐색 중...', 'nChannels': '개 채널', 'saving': '저장 중...', 'updateDone': '업데이트 완료', 'updateBtn': '업데이트', 'rescanning': '채널 재탐색 중...', 'nChannelsFound': '개 채널 발견', 'rescanFail': '재탐색 실패', 'selectDvrFirst': '카메라 그룹을 먼저 선택하세요', 'rtspTesting': 'RTSP 테스트 중...', 'enterDvrAddr': '카메라 그룹 주소를 입력하세요',
         'selecting': '선택 중...', 'rtspGeneric': 'RTSP(범용)', 'noCctvMixed': '카메라 채널 없음' },
-      ja: { 'settings': '設定', 'lang': '言語', 'autoStart': 'ログイン時に起動', 'update': 'アップデート', 'upToDate': '最新です', 'updateNow': 'アップデート', 'downloading': 'ダウンロード中...', 'done': '完了!', 'error': 'エラー', 'newVersion': '新バージョン {ver} 利用可能 (現在: {cur})', 'ops': 'Ops', 'cctv': 'カメラ', 'mixed': '同時表示', 'refresh': '更新', 'settings_btn': '設定', 'setup': '設定', 'disconnect': '切断',
+      ja: { 'settings': '設定', 'lang': '言語', 'autoStart': 'ログイン時に起動', 'update': 'アップデート', 'upToDate': '最新です', 'updateNow': 'アップデート', 'downloading': 'ダウンロード中...', 'done': '完了!', 'error': 'エラー', 'newVersion': '新バージョン {ver} 利用可能 (現在: {cur})', 'ops': 'Ops', 'cctv': 'カメラ', 'mixed': '同時表示', 'refresh': '更新', 'fullscreen': '全画面', 'exitFullscreen': '全画面終了', 'settings_btn': '設定', 'setup': '設定', 'disconnect': '切断',
         'screenSource': '画面ソース', 'opsRelay': 'OpsView リレー', 'pinLabel': 'PINコード', 'pinPlaceholder': '6桁のPIN (例: 482193)', 'connectRelay': 'リレー接続', 'or': 'または', 'directStream': 'ダイレクトストリーム', 'playStream': 'ストリーム再生',
         'addDvr': 'カメラグループ追加', 'name': '名前:', 'myDvr': 'マイカメラグループ', 'port': 'ポート:', 'username': 'アカウント:', 'password': 'パスワード:', 'protocol': 'プロトコル:', 'autoProtocol': '自動', 'quality': '画質:', 'subStream': 'サブ', 'mainStream': 'メイン', 'refreshRate': '更新:', 'saveAndConnect': '保存して接続', 'cancel': 'キャンセル', 'rtspTest': 'RTSPテスト',
         'grid': 'グリッド:', 'noChannelsAddDvr': 'チャンネルを見るにはカメラグループを追加してください', 'layout': 'レイアウト:', 'horizontal': '横', 'vertical': '縦', 'swap': '切替', 'noCctvChannels': 'カメラチャンネルなし', 'selectRegion': '領域選択', 'resetRegion': 'リセット',
@@ -2287,7 +2342,7 @@
         'chConnWait': '接続待機中...', 'chConnecting': '接続中...', 'retry': '再試行', 'webrtcFail': 'WebRTC offer SDP生成失敗',
         'scanning': 'チャンネル探索中...', 'nChannels': 'チャンネル', 'saving': '保存中...', 'updateDone': '更新完了', 'updateBtn': '更新', 'rescanning': 'チャンネル再探索中...', 'nChannelsFound': 'チャンネル発見', 'rescanFail': '再探索失敗', 'selectDvrFirst': 'カメラグループを先に選択してください', 'rtspTesting': 'RTSPテスト中...', 'enterDvrAddr': 'カメラグループのアドレスを入力してください',
         'selecting': '選択中...', 'rtspGeneric': 'RTSP(汎用)', 'noCctvMixed': 'カメラチャンネルなし' },
-      pt: { 'settings': 'Configurações', 'lang': 'Idioma', 'autoStart': 'Iniciar no Login', 'update': 'Atualização', 'upToDate': 'Atualizado', 'updateNow': 'Atualizar', 'downloading': 'Baixando...', 'done': 'Concluído!', 'error': 'Erro', 'newVersion': 'Nova versão {ver} disponível (atual: {cur})', 'ops': 'Ops', 'cctv': 'Câmeras', 'mixed': 'Misto', 'refresh': 'Atualizar', 'settings_btn': 'Config.', 'setup': 'Configurações', 'disconnect': 'Desconectar',
+      pt: { 'settings': 'Configurações', 'lang': 'Idioma', 'autoStart': 'Iniciar no Login', 'update': 'Atualização', 'upToDate': 'Atualizado', 'updateNow': 'Atualizar', 'downloading': 'Baixando...', 'done': 'Concluído!', 'error': 'Erro', 'newVersion': 'Nova versão {ver} disponível (atual: {cur})', 'ops': 'Ops', 'cctv': 'Câmeras', 'mixed': 'Misto', 'refresh': 'Atualizar', 'fullscreen': 'Tela cheia', 'exitFullscreen': 'Sair da tela cheia', 'settings_btn': 'Config.', 'setup': 'Configurações', 'disconnect': 'Desconectar',
         'screenSource': 'Fonte da Tela', 'opsRelay': 'OpsView Relay', 'pinLabel': 'Código PIN', 'pinPlaceholder': 'PIN de 6 dígitos (ex: 482193)', 'connectRelay': 'Conectar Relay', 'or': 'ou', 'directStream': 'Stream Direto', 'playStream': 'Reproduzir Stream',
         'addDvr': 'Adicionar Grupo', 'name': 'Nome:', 'myDvr': 'Meu Grupo', 'port': 'Porta:', 'username': 'Usuário:', 'password': 'Senha:', 'protocol': 'Protocolo:', 'autoProtocol': 'Auto', 'quality': 'Qualidade:', 'subStream': 'Sub', 'mainStream': 'Principal', 'refreshRate': 'Atualização:', 'saveAndConnect': 'Salvar e Conectar', 'cancel': 'Cancelar', 'rtspTest': 'Teste RTSP',
         'grid': 'Grade:', 'noChannelsAddDvr': 'Adicione um grupo para ver canais', 'layout': 'Layout:', 'horizontal': 'Horizontal', 'vertical': 'Vertical', 'swap': 'Trocar', 'noCctvChannels': 'Sem câmeras', 'selectRegion': 'Selecionar Região', 'resetRegion': 'Redefinir',
@@ -2297,7 +2352,7 @@
         'chConnWait': 'Aguardando...', 'chConnecting': 'Conectando...', 'retry': 'tentativa', 'webrtcFail': 'Falha na geração do WebRTC offer SDP',
         'scanning': 'Escaneando canais...', 'nChannels': ' canais', 'saving': 'Salvando...', 'updateDone': 'Atualização concluída', 'updateBtn': 'Atualizar', 'rescanning': 'Reescaneando canais...', 'nChannelsFound': ' canais encontrados', 'rescanFail': 'Falha no reescaneamento', 'selectDvrFirst': 'Selecione um grupo primeiro', 'rtspTesting': 'Testando RTSP...', 'enterDvrAddr': 'Digite o endereço do grupo',
         'selecting': 'Selecionando...', 'rtspGeneric': 'RTSP (Genérico)', 'noCctvMixed': 'Sem câmeras' },
-      es: { 'settings': 'Ajustes', 'lang': 'Idioma', 'autoStart': 'Iniciar al Login', 'update': 'Actualización', 'upToDate': 'Actualizado', 'updateNow': 'Actualizar', 'downloading': 'Descargando...', 'done': '¡Listo!', 'error': 'Error', 'newVersion': 'Nueva versión {ver} disponible (actual: {cur})', 'ops': 'Ops', 'cctv': 'Cámaras', 'mixed': 'Mixto', 'refresh': 'Actualizar', 'settings_btn': 'Ajustes', 'setup': 'Ajustes', 'disconnect': 'Desconectar',
+      es: { 'settings': 'Ajustes', 'lang': 'Idioma', 'autoStart': 'Iniciar al Login', 'update': 'Actualización', 'upToDate': 'Actualizado', 'updateNow': 'Actualizar', 'downloading': 'Descargando...', 'done': '¡Listo!', 'error': 'Error', 'newVersion': 'Nueva versión {ver} disponible (actual: {cur})', 'ops': 'Ops', 'cctv': 'Cámaras', 'mixed': 'Mixto', 'refresh': 'Actualizar', 'fullscreen': 'Pantalla completa', 'exitFullscreen': 'Salir de pantalla completa', 'settings_btn': 'Ajustes', 'setup': 'Ajustes', 'disconnect': 'Desconectar',
         'screenSource': 'Fuente de Pantalla', 'opsRelay': 'OpsView Relay', 'pinLabel': 'Código PIN', 'pinPlaceholder': 'PIN de 6 dígitos (ej: 482193)', 'connectRelay': 'Conectar Relay', 'or': 'o', 'directStream': 'Stream Directo', 'playStream': 'Reproducir Stream',
         'addDvr': 'Añadir Grupo', 'name': 'Nombre:', 'myDvr': 'Mi Grupo', 'port': 'Puerto:', 'username': 'Usuario:', 'password': 'Contraseña:', 'protocol': 'Protocolo:', 'autoProtocol': 'Auto', 'quality': 'Calidad:', 'subStream': 'Sub', 'mainStream': 'Principal', 'refreshRate': 'Actualización:', 'saveAndConnect': 'Guardar y Conectar', 'cancel': 'Cancelar', 'rtspTest': 'Prueba RTSP',
         'grid': 'Cuadrícula:', 'noChannelsAddDvr': 'Agregue un grupo para ver canales', 'layout': 'Diseño:', 'horizontal': 'Horizontal', 'vertical': 'Vertical', 'swap': 'Intercambiar', 'noCctvChannels': 'Sin cámaras', 'selectRegion': 'Seleccionar Región', 'resetRegion': 'Restablecer',
