@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -219,6 +220,7 @@ func (m *CCTVManager) DiscoverChannels(dvrID int64) ([]ChannelConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	discovered = normalizeDetectedChannels(discovered)
 
 	// Upsert channels
 	for _, ch := range discovered {
@@ -664,24 +666,26 @@ type isAPIDeviceInfo struct {
 }
 
 func (m *CCTVManager) discoverFromDVRISAPI(dvr DVRConfig) ([]ChannelConfig, error) {
-	// Strategy 1: Get device info for total channel count (most reliable)
-	channels, err := m.discoverISAPIDeviceInfo(dvr)
+	// Prefer endpoints that expose the real channel IDs. Some DVRs start at
+	// channel 3/33 rather than 1, and deviceInfo only reports a total count.
+	channels, err := m.discoverISAPIStreaming(dvr)
 	if err != nil {
-		log.Printf("[cctv] ISAPI deviceInfo discovery failed: %v", err)
+		log.Printf("[cctv] ISAPI streaming discovery failed: %v", err)
 	}
 
-	// Strategy 2: Parse streaming channels list
-	if len(channels) == 0 {
-		channels, err = m.discoverISAPIStreaming(dvr)
-		if err != nil {
-			log.Printf("[cctv] ISAPI streaming discovery failed: %v", err)
-		}
-	}
-
-	// Strategy 3: Parse video input channels
+	// Strategy 2: Parse video input channels
 	if len(channels) == 0 {
 		log.Printf("[cctv] trying video inputs fallback")
 		channels, err = m.discoverISAPIVideoInputs(dvr)
+		if err != nil {
+			log.Printf("[cctv] ISAPI video inputs discovery failed: %v", err)
+		}
+	}
+
+	// Strategy 3: Fall back to total channel count
+	if len(channels) == 0 {
+		log.Printf("[cctv] trying deviceInfo fallback")
+		channels, err = m.discoverISAPIDeviceInfo(dvr)
 		if err != nil {
 			return nil, fmt.Errorf("ISAPI discovery failed: %w", err)
 		}
@@ -690,7 +694,7 @@ func (m *CCTVManager) discoverFromDVRISAPI(dvr DVRConfig) ([]ChannelConfig, erro
 	if len(channels) == 0 {
 		return nil, fmt.Errorf("no channels found via ISAPI")
 	}
-	return channels, nil
+	return normalizeDetectedChannels(channels), nil
 }
 
 // discoverISAPIDeviceInfo gets total channel count from /ISAPI/System/deviceInfo
@@ -868,6 +872,16 @@ func (m *CCTVManager) fetchChannelResolution(dvr DVRConfig, chNum int) (int, int
 	var info isAPIVideoInfo
 	xml.NewDecoder(resp.Body).Decode(&info)
 	return info.Width, info.Height
+}
+
+func normalizeDetectedChannels(channels []ChannelConfig) []ChannelConfig {
+	sort.SliceStable(channels, func(i, j int) bool {
+		return channels[i].ChNum < channels[j].ChNum
+	})
+	for i := range channels {
+		channels[i].Order = i
+	}
+	return channels
 }
 
 // --- Helpers ---

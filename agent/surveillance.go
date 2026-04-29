@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -220,6 +221,7 @@ func (m *SurveillanceManager) DiscoverChannels(dvrID int64) ([]ChannelConfig, er
 	if err != nil {
 		return nil, err
 	}
+	discovered = normalizeChannelDiscovery(discovered)
 
 	for _, ch := range discovered {
 		_, err := m.db.Exec(`INSERT INTO channels (dvr_id, ch_num, name, display_order, enabled, width, height)
@@ -409,18 +411,22 @@ type isAPIVideoInput struct {
 }
 
 func (m *SurveillanceManager) discoverFromDVRISAPI(dvr DVRConfig) ([]ChannelConfig, error) {
-	channels, err := m.discoverISAPIDeviceInfo(dvr)
+	// Prefer endpoints that expose the real channel IDs. Some DVRs start at
+	// channel 3/33 rather than 1, and deviceInfo only reports a total count.
+	channels, err := m.discoverISAPIStreaming(dvr)
 	if err != nil {
-		log.Printf("[surv] ISAPI deviceInfo discovery failed: %v", err)
+		log.Printf("[surv] ISAPI streaming discovery failed: %v", err)
 	}
 	if len(channels) == 0 {
-		channels, err = m.discoverISAPIStreaming(dvr)
+		log.Printf("[surv] trying video inputs fallback")
+		channels, err = m.discoverISAPIVideoInputs(dvr)
 		if err != nil {
-			log.Printf("[surv] ISAPI streaming discovery failed: %v", err)
+			log.Printf("[surv] ISAPI video inputs discovery failed: %v", err)
 		}
 	}
 	if len(channels) == 0 {
-		channels, err = m.discoverISAPIVideoInputs(dvr)
+		log.Printf("[surv] trying deviceInfo fallback")
+		channels, err = m.discoverISAPIDeviceInfo(dvr)
 		if err != nil {
 			return nil, fmt.Errorf("ISAPI discovery failed: %w", err)
 		}
@@ -428,7 +434,7 @@ func (m *SurveillanceManager) discoverFromDVRISAPI(dvr DVRConfig) ([]ChannelConf
 	if len(channels) == 0 {
 		return nil, fmt.Errorf("no channels found via ISAPI")
 	}
-	return channels, nil
+	return normalizeChannelDiscovery(channels), nil
 }
 
 func (m *SurveillanceManager) discoverISAPIDeviceInfo(dvr DVRConfig) ([]ChannelConfig, error) {
@@ -655,6 +661,16 @@ func buildRTSPURL(username, password, addr string, port int, path string) string
 		Path:   path,
 	}
 	return u.String()
+}
+
+func normalizeChannelDiscovery(channels []ChannelConfig) []ChannelConfig {
+	sort.SliceStable(channels, func(i, j int) bool {
+		return channels[i].ChNum < channels[j].ChNum
+	})
+	for i := range channels {
+		channels[i].Order = i
+	}
+	return channels
 }
 
 // --- Helpers ---
