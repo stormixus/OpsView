@@ -666,21 +666,20 @@ type isAPIDeviceInfo struct {
 }
 
 func (m *CCTVManager) discoverFromDVRISAPI(dvr DVRConfig) ([]ChannelConfig, error) {
-	// Prefer videoInputs — returns physical analog inputs only (no IP cameras).
-	// Streaming includes all active streams (IP cameras too) so use as fallback.
-	channels, err := m.discoverISAPIVideoInputs(dvr)
+	// HVRs often split analog inputs and IP cameras across different ISAPI endpoints.
+	// Merge both sources so analog channels (1..N) and higher-numbered IP channels
+	// (for example 15, 16, ...) are discovered together.
+	videoInputs, err := m.discoverISAPIVideoInputs(dvr)
 	if err != nil {
 		log.Printf("[cctv] ISAPI video inputs discovery failed: %v", err)
 	}
 
-	if len(channels) == 0 {
-		log.Printf("[cctv] trying streaming fallback")
-		channels, err = m.discoverISAPIStreaming(dvr)
-		if err != nil {
-			log.Printf("[cctv] ISAPI streaming discovery failed: %v", err)
-		}
+	streamingChannels, streamingErr := m.discoverISAPIStreaming(dvr)
+	if streamingErr != nil {
+		log.Printf("[cctv] ISAPI streaming discovery failed: %v", streamingErr)
 	}
 
+	channels := mergeDetectedChannels(videoInputs, streamingChannels)
 	if len(channels) == 0 {
 		log.Printf("[cctv] trying deviceInfo fallback")
 		channels, err = m.discoverISAPIDeviceInfo(dvr)
@@ -870,6 +869,52 @@ func (m *CCTVManager) fetchChannelResolution(dvr DVRConfig, chNum int) (int, int
 	var info isAPIVideoInfo
 	xml.NewDecoder(resp.Body).Decode(&info)
 	return info.Width, info.Height
+}
+
+func mergeDetectedChannels(channelSets ...[]ChannelConfig) []ChannelConfig {
+	merged := make(map[int]ChannelConfig)
+	order := make([]int, 0)
+
+	for _, channels := range channelSets {
+		for _, ch := range channels {
+			if ch.ChNum == 0 {
+				continue
+			}
+			existing, ok := merged[ch.ChNum]
+			if !ok {
+				merged[ch.ChNum] = ch
+				order = append(order, ch.ChNum)
+				continue
+			}
+
+			if shouldReplaceDetectedChannelName(existing.Name, ch.Name, ch.ChNum) {
+				existing.Name = ch.Name
+			}
+			if existing.Width == 0 && ch.Width > 0 {
+				existing.Width = ch.Width
+			}
+			if existing.Height == 0 && ch.Height > 0 {
+				existing.Height = ch.Height
+			}
+			merged[ch.ChNum] = existing
+		}
+	}
+
+	result := make([]ChannelConfig, 0, len(order))
+	for _, chNum := range order {
+		result = append(result, merged[chNum])
+	}
+	return result
+}
+
+func shouldReplaceDetectedChannelName(current, candidate string, chNum int) bool {
+	if candidate == "" {
+		return false
+	}
+	if current == "" {
+		return true
+	}
+	return current == fmt.Sprintf("Channel %d", chNum) && candidate != current
 }
 
 func normalizeDetectedChannels(channels []ChannelConfig) []ChannelConfig {

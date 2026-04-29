@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestDiscoverISAPIPrefersVideoInputsOverStreaming(t *testing.T) {
+func TestDiscoverISAPIMergesVideoInputsAndStreaming(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ISAPI/System/Video/inputs/channels", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
@@ -21,7 +21,7 @@ func TestDiscoverISAPIPrefersVideoInputsOverStreaming(t *testing.T) {
 </VideoInputChannelList>`)
 	})
 	mux.HandleFunc("/ISAPI/Streaming/channels", func(w http.ResponseWriter, r *http.Request) {
-		// Streaming includes IP cameras (15, 16) that should NOT appear
+		// Streaming includes IP cameras (15, 16) that should be merged in.
 		fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
 <StreamingChannelList>
   <StreamingChannel><id>101</id><channelName>Cam 1</channelName></StreamingChannel>
@@ -56,12 +56,13 @@ func TestDiscoverISAPIPrefersVideoInputsOverStreaming(t *testing.T) {
 	if err != nil {
 		t.Fatalf("discoverFromDVRISAPI returned error: %v", err)
 	}
-	if len(channels) != 4 {
-		t.Fatalf("expected 4 channels, got %d", len(channels))
+	expected := []int{1, 2, 3, 4, 15, 16}
+	if len(channels) != len(expected) {
+		t.Fatalf("expected %d channels, got %d", len(expected), len(channels))
 	}
-	for i, ch := range channels {
-		if ch.ChNum != i+1 {
-			t.Errorf("channel %d: expected ChNum %d, got %d", i, i+1, ch.ChNum)
+	for i, want := range expected {
+		if channels[i].ChNum != want {
+			t.Errorf("channel %d: expected ChNum %d, got %d", i, want, channels[i].ChNum)
 		}
 	}
 }
