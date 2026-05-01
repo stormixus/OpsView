@@ -236,6 +236,26 @@ func (m *CCTVManager) DiscoverChannels(dvrID int64) ([]ChannelConfig, error) {
 	return m.ListChannels(dvrID)
 }
 
+func (m *CCTVManager) RediscoverAllChannels() ([]ChannelConfig, error) {
+	dvrs, err := m.ListDVRs()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := m.db.Exec(`DELETE FROM channels`); err != nil {
+		return nil, fmt.Errorf("clear channels: %w", err)
+	}
+	var all []ChannelConfig
+	for _, dvr := range dvrs {
+		chs, err := m.DiscoverChannels(dvr.ID)
+		if err != nil {
+			log.Printf("[cctv] rediscover DVR %d (%s): %v", dvr.ID, dvr.Name, err)
+			continue
+		}
+		all = append(all, chs...)
+	}
+	return all, nil
+}
+
 func (m *CCTVManager) UpdateChannel(id int, name string, order int, enabled bool) error {
 	en := 0
 	if enabled {

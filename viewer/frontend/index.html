@@ -193,6 +193,11 @@
     ::-webkit-scrollbar-thumb { background: #294468; border-radius: 4px; }
     ::-webkit-scrollbar-thumb:hover { background: #3b5e8c; }
 
+    /* === Fullscreen auto-hide bars === */
+    .tabs, .dvr-tabs { transition: transform 0.35s cubic-bezier(0.4,0,0.2,1), opacity 0.35s; }
+    body.fs-bars-hidden .tabs { transform: translateY(-100%); opacity: 0; pointer-events: none; }
+    body.fs-bars-hidden .dvr-tabs { transform: translateY(-100%); opacity: 0; pointer-events: none; }
+
     @media (max-width: 900px) {
       .tab { padding-left: 12px !important; padding-right: 12px !important; }
       .tab-status-area { gap: 8px !important; padding-right: 8px !important; }
@@ -221,6 +226,10 @@
     <button onclick="refreshCurrentTab()" data-i18n-title="refresh" title="Refresh"
       class="fullscreen-btn ml-2 w-7 h-7 flex items-center justify-center rounded-md border border-white/[0.06] text-gray-500 hover:text-gray-200 hover:bg-white/[0.05] hover:border-white/10 transition-all">
       <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+    </button>
+    <button onclick="rediscoverAllChannels()" data-i18n-title="rediscoverAll" title="Rediscover All Channels"
+      class="fullscreen-btn ml-1 w-7 h-7 flex items-center justify-center rounded-md border border-white/[0.06] text-gray-500 hover:text-amber-400 hover:bg-amber-500/10 hover:border-amber-500/20 transition-all">
+      <i data-lucide="scan" class="w-3.5 h-3.5"></i>
     </button>
     <button id="fullscreenBtn" onclick="toggleFullscreen()" data-i18n-title="fullscreen" title="Fullscreen"
       class="fullscreen-btn ml-1 w-7 h-7 flex items-center justify-center rounded-md border border-white/[0.06] text-gray-500 hover:text-gray-200 hover:bg-white/[0.05] hover:border-white/10 transition-all">
@@ -580,11 +589,49 @@
       const active = await isFullscreenActive();
       await setFullscreenActive(!active);
       setTimeout(syncFullscreenButton, 50);
+      setTimeout(onFullscreenChange, 100);
     }
 
     document.addEventListener('fullscreenchange', syncFullscreenButton);
     document.addEventListener('webkitfullscreenchange', syncFullscreenButton);
     document.addEventListener('msfullscreenchange', syncFullscreenButton);
+
+    // --- Fullscreen auto-hide bars ---
+    let fsHideTimer = null;
+    const FS_HIDE_DELAY = 3000;
+
+    function fsShowBars() {
+      document.body.classList.remove('fs-bars-hidden');
+      clearTimeout(fsHideTimer);
+    }
+
+    function fsScheduleHide() {
+      clearTimeout(fsHideTimer);
+      fsHideTimer = setTimeout(() => {
+        document.body.classList.add('fs-bars-hidden');
+      }, FS_HIDE_DELAY);
+    }
+
+    async function fsHandleActivity() {
+      if (!(await isFullscreenActive())) return;
+      fsShowBars();
+      fsScheduleHide();
+    }
+
+    document.addEventListener('mousemove', fsHandleActivity);
+    document.addEventListener('mousedown', fsHandleActivity);
+    document.addEventListener('keydown', fsHandleActivity);
+
+    async function onFullscreenChange() {
+      if (await isFullscreenActive()) {
+        fsScheduleHide();
+      } else {
+        clearTimeout(fsHideTimer);
+        fsShowBars();
+      }
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
 
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape' && expandedOverlay) {
@@ -1468,6 +1515,21 @@
       } catch(e) {
         setDVRStatus(t('rescanFail') + ': ' + e, '#ef4444');
         console.error('rediscoverChannels:', e);
+      }
+    }
+
+    async function rediscoverAllChannels() {
+      if (!CM()) return;
+      if (!confirm(t('rediscoverAllConfirm') || 'Delete all channels and rediscover? This may take a moment.')) return;
+      try {
+        setDVRStatus(t('rediscoveringAll') || 'Rediscovering all channels...', '#eab308');
+        await CM().RediscoverAllChannels();
+        await loadDVRs();
+        if (activeDvrId) await selectDVR(activeDvrId);
+        setDVRStatus(t('rediscoverAllDone') || 'All channels rediscovered', '#22c55e');
+      } catch(e) {
+        setDVRStatus(t('rediscoverAllFail') || 'Rediscover failed: ' + e, '#ef4444');
+        console.error('rediscoverAllChannels:', e);
       }
     }
 
