@@ -51,6 +51,9 @@ type Hub struct {
 
 	// Surveillance RTSP→HLS proxy
 	survProxy *SurvProxy
+
+	// Full-frame accumulator for REST snapshot
+	frameBuf *FrameBuffer
 }
 
 // Watcher wraps a viewer WebSocket connection with a send queue.
@@ -68,6 +71,7 @@ func NewHub(cfg Config) *Hub {
 		broadcast: make(chan []byte, 64),
 		done:      make(chan struct{}),
 		survProxy: NewSurvProxy(),
+		frameBuf:  NewFrameBuffer(),
 	}
 	h.testPattern = NewTestPattern(h)
 	return h
@@ -208,8 +212,14 @@ func (h *Hub) HandlePublish(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
+		case proto.MsgFrameDelta:
+			fd, err := proto.DecodeFrameDelta(data[proto.HeaderSize:])
+			if err == nil {
+				h.frameBuf.Update(fd)
+			}
+			h.broadcast <- data
+
 		default:
-			// Forward all other messages (frames, heartbeats, etc.)
 			h.broadcast <- data
 		}
 	}
@@ -502,6 +512,18 @@ func (h *Hub) HandleSurvStreams(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	json.NewEncoder(w).Encode(h.survProxy.ListStreams())
+}
+
+// HandleSnapshot returns the current accumulated frame as PNG.
+func (h *Hub) HandleSnapshot(w http.ResponseWriter, r *http.Request) {
+	data, err := h.frameBuf.SnapshotPNG()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Write(data)
 }
 
 // HandleHealth returns basic health status.
