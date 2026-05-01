@@ -170,7 +170,7 @@ func (m *CCTVManager) StartChannelStream(dvrID int64, chNum int, offerSDP string
 		}
 	})
 
-	go func() { <-ctx.Done(); c.Close() }()
+	go m.rtspReconnectLoop(cs, dvr, chNum, ctx, cancel)
 
 	m.streamsMu.Lock()
 	m.streams[key] = cs
@@ -178,6 +178,82 @@ func (m *CCTVManager) StartChannelStream(dvrID int64, chNum int, offerSDP string
 
 	log.Printf("[cctv] WebRTC stream started: DVR %d CH %d (H264)", dvrID, chNum)
 	return &StreamResult{Method: "webrtc", SDP: pc.LocalDescription().SDP}, nil
+}
+
+// rtspReconnectLoop monitors the RTSP client and reconnects automatically when it drops.
+func (m *CCTVManager) rtspReconnectLoop(cs *channelStream, dvr DVRConfig, chNum int, ctx context.Context, cancel context.CancelFunc) {
+	const maxAttempts = 5
+
+	for {
+		cs.mu.Lock()
+		client := cs.client
+		cs.mu.Unlock()
+		if client == nil {
+			cancel()
+			return
+		}
+		client.Wait()
+
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		log.Printf("[cctv] RTSP DVR%d CH%d: stream dropped, reconnecting", dvr.ID, chNum)
+
+		reconnected := false
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
+
+			newC, newFmt, baseURL, newMedi, err := m.connectH264(dvr, chNum)
+			if err != nil {
+				log.Printf("[cctv] DVR%d CH%d reconnect %d/%d: %v", dvr.ID, chNum, attempt, maxAttempts, err)
+				continue
+			}
+			if _, err := newC.Setup(baseURL, newMedi, 0, 0); err != nil {
+				newC.Close()
+				log.Printf("[cctv] DVR%d CH%d reconnect %d/%d setup: %v", dvr.ID, chNum, attempt, maxAttempts, err)
+				continue
+			}
+			newC.OnPacketRTP(newMedi, newFmt, func(pkt *rtp.Packet) {
+				cs.mu.Lock()
+				t := cs.track
+				cs.mu.Unlock()
+				if t != nil {
+					if p := pkt.Clone(); p != nil {
+						_ = t.WriteRTP(p)
+					}
+				}
+			})
+			if _, err := newC.Play(nil); err != nil {
+				newC.Close()
+				log.Printf("[cctv] DVR%d CH%d reconnect %d/%d play: %v", dvr.ID, chNum, attempt, maxAttempts, err)
+				continue
+			}
+
+			cs.mu.Lock()
+			if cs.client != nil {
+				cs.client.Close()
+			}
+			cs.client = newC
+			cs.mu.Unlock()
+
+			log.Printf("[cctv] DVR%d CH%d: reconnected (attempt %d)", dvr.ID, chNum, attempt)
+			reconnected = true
+			break
+		}
+
+		if !reconnected {
+			log.Printf("[cctv] DVR%d CH%d: reconnect failed after %d attempts", dvr.ID, chNum, maxAttempts)
+			cancel()
+			return
+		}
+	}
 }
 
 // --- Lifecycle ---

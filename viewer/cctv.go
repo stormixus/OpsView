@@ -208,14 +208,15 @@ func (m *CCTVManager) DiscoverChannels(dvrID int64) ([]ChannelConfig, error) {
 		m.db.Exec(`UPDATE dvrs SET protocol=? WHERE id=?`, dvr.Protocol, dvr.ID)
 	}
 
-	var discovered []ChannelConfig
-	switch dvr.Protocol {
-	case "rtsp":
-		discovered, err = m.discoverFromDVRRTSP(dvr)
-	case "dahua":
-		discovered, err = m.discoverFromDVRDahua(dvr)
-	default: // "isapi" (hikvision)
-		discovered, err = m.discoverFromDVRISAPI(dvr)
+	discovered, err := m.discoverWithProtocol(dvr)
+	if (err != nil || len(discovered) == 0) && dvr.Protocol != "auto" {
+		log.Printf("[cctv] %s discovery failed for DVR %d, re-probing protocol", dvr.Protocol, dvr.ID)
+		origProto := dvr.Protocol
+		dvr.Protocol = m.probeDVRProtocol(dvr)
+		if dvr.Protocol != origProto {
+			m.db.Exec(`UPDATE dvrs SET protocol=? WHERE id=?`, dvr.Protocol, dvr.ID)
+			discovered, err = m.discoverWithProtocol(dvr)
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -254,6 +255,17 @@ func (m *CCTVManager) RediscoverAllChannels() ([]ChannelConfig, error) {
 		all = append(all, chs...)
 	}
 	return all, nil
+}
+
+func (m *CCTVManager) discoverWithProtocol(dvr DVRConfig) ([]ChannelConfig, error) {
+	switch dvr.Protocol {
+	case "rtsp":
+		return m.discoverFromDVRRTSP(dvr)
+	case "dahua":
+		return m.discoverFromDVRDahua(dvr)
+	default:
+		return m.discoverFromDVRISAPI(dvr)
+	}
 }
 
 func (m *CCTVManager) UpdateChannel(id int, name string, order int, enabled bool) error {
@@ -686,28 +698,30 @@ type isAPIDeviceInfo struct {
 }
 
 func (m *CCTVManager) discoverFromDVRISAPI(dvr DVRConfig) ([]ChannelConfig, error) {
-	// HVRs often split analog inputs and IP cameras across different ISAPI endpoints.
-	// Merge both sources so analog channels (1..N) and higher-numbered IP channels
-	// (for example 15, 16, ...) are discovered together.
+	// Prefer videoInputs — it returns only physical video inputs,
+	// excluding empty IP camera slots that streaming channels includes.
 	videoInputs, err := m.discoverISAPIVideoInputs(dvr)
 	if err != nil {
 		log.Printf("[cctv] ISAPI video inputs discovery failed: %v", err)
+	}
+	if len(videoInputs) > 0 {
+		log.Printf("[cctv] using videoInputs: %d channels", len(videoInputs))
+		return normalizeDetectedChannels(videoInputs), nil
 	}
 
 	streamingChannels, streamingErr := m.discoverISAPIStreaming(dvr)
 	if streamingErr != nil {
 		log.Printf("[cctv] ISAPI streaming discovery failed: %v", streamingErr)
 	}
-
-	channels := mergeDetectedChannels(videoInputs, streamingChannels)
-	if len(channels) == 0 {
-		log.Printf("[cctv] trying deviceInfo fallback")
-		channels, err = m.discoverISAPIDeviceInfo(dvr)
-		if err != nil {
-			return nil, fmt.Errorf("ISAPI discovery failed: %w", err)
-		}
+	if len(streamingChannels) > 0 {
+		return normalizeDetectedChannels(streamingChannels), nil
 	}
 
+	log.Printf("[cctv] trying deviceInfo fallback")
+	channels, err := m.discoverISAPIDeviceInfo(dvr)
+	if err != nil {
+		return nil, fmt.Errorf("ISAPI discovery failed: %w", err)
+	}
 	if len(channels) == 0 {
 		return nil, fmt.Errorf("no channels found via ISAPI")
 	}
