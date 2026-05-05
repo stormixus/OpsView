@@ -38,6 +38,8 @@ type DVRInfo struct {
 	Name          string `json:"name"`
 	Addr          string `json:"addr"`
 	Port          int    `json:"port"`
+	ExtAddr       string `json:"ext_addr,omitempty"` // External IP/Domain for Relay
+	ExtPort       int    `json:"ext_port,omitempty"` // External port for RTSP
 	RTSPPort      int    `json:"rtsp_port,omitempty"` // explicit RTSP port; 0 means derive from protocol default (554)
 	Username      string `json:"username"`
 	Password      string `json:"password"`

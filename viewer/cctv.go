@@ -30,6 +30,8 @@ type DVRConfig struct {
 	Name          string `json:"name"`
 	Addr          string `json:"addr"`
 	Port          int    `json:"port"`
+	ExtAddr       string `json:"ext_addr,omitempty"`
+	ExtPort       int    `json:"ext_port,omitempty"`
 	Username      string `json:"username"`
 	Password      string `json:"password"`
 	RefreshRate   int    `json:"refresh_rate"`   // snapshot interval in ms (default 2000)
@@ -126,12 +128,14 @@ func (m *CCTVManager) migrate() {
 	m.db.Exec(`ALTER TABLE dvrs ADD COLUMN protocol TEXT NOT NULL DEFAULT 'isapi'`)
 	// Add display_order column for DVR tab ordering
 	m.db.Exec(`ALTER TABLE dvrs ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0`)
+	m.db.Exec(`ALTER TABLE dvrs ADD COLUMN ext_addr TEXT NOT NULL DEFAULT ''`)
+	m.db.Exec(`ALTER TABLE dvrs ADD COLUMN ext_port INTEGER NOT NULL DEFAULT 0`)
 }
 
 // --- DVR CRUD ---
 
 func (m *CCTVManager) ListDVRs() ([]DVRConfig, error) {
-	rows, err := m.db.Query(`SELECT id, name, addr, port, username, password, refresh_rate, stream_quality, protocol, created_at FROM dvrs ORDER BY display_order, id`)
+	rows, err := m.db.Query(`SELECT id, name, addr, port, ext_addr, ext_port, username, password, refresh_rate, stream_quality, protocol, created_at FROM dvrs ORDER BY display_order, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -140,34 +144,34 @@ func (m *CCTVManager) ListDVRs() ([]DVRConfig, error) {
 	var dvrs []DVRConfig
 	for rows.Next() {
 		var d DVRConfig
-		rows.Scan(&d.ID, &d.Name, &d.Addr, &d.Port, &d.Username, &d.Password, &d.RefreshRate, &d.StreamQuality, &d.Protocol, &d.CreatedAt)
+		rows.Scan(&d.ID, &d.Name, &d.Addr, &d.Port, &d.ExtAddr, &d.ExtPort, &d.Username, &d.Password, &d.RefreshRate, &d.StreamQuality, &d.Protocol, &d.CreatedAt)
 		dvrs = append(dvrs, d)
 	}
 	return dvrs, nil
 }
 
-func (m *CCTVManager) AddDVR(name, addr string, port int, username, password, protocol string) (DVRConfig, error) {
+func (m *CCTVManager) AddDVR(name, addr string, port int, extAddr string, extPort int, username, password, protocol string) (DVRConfig, error) {
 	if name == "" {
 		name = addr
 	}
 	if protocol == "" {
 		protocol = "isapi"
 	}
-	res, err := m.db.Exec(`INSERT INTO dvrs (name, addr, port, username, password, protocol) VALUES (?, ?, ?, ?, ?, ?)`,
-		name, addr, port, username, password, protocol)
+	res, err := m.db.Exec(`INSERT INTO dvrs (name, addr, port, ext_addr, ext_port, username, password, protocol) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		name, addr, port, extAddr, extPort, username, password, protocol)
 	if err != nil {
 		return DVRConfig{}, err
 	}
 	id, _ := res.LastInsertId()
-	return DVRConfig{ID: id, Name: name, Addr: addr, Port: port, Username: username, Password: password, RefreshRate: 2000, StreamQuality: "sub", Protocol: protocol}, nil
+	return DVRConfig{ID: id, Name: name, Addr: addr, Port: port, ExtAddr: extAddr, ExtPort: extPort, Username: username, Password: password, RefreshRate: 2000, StreamQuality: "sub", Protocol: protocol}, nil
 }
 
-func (m *CCTVManager) UpdateDVR(id int64, name, addr string, port int, username, password string, refreshRate int, streamQuality, protocol string) error {
+func (m *CCTVManager) UpdateDVR(id int64, name, addr string, port int, extAddr string, extPort int, username, password string, refreshRate int, streamQuality, protocol string) error {
 	if protocol == "" {
 		protocol = "auto"
 	}
-	_, err := m.db.Exec(`UPDATE dvrs SET name=?, addr=?, port=?, username=?, password=?, refresh_rate=?, stream_quality=?, protocol=? WHERE id=?`,
-		name, addr, port, username, password, refreshRate, streamQuality, protocol, id)
+	_, err := m.db.Exec(`UPDATE dvrs SET name=?, addr=?, port=?, ext_addr=?, ext_port=?, username=?, password=?, refresh_rate=?, stream_quality=?, protocol=? WHERE id=?`,
+		name, addr, port, extAddr, extPort, username, password, refreshRate, streamQuality, protocol, id)
 	return err
 }
 
@@ -965,8 +969,8 @@ func normalizeDetectedChannels(channels []ChannelConfig) []ChannelConfig {
 
 func (m *CCTVManager) getDVR(id int64) (DVRConfig, error) {
 	var d DVRConfig
-	err := m.db.QueryRow(`SELECT id, name, addr, port, username, password, refresh_rate, stream_quality, protocol FROM dvrs WHERE id=?`, id).
-		Scan(&d.ID, &d.Name, &d.Addr, &d.Port, &d.Username, &d.Password, &d.RefreshRate, &d.StreamQuality, &d.Protocol)
+	err := m.db.QueryRow(`SELECT id, name, addr, port, ext_addr, ext_port, username, password, refresh_rate, stream_quality, protocol FROM dvrs WHERE id=?`, id).
+		Scan(&d.ID, &d.Name, &d.Addr, &d.Port, &d.ExtAddr, &d.ExtPort, &d.Username, &d.Password, &d.RefreshRate, &d.StreamQuality, &d.Protocol)
 	if d.Protocol == "" {
 		d.Protocol = "isapi"
 	}

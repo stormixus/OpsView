@@ -185,6 +185,8 @@ func handleSurvDVRs(w http.ResponseWriter, r *http.Request) {
 			Name          string `json:"name"`
 			Addr          string `json:"addr"`
 			Port          int    `json:"port"`
+			ExtAddr       string `json:"ext_addr"`
+			ExtPort       int    `json:"ext_port"`
 			Username      string `json:"username"`
 			Password      string `json:"password"`
 			Protocol      string `json:"protocol"`
@@ -198,7 +200,7 @@ func handleSurvDVRs(w http.ResponseWriter, r *http.Request) {
 		if req.Port == 0 {
 			req.Port = 80
 		}
-		dvr, err := webSurvMgr.AddDVR(req.Name, req.Addr, req.Port, req.Username, req.Password, req.Protocol, req.RefreshRate, req.StreamQuality)
+		dvr, err := webSurvMgr.AddDVR(req.Name, req.Addr, req.Port, req.ExtAddr, req.ExtPort, req.Username, req.Password, req.Protocol, req.RefreshRate, req.StreamQuality)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -264,6 +266,8 @@ func handleSurvDVR(w http.ResponseWriter, r *http.Request) {
 				Name          string `json:"name"`
 				Addr          string `json:"addr"`
 				Port          int    `json:"port"`
+				ExtAddr       string `json:"ext_addr"`
+				ExtPort       int    `json:"ext_port"`
 				Username      string `json:"username"`
 				Password      string `json:"password"`
 				RefreshRate   int    `json:"refresh_rate"`
@@ -274,7 +278,7 @@ func handleSurvDVR(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			if err := webSurvMgr.UpdateDVR(id, req.Name, req.Addr, req.Port, req.Username, req.Password, req.RefreshRate, req.StreamQuality, req.Protocol); err != nil {
+			if err := webSurvMgr.UpdateDVR(id, req.Name, req.Addr, req.Port, req.ExtAddr, req.ExtPort, req.Username, req.Password, req.RefreshRate, req.StreamQuality, req.Protocol); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -463,6 +467,16 @@ const htmlTemplate = `
                             <input type="number" id="dvr-port" value="80" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </div>
                     </div>
+                    <div class="grid grid-cols-3 gap-3">
+                        <div class="col-span-2">
+                            <label class="block text-xs text-slate-400 mb-1">외부 접속 주소 (선택)</label>
+                            <input type="text" id="dvr-ext-addr" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="domain.com (옵션)">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-slate-400 mb-1">외부 포트</label>
+                            <input type="number" id="dvr-ext-port" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="80">
+                        </div>
+                    </div>
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="block text-xs text-slate-400 mb-1">사용자명</label>
@@ -538,6 +552,16 @@ const htmlTemplate = `
                     <div>
                         <label class="block text-xs text-slate-400 mb-1">포트</label>
                         <input type="number" id="edit-dvr-port" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="col-span-2">
+                        <label class="block text-xs text-slate-400 mb-1">외부 접속 주소 (선택)</label>
+                        <input type="text" id="edit-dvr-ext-addr" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">외부 포트</label>
+                        <input type="number" id="edit-dvr-ext-port" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
@@ -710,6 +734,8 @@ const htmlTemplate = `
                 name: document.getElementById('dvr-name').value.trim(),
                 addr: document.getElementById('dvr-addr').value.trim(),
                 port: parseInt(document.getElementById('dvr-port').value) || 80,
+                ext_addr: document.getElementById('dvr-ext-addr').value.trim(),
+                ext_port: parseInt(document.getElementById('dvr-ext-port').value) || 0,
                 username: document.getElementById('dvr-username').value.trim(),
                 password: document.getElementById('dvr-password').value,
                 protocol: document.getElementById('dvr-protocol').value,
@@ -727,6 +753,8 @@ const htmlTemplate = `
                     showMsg('DVR이 추가되었습니다.', 'success');
                     document.getElementById('dvr-name').value = '';
                     document.getElementById('dvr-addr').value = '';
+                    document.getElementById('dvr-ext-addr').value = '';
+                    document.getElementById('dvr-ext-port').value = '';
                     document.getElementById('dvr-password').value = '';
                     loadDVRs();
                 } else {
@@ -759,6 +787,8 @@ const htmlTemplate = `
             document.getElementById('edit-dvr-protocol').value = d.protocol || 'auto';
             document.getElementById('edit-dvr-addr').value = d.addr || '';
             document.getElementById('edit-dvr-port').value = d.port || 80;
+            document.getElementById('edit-dvr-ext-addr').value = d.ext_addr || '';
+            document.getElementById('edit-dvr-ext-port').value = d.ext_port || '';
             document.getElementById('edit-dvr-username').value = d.username || '';
             document.getElementById('edit-dvr-password').value = '';
             document.getElementById('edit-dvr-refresh').value = d.refresh_rate || 2000;
@@ -776,6 +806,8 @@ const htmlTemplate = `
                 name: document.getElementById('edit-dvr-name').value.trim(),
                 addr: document.getElementById('edit-dvr-addr').value.trim(),
                 port: parseInt(document.getElementById('edit-dvr-port').value) || 80,
+                ext_addr: document.getElementById('edit-dvr-ext-addr').value.trim(),
+                ext_port: parseInt(document.getElementById('edit-dvr-ext-port').value) || 0,
                 username: document.getElementById('edit-dvr-username').value.trim(),
                 password: document.getElementById('edit-dvr-password').value,
                 protocol: document.getElementById('edit-dvr-protocol').value,
