@@ -5,7 +5,10 @@
 *.so
 *.dylib
 /relay/opsview-relay
+/relay/relay
 /agent/opsview-agent
+/agent/agent
+/viewer/viewer
 /viewer/build/
 /build/
 

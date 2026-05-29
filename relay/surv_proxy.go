@@ -442,9 +442,17 @@ func setupSurvH265(c *gortsplib.Client, desc *description.Session, medi *descrip
 
 // --- Helpers ---
 
+// resolveSurvHost picks the RTSP reachability host: public ext_addr when set, else LAN addr.
+func resolveSurvHost(dvr proto.DVRInfo) string {
+	if addr := strings.TrimSpace(dvr.ExtAddr); addr != "" {
+		return addr
+	}
+	return dvr.Addr
+}
+
 func buildSurvRTSPURL(dvr proto.DVRInfo, chNum int) string {
 	port := resolveRTSPPort(dvr)
-	host := fmt.Sprintf("%s:%d", dvr.Addr, port)
+	host := fmt.Sprintf("%s:%d", resolveSurvHost(dvr), port)
 
 	var path string
 	switch dvr.Protocol {

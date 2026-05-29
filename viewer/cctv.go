@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -128,8 +129,14 @@ func (m *CCTVManager) migrate() {
 	m.db.Exec(`ALTER TABLE dvrs ADD COLUMN protocol TEXT NOT NULL DEFAULT 'isapi'`)
 	// Add display_order column for DVR tab ordering
 	m.db.Exec(`ALTER TABLE dvrs ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0`)
-	m.db.Exec(`ALTER TABLE dvrs ADD COLUMN ext_addr TEXT NOT NULL DEFAULT ''`)
-	m.db.Exec(`ALTER TABLE dvrs ADD COLUMN ext_port INTEGER NOT NULL DEFAULT 0`)
+	for _, stmt := range []string{
+		`ALTER TABLE dvrs ADD COLUMN ext_addr TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE dvrs ADD COLUMN ext_port INTEGER NOT NULL DEFAULT 0`,
+	} {
+		if _, err := m.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			log.Printf("[cctv] migrate alter: %v", err)
+		}
+	}
 }
 
 // --- DVR CRUD ---
@@ -144,10 +151,12 @@ func (m *CCTVManager) ListDVRs() ([]DVRConfig, error) {
 	var dvrs []DVRConfig
 	for rows.Next() {
 		var d DVRConfig
-		rows.Scan(&d.ID, &d.Name, &d.Addr, &d.Port, &d.ExtAddr, &d.ExtPort, &d.Username, &d.Password, &d.RefreshRate, &d.StreamQuality, &d.Protocol, &d.CreatedAt)
+		if err := rows.Scan(&d.ID, &d.Name, &d.Addr, &d.Port, &d.ExtAddr, &d.ExtPort, &d.Username, &d.Password, &d.RefreshRate, &d.StreamQuality, &d.Protocol, &d.CreatedAt); err != nil {
+			return nil, err
+		}
 		dvrs = append(dvrs, d)
 	}
-	return dvrs, nil
+	return dvrs, rows.Err()
 }
 
 func (m *CCTVManager) AddDVR(name, addr string, port int, extAddr string, extPort int, username, password, protocol string) (DVRConfig, error) {

@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -88,9 +89,15 @@ func (m *SurveillanceManager) migrate() {
 			log.Printf("[surv] migrate: %v", err)
 		}
 	}
-	m.db.Exec(`ALTER TABLE dvrs ADD COLUMN protocol TEXT NOT NULL DEFAULT 'isapi'`)
-	m.db.Exec(`ALTER TABLE dvrs ADD COLUMN ext_addr TEXT NOT NULL DEFAULT ''`)
-	m.db.Exec(`ALTER TABLE dvrs ADD COLUMN ext_port INTEGER NOT NULL DEFAULT 0`)
+	for _, stmt := range []string{
+		`ALTER TABLE dvrs ADD COLUMN protocol TEXT NOT NULL DEFAULT 'isapi'`,
+		`ALTER TABLE dvrs ADD COLUMN ext_addr TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE dvrs ADD COLUMN ext_port INTEGER NOT NULL DEFAULT 0`,
+	} {
+		if _, err := m.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			log.Printf("[surv] migrate alter: %v", err)
+		}
+	}
 }
 
 // --- DVR CRUD ---
@@ -131,10 +138,12 @@ func (m *SurveillanceManager) ListDVRs() ([]DVRConfig, error) {
 	var dvrs []DVRConfig
 	for rows.Next() {
 		var d DVRConfig
-		rows.Scan(&d.ID, &d.Name, &d.Addr, &d.Port, &d.ExtAddr, &d.ExtPort, &d.Username, &d.Password, &d.RefreshRate, &d.StreamQuality, &d.Protocol, &d.CreatedAt)
+		if err := rows.Scan(&d.ID, &d.Name, &d.Addr, &d.Port, &d.ExtAddr, &d.ExtPort, &d.Username, &d.Password, &d.RefreshRate, &d.StreamQuality, &d.Protocol, &d.CreatedAt); err != nil {
+			return nil, err
+		}
 		dvrs = append(dvrs, d)
 	}
-	return dvrs, nil
+	return dvrs, rows.Err()
 }
 
 func (m *SurveillanceManager) AddDVR(name, addr string, port int, extAddr string, extPort int, username, password, protocol string, refreshRate int, streamQuality string) (DVRConfig, error) {

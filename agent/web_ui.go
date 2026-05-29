@@ -473,8 +473,8 @@ const htmlTemplate = `
                             <input type="text" id="dvr-ext-addr" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="domain.com (옵션)">
                         </div>
                         <div>
-                            <label class="block text-xs text-slate-400 mb-1">외부 포트</label>
-                            <input type="number" id="dvr-ext-port" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="80">
+                            <label class="block text-xs text-slate-400 mb-1">HLS 포트 (HTTP)</label>
+                            <input type="number" id="dvr-ext-port" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="8080">
                         </div>
                     </div>
                     <div class="grid grid-cols-2 gap-3">
@@ -560,8 +560,8 @@ const htmlTemplate = `
                         <input type="text" id="edit-dvr-ext-addr" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                     </div>
                     <div>
-                        <label class="block text-xs text-slate-400 mb-1">외부 포트</label>
-                        <input type="number" id="edit-dvr-ext-port" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <label class="block text-xs text-slate-400 mb-1">HLS 포트 (HTTP)</label>
+                        <input type="number" id="edit-dvr-ext-port" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="8080">
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-3">

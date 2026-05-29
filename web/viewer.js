@@ -500,6 +500,15 @@ function getHttpBase() {
   return `${proto}://${ip}:${port}`;
 }
 
+/** Per-DVR HLS endpoint override when ext_addr is configured on a cloud DVR. */
+function resolveHLSEndpoint(dvr) {
+  if (dvr && dvr.ext_addr && String(dvr.ext_addr).trim() !== '') {
+    const port = dvr.ext_port > 0 ? dvr.ext_port : (parseInt(document.getElementById('relayPort').value, 10) || 8080);
+    return `http://${String(dvr.ext_addr).trim()}:${port}`;
+  }
+  return getHttpBase();
+}
+
 // --- DVR Tabs ---
 function renderDVRTabs() {
   const bar = document.getElementById('dvrTabs');
@@ -710,7 +719,7 @@ function startStream(dvr, ch) {
   if (!cell) return;
 
   if (dvr._remote) {
-    const base = getHttpBase();
+    const base = resolveHLSEndpoint(dvr);
     const streamId = `dvr${dvr.id}_ch${chNum}`;
     const hlsUrl = `${base}/surv/${streamId}/index.m3u8`;
 

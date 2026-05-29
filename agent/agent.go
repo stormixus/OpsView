@@ -234,6 +234,7 @@ func (a *Agent) sendSurvConfig() {
 	for _, d := range dvrs {
 		cfg.DVRs = append(cfg.DVRs, proto.DVRInfo{
 			ID: d.ID, Name: d.Name, Addr: d.Addr, Port: d.Port,
+			ExtAddr: d.ExtAddr, ExtPort: d.ExtPort,
 			Username: d.Username, Password: d.Password,
 			RefreshRate: d.RefreshRate, StreamQuality: d.StreamQuality, Protocol: d.Protocol,
 		})

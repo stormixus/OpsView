@@ -412,10 +412,10 @@
       <input type="text" id="dvrAddr" placeholder="192.168.1.64" class="w-[110px] bg-surface-50 text-gray-200 border border-white/[0.06] rounded-md px-2 py-1 text-[11px] focus:border-cyan-500/50 outline-none transition-all">
       <label class="text-gray-500" data-i18n="port">Port:</label>
       <input type="number" id="dvrPort" value="80" class="w-[50px] bg-surface-50 text-gray-200 border border-white/[0.06] rounded-md px-2 py-1 text-[11px] focus:border-cyan-500/50 outline-none transition-all">
-      <label class="text-gray-500">ExtIP:</label>
+      <label class="text-gray-500" title="Relay HLS public host">HLS Host:</label>
       <input type="text" id="dvrExtAddr" placeholder="domain.com" class="w-[110px] bg-surface-50 text-gray-200 border border-white/[0.06] rounded-md px-2 py-1 text-[11px] focus:border-cyan-500/50 outline-none transition-all">
-      <label class="text-gray-500">ExtPort:</label>
-      <input type="number" id="dvrExtPort" placeholder="80" class="w-[50px] bg-surface-50 text-gray-200 border border-white/[0.06] rounded-md px-2 py-1 text-[11px] focus:border-cyan-500/50 outline-none transition-all">
+      <label class="text-gray-500" title="Relay HTTP port for /surv/...">HLS Port:</label>
+      <input type="number" id="dvrExtPort" placeholder="8080" class="w-[50px] bg-surface-50 text-gray-200 border border-white/[0.06] rounded-md px-2 py-1 text-[11px] focus:border-cyan-500/50 outline-none transition-all">
       <label class="text-gray-500" data-i18n="username">Username:</label>
       <input type="text" id="dvrUser" value="admin" class="w-[70px] bg-surface-50 text-gray-200 border border-white/[0.06] rounded-md px-2 py-1 text-[11px] focus:border-cyan-500/50 outline-none transition-all">
       <label class="text-gray-500" data-i18n="password">Password:</label>
@@ -735,6 +735,17 @@
         else if (status === 'connecting') dot.classList.add('warn');
         else if (status === 'error' || status === 'disconnected') dot.classList.add('err');
       }
+    }
+
+    /** Per-DVR override for relay HLS HTTP endpoint (ext_addr/ext_port), else global relay settings. */
+    function resolveRelayHLSEndpoint(dvr) {
+      let ip = document.getElementById('relayIp').value.trim();
+      let port = document.getElementById('relayPort').value.trim();
+      if (dvr && dvr.ext_addr && dvr.ext_addr.trim() !== '') {
+        ip = dvr.ext_addr.trim();
+        if (dvr.ext_port > 0) port = String(dvr.ext_port);
+      }
+      return { ip, port };
     }
 
     function connect() {
@@ -1733,7 +1744,7 @@
       const isRTSP = dvr && dvr.protocol === 'rtsp';
       const refreshMs = (dvr && dvr.refresh_rate) ? dvr.refresh_rate : 2000;
 
-      const isRemote = (dvr && dvr._remote) || (dvr && dvr.ext_addr && dvr.ext_addr.trim() !== '');
+      const isRemote = !!(dvr && dvr._remote);
 
       enabled.forEach(ch => {
         const cell = document.createElement('div');
@@ -1751,12 +1762,7 @@
           video.style.height = '100%';
           video.style.objectFit = 'contain';
           video.style.background = '#000';
-          let ip = document.getElementById('relayIp').value.trim();
-          let port = document.getElementById('relayPort').value.trim();
-          if (dvr && dvr.ext_addr && dvr.ext_addr.trim() !== '') {
-            ip = dvr.ext_addr.trim();
-            port = dvr.ext_port || port;
-          }
+          const { ip, port } = resolveRelayHLSEndpoint(dvr);
           const hlsUrl = 'http://' + ip + ':' + port + '/surv/dvr' + ch.dvr_id + '_ch' + ch.ch_num + '/index.m3u8';
           if (typeof Hls !== 'undefined' && Hls.isSupported()) {
             const hls = new Hls({ enableWorker: true, lowLatencyMode: true, manifestLoadingMaxRetry: 2, manifestLoadingRetryDelay: 3000 });

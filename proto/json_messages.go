@@ -38,9 +38,9 @@ type DVRInfo struct {
 	Name          string `json:"name"`
 	Addr          string `json:"addr"`
 	Port          int    `json:"port"`
-	ExtAddr       string `json:"ext_addr,omitempty"` // External IP/Domain for Relay
-	ExtPort       int    `json:"ext_port,omitempty"` // External port for RTSP
-	RTSPPort      int    `json:"rtsp_port,omitempty"` // explicit RTSP port; 0 means derive from protocol default (554)
+	ExtAddr       string `json:"ext_addr,omitempty"`  // Public host for relay RTSP pull and viewer HLS playback
+	ExtPort       int    `json:"ext_port,omitempty"`  // Public HTTP port for HLS (/surv/...); 0 = use viewer relay port
+	RTSPPort      int    `json:"rtsp_port,omitempty"` // explicit RTSP port; 0 means default 554
 	Username      string `json:"username"`
 	Password      string `json:"password"`
 	RefreshRate   int    `json:"refresh_rate"`
