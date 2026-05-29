@@ -14,6 +14,7 @@
 
 # Go
 vendor/
+.venv-icons/
 
 # Web
 web/node_modules/

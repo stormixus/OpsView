@@ -41,10 +41,13 @@ GOOS=windows GOARCH=amd64 go build -o opsview-agent.exe .
 ### Wails Desktop Viewer
 
 ```bash
-cd viewer
-wails build
+./scripts/generate_icons.sh   # tray.ico + viewer/appicon.png (from icon-*.svg)
+make viewer
+# Or: cd viewer && mkdir -p build && cp appicon.png build/ && wails build
 # Output: build/bin/opsview-viewer
 ```
+
+App icons are hand-edited SVGs at the repo root (`icon-dark.svg`, `icon-light.svg`, `icon-*-apple.svg`). Re-run the script after changing them.
 
 ### Web Viewer
 

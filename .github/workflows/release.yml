@@ -90,10 +90,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
 
+      - name: Generate app icons
+        run: |
+          python3 -m venv .venv-icons
+          .venv-icons/bin/pip install cairosvg pillow
+          ./scripts/generate_icons.sh
+
       - name: Build viewer
         shell: bash
         run: |
           cd viewer
+          mkdir -p build && cp appicon.png build/appicon.png
           TAG="${{ github.event.release.tag_name || github.ref_name }}"
           wails build ${{ matrix.wails_flags }} -platform ${{ matrix.goos }}/${{ matrix.goarch }} -ldflags "-X main.Version=$TAG"
 

@@ -11,11 +11,13 @@ import (
 	_ "image/jpeg"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -581,6 +583,36 @@ func (m *CCTVManager) probeDVRProtocol(dvr DVRConfig) string {
 	// 3. Fallback to generic RTSP profile if port is alive but HTTP APIs fail
 	log.Printf("[cctv] Probe fallback to RTSP for %s:%d", dvr.Addr, dvr.Port)
 	return "rtsp"
+}
+
+// ProbeReachable reports whether the DVR HTTP/RTSP ports are reachable from this machine (LAN).
+func (m *CCTVManager) ProbeReachable(addr string, port int, username, password string) bool {
+	addr = strings.TrimSpace(addr)
+	if addr == "" || port <= 0 {
+		return false
+	}
+	dvr := DVRConfig{Addr: addr, Port: port, Username: username, Password: password}
+	switch m.probeDVRProtocol(dvr) {
+	case "isapi", "dahua":
+		return true
+	default:
+		if probeTCPPort(addr, port) {
+			return true
+		}
+		if port != 554 {
+			return probeTCPPort(addr, 554)
+		}
+		return false
+	}
+}
+
+func probeTCPPort(addr string, port int) bool {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(addr, strconv.Itoa(port)), 1500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 // --- Dahua CGI Support ---

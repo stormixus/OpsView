@@ -442,11 +442,8 @@ func setupSurvH265(c *gortsplib.Client, desc *description.Session, medi *descrip
 
 // --- Helpers ---
 
-// resolveSurvHost picks the RTSP reachability host: public ext_addr when set, else LAN addr.
+// resolveSurvHost is the LAN address Relay uses to pull RTSP. ext_addr is for viewer HLS only.
 func resolveSurvHost(dvr proto.DVRInfo) string {
-	if addr := strings.TrimSpace(dvr.ExtAddr); addr != "" {
-		return addr
-	}
 	return dvr.Addr
 }
 

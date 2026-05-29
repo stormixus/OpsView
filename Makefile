@@ -21,7 +21,8 @@ relay-windows:
 	cd relay && GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -H windowsgui" -o ../build/opsview-relay.exe .
 
 viewer:
-	cd viewer && wails build
+	./scripts/generate_icons.sh
+	cd viewer && mkdir -p build && cp appicon.png build/appicon.png && wails build
 
 docker:
 	cd relay && docker compose build
