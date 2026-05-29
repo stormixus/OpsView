@@ -100,16 +100,17 @@
       background: #020408; 
       overflow-y: auto; /* 세로 스크롤 가능하게 복원 */
       align-content: start; /* 상단 정렬하여 비율 유지 */
+      align-items: flex-start; /* 셀 수직 늘어남 방지 및 aspect-ratio 강제 */
       width: 100%;
     }
     .cctv-grid.grid-2 .cctv-cell {
-      width: calc(50% - 1px);
+      width: calc(50% - 1.01px);
     }
     .cctv-grid.grid-3 .cctv-cell {
-      width: calc(33.3333% - 1.3333px);
+      width: calc(33.333% - 1.34px);
     }
     .cctv-grid.grid-4 .cctv-cell {
-      width: calc(25% - 1.5px);
+      width: calc(25% - 1.51px);
     }
 
     /* === CCTV Cell === */
@@ -220,7 +221,7 @@
     .mixed-overflow-row .cctv-cell img,
     .mixed-overflow-row .cctv-cell video { width: 100%; height: 100%; object-fit: contain; }
     .mixed-cctv-grid, .cctv-grid { position: relative; }
-    .mixed-cctv-grid { flex: 1; min-height: 0; display: flex; flex-wrap: wrap; gap: 3px; padding: 3px; background: #020408; overflow-y: auto; align-content: start; width: 100%; }
+    .mixed-cctv-grid { flex: 1; min-height: 0; display: flex; flex-wrap: wrap; gap: 3px; padding: 3px; background: #020408; overflow-y: auto; align-content: start; align-items: flex-start; width: 100%; }
     .mixed-cctv-grid.cols-3 .cctv-cell { width: calc(33.3333% - 2px); }
     .mixed-cctv-grid.cols-4 .cctv-cell { width: calc(25% - 2.25px); }
     .mixed-cctv-grid .cctv-cell { cursor: default; border-radius: 6px; flex-shrink: 0; flex-grow: 0; }
@@ -286,7 +287,6 @@
       .tab { padding-left: 12px !important; padding-right: 12px !important; }
       .tab-status-area { gap: 8px !important; padding-right: 8px !important; }
       .dvr-form { padding: 8px 10px !important; }
-      .cctv-grid { gap: 6px; padding: 6px; }
     }
   </style>
 </head>
