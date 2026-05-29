@@ -122,25 +122,39 @@
     
     .cctv-cell .ch-label {
       position: absolute; bottom: 0; left: 0; right: 0;
-      background: linear-gradient(to top, rgba(3, 6, 12, 0.9) 0%, rgba(3, 6, 12, 0.4) 60%, transparent 100%);
-      backdrop-filter: blur(4px);
-      -webkit-backdrop-filter: blur(4px);
-      padding: 18px 12px 6px; font-size: 11px;
+      /* 배경 그라데이션 및 블러를 완전히 투명하게 걷어내어 하단 영상 시야 확보 */
+      background: transparent;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      padding: 6px 10px; font-size: 11px;
       display: flex; align-items: center; justify-content: space-between;
-      border-top: 1px solid rgba(255, 255, 255, 0.03);
+      border-top: none;
+      pointer-events: none; /* 마우스 이벤트가 영상 조작을 방해하지 않도록 */
+    }
+    .cctv-cell .ch-label * {
+      pointer-events: auto; /* 내부 인풋창 등은 조작 가능하게 */
     }
     .cctv-cell .ch-name { 
-      border: none; background: transparent; font-size: 11px; color: #e2e8f0; 
-      width: 100%; outline: none; cursor: text; font-family: inherit; font-weight: 500;
+      border: none; background: transparent; font-size: 11px; color: #ffffff; 
+      width: 100%; outline: none; cursor: text; font-family: inherit; font-weight: 600;
+      /* 텍스트 그림자를 주어 어떤 영상 배경에서도 100% 가독성을 지키면서 시야 방해 제로 실현 */
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 2px 8px rgba(0, 0, 0, 0.95);
       transition: all 0.2s;
     }
     .cctv-cell .ch-name:focus { 
-      background: rgba(255, 255, 255, 0.08); 
+      background: rgba(0, 0, 0, 0.6); 
       border-radius: 4px; padding: 1px 6px; 
-      box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.3);
+      box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.4);
     }
-    .cctv-cell .ch-id { color: #64748b; font-size: 10px; margin-left: 6px; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-    .cctv-cell .ch-res { color: #475569; font-size: 9px; margin-left: 4px; }
+    .cctv-cell .ch-id { 
+      color: #e2e8f0; font-size: 10px; margin-left: 6px; white-space: nowrap; 
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
+    }
+    .cctv-cell .ch-res { 
+      color: #cbd5e1; font-size: 9px; margin-left: 4px;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
+    }
     .cctv-cell.cell-shrink { transform: scale(0.3); opacity: 0; pointer-events: none; }
 
     /* === Sortable states === */
