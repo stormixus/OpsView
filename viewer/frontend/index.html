@@ -312,6 +312,46 @@
       <div class="px-5 py-3 border-t border-white/[0.06] text-center">
         <span class="text-[10px] text-gray-600 font-mono" id="settingsVersion"></span>
       </div>
+  </div>
+
+  <!-- === Auto Update Toast === -->
+  <div id="updateToast" class="fixed left-5 bottom-5 z-[300] w-[340px] bg-[#0c0f16]/95 border border-white/10 rounded-xl shadow-2xl p-4 transition-all duration-300 transform translate-y-[120%] opacity-0 pointer-events-none flex flex-col gap-3" style="backdrop-filter: blur(12px);">
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <div class="w-2 h-2 bg-cyan-500 rounded-full animate-pulse"></div>
+        <span class="text-[12px] font-semibold text-gray-200" id="toastTitle">새 업데이트 발견</span>
+      </div>
+      <button onclick="dismissUpdateToast()" class="text-gray-500 hover:text-gray-200 transition-colors">
+        <i data-lucide="x" class="w-3.5 h-3.5"></i>
+      </button>
+    </div>
+    
+    <!-- Content -->
+    <div class="space-y-1">
+      <p class="text-[12px] text-gray-300 leading-normal" id="toastMsg">최신 버전을 사용할 수 있습니다.</p>
+      <p class="text-[10px] text-gray-500 font-mono" id="toastVerInfo"></p>
+    </div>
+
+    <!-- Progress (Hidden by default) -->
+    <div id="toastProgressArea" style="display:none" class="space-y-1.5">
+      <div class="flex justify-between items-center text-[10px]">
+        <span class="text-gray-400" id="toastProgressStatus">다운로드 중...</span>
+        <span class="text-cyan-400 font-semibold" id="toastProgressPercent">0%</span>
+      </div>
+      <div class="w-full bg-white/[0.05] h-1 rounded-full overflow-hidden border border-white/[0.03]">
+        <div id="toastProgressBar" class="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-100" style="width: 0%"></div>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div id="toastActionArea" class="flex gap-2">
+      <button onclick="dismissUpdateToast()" class="flex-1 px-3 py-1.5 border border-white/10 hover:bg-white/[0.05] text-gray-400 hover:text-gray-200 text-[11px] font-medium rounded-lg transition-colors">
+        나중에
+      </button>
+      <button onclick="startToastUpdate()" class="flex-1 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-medium rounded-lg shadow-lg shadow-cyan-500/20 transition-colors">
+        업데이트 및 설치
+      </button>
     </div>
   </div>
 
@@ -3051,31 +3091,102 @@
           document.getElementById('settingsUpdateStatus').style.display = 'none';
           document.getElementById('settingsUpdateAvailable').style.display = 'block';
           document.getElementById('settingsVersion').textContent = 'v' + info.current_ver;
+          
+          // Show the premium left-bottom auto-update toast
+          showUpdateToast(info);
         } else if (info) {
           document.getElementById('settingsVersion').textContent = 'v' + info.current_ver;
         }
       } catch(e) { console.log('update check:', e); }
     }
 
-    async function doUpdate() {
+    function showUpdateToast(info) {
+      const toast = document.getElementById('updateToast');
+      if (!toast) return;
+      
+      const verInfo = document.getElementById('toastVerInfo');
+      const msgInfo = document.getElementById('toastMsg');
+      
+      let updateMsg = "최신 버전을 사용할 수 있습니다. 지금 업데이트를 진행하시겠습니까?";
+      if (currentLang === 'en') updateMsg = "A new version is available. Would you like to update now?";
+      else if (currentLang === 'ja') updateMsg = "最新バージョンが利用可能です。今すぐアップデートしますか？";
+      else if (currentLang === 'pt') updateMsg = "Uma nova versão está disponível. Deseja atualizar agora?";
+      else if (currentLang === 'es') updateMsg = "Una nueva versión está disponible. ¿Desea actualizar ahora?";
+      
+      if (msgInfo) msgInfo.textContent = updateMsg;
+      if (verInfo) verInfo.textContent = `v${info.current_ver} ➔ v${info.latest_ver}`;
+      
+      // Reset Toast States
+      document.getElementById('toastActionArea').style.display = 'flex';
+      document.getElementById('toastProgressArea').style.display = 'none';
+      document.getElementById('toastProgressBar').style.width = '0%';
+      document.getElementById('toastProgressPercent').textContent = '0%';
+      
+      // Slide-in Animation
+      toast.style.transform = 'translateY(0)';
+      toast.style.opacity = '1';
+      toast.style.pointerEvents = 'auto';
+      
+      lucide.createIcons();
+    }
+
+    function dismissUpdateToast() {
+      const toast = document.getElementById('updateToast');
+      if (!toast) return;
+      toast.style.transform = 'translateY(120%)';
+      toast.style.opacity = '0';
+      toast.style.pointerEvents = 'none';
+    }
+
+    async function startToastUpdate() {
       if (!pendingUpdate || !UPD()) return;
-      const btn = document.getElementById('settingsUpdateBtn');
-      const prog = document.getElementById('settingsUpdateProgress');
-      btn.style.display = 'none';
-      prog.style.display = 'block';
-      prog.textContent = t('downloading');
+      
+      document.getElementById('toastActionArea').style.display = 'none';
+      document.getElementById('toastProgressArea').style.display = 'block';
+      
+      const statusText = document.getElementById('toastProgressStatus');
+      statusText.textContent = currentLang === 'ko' ? '다운로드 중...' : 'Downloading...';
+      statusText.style.color = '';
+      
       try {
         const msg = await UPD().DownloadAndInstall(pendingUpdate.download_url);
-        prog.textContent = msg || t('done');
+        // Will close app on Windows/Mac, but if returns
+        statusText.textContent = msg || (currentLang === 'ko' ? '완료!' : 'Done!');
       } catch(e) {
-        prog.textContent = t('error') + ': ' + e;
-        prog.style.color = '#ef4444';
-        btn.style.display = 'block';
+        statusText.textContent = (currentLang === 'ko' ? '오류: ' : 'Error: ') + e;
+        statusText.style.color = '#ef4444';
+        document.getElementById('toastActionArea').style.display = 'flex';
       }
+    }
+
+    async function doUpdate() {
+      if (!pendingUpdate || !UPD()) return;
+      closeSettings();
+      showUpdateToast(pendingUpdate);
+      startToastUpdate();
+    }
+
+    // Bind real-time progress update event from Wails
+    if (window.runtime) {
+      window.runtime.EventsOn("update-download-progress", (percent) => {
+        const rounded = Math.round(percent);
+        const bar = document.getElementById('toastProgressBar');
+        const percentText = document.getElementById('toastProgressPercent');
+        const statusText = document.getElementById('toastProgressStatus');
+        
+        if (bar) bar.style.width = rounded + '%';
+        if (percentText) percentText.textContent = rounded + '%';
+        
+        if (rounded >= 100 && statusText) {
+          statusText.textContent = currentLang === 'ko' ? '설치 및 종료 중...' : 'Installing and relaunching...';
+        }
+      });
     }
 
     // Check for updates 3s after launch
     setTimeout(checkUpdate, 3000);
+    // Periodically auto-detect update every 30 minutes
+    setInterval(checkUpdate, 30 * 60 * 1000);
 
     // Apply i18n on load
     applyI18n();

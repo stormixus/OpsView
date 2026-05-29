@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // Version is set at build time via ldflags.
@@ -110,6 +112,11 @@ func (u *Updater) DownloadAndInstall(downloadURL string) (string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("bad status: %s", resp.Status)
+	}
+
+	totalSize := resp.ContentLength
 	fileName := filepath.Base(downloadURL)
 	tmpPath := filepath.Join(os.TempDir(), fileName)
 
@@ -117,9 +124,32 @@ func (u *Updater) DownloadAndInstall(downloadURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		f.Close()
-		return "", err
+
+	// Use custom buffer copy to report progress
+	buf := make([]byte, 32*1024)
+	var downloaded int64
+
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			_, writeErr := f.Write(buf[:n])
+			if writeErr != nil {
+				f.Close()
+				return "", writeErr
+			}
+			downloaded += int64(n)
+			if totalSize > 0 {
+				percent := float64(downloaded) / float64(totalSize) * 100
+				wruntime.EventsEmit(u.ctx, "update-download-progress", percent)
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			f.Close()
+			return "", readErr
+		}
 	}
 	f.Close()
 
