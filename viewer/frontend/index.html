@@ -91,14 +91,27 @@
 
     /* === CCTV Grid columns (JS toggles .grid-2/3/4) === */
     .cctv-grid { 
-      flex: 1; display: flex; flex-wrap: wrap; 
+      flex: 1; 
+      display: grid; /* flex에서 grid 아키텍처로 리팩토링 */
       gap: 2px; /* 사이 간격을 2px로 극도로 얇게 줄임 */
       padding: 2px; /* 바깥 여백도 2px로 최소화하여 영상 낭비 방지 */
-      background: #020408; overflow-y: auto; align-content: start; 
+      background: #020408; 
+      overflow: hidden; /* 여백이나 스크롤바 생성 원천 차단 */
+      width: 100%;
+      height: 100%; /* 부모 레이아웃의 사용 가능한 세로 높이를 100% 꽉 채우도록 보장 */
     }
-    .cctv-grid.grid-2 .cctv-cell { width: calc(50% - 1px); }
-    .cctv-grid.grid-3 .cctv-cell { width: calc(33.333% - 1.333px); }
-    .cctv-grid.grid-4 .cctv-cell { width: calc(25% - 1.5px); }
+    .cctv-grid.grid-2 {
+      grid-template-columns: repeat(2, 1fr);
+      grid-auto-rows: 1fr; /* 생성되는 모든 행이 남은 높이를 균등하게 분배받아 하단 빈 공간 100% 소멸 */
+    }
+    .cctv-grid.grid-3 {
+      grid-template-columns: repeat(3, 1fr);
+      grid-auto-rows: 1fr;
+    }
+    .cctv-grid.grid-4 {
+      grid-template-columns: repeat(4, 1fr);
+      grid-auto-rows: 1fr;
+    }
 
     /* === CCTV Cell === */
     .cctv-cell {
@@ -108,7 +121,8 @@
       border-radius: 4px; /* 붙었을 때 빈틈이 생겨 보기 흉해지지 않도록 곡률을 4px로 최적화 */
       overflow: hidden; 
       cursor: grab;
-      aspect-ratio: 16 / 9; /* 가로세로 비율을 실제 영상 원본(16:9)과 완벽히 일치시켜 양옆 검은 여백을 100% 제거 */
+      width: 100%;
+      height: 100%; /* 그리드가 배정한 등분 너비/높이 영역을 빈틈없이 100% 꽉 채움 */
       transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     }
     .cctv-cell:hover { 
@@ -118,7 +132,13 @@
       transform: scale(1.008); /* 꽉 찬 화면에서 호버 시 살짝 확대되어 가독성 극대화 */
     }
     .cctv-cell:active { cursor: grabbing; }
-    .cctv-cell img, .cctv-cell video { width: 100%; height: 100%; object-fit: cover; background: #000; display: block; }
+    .cctv-cell img, .cctv-cell video { 
+      width: 100%; 
+      height: 100%; 
+      object-fit: cover; /* 대다수의 보편적 비율에 맞추되, 다른 화면 비율(예: 4:3)의 카메라도 찌그러짐이나 검은 여백 없이 꽉 찬 비율로 채움 */
+      background: #000; 
+      display: block; 
+    }
     
     .cctv-cell .ch-label {
       position: absolute; bottom: 0; left: 0; right: 0;
