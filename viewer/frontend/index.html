@@ -108,6 +108,7 @@
       border-radius: 4px; /* 붙었을 때 빈틈이 생겨 보기 흉해지지 않도록 곡률을 4px로 최적화 */
       overflow: hidden; 
       cursor: grab;
+      aspect-ratio: 16 / 9; /* 가로세로 비율을 실제 영상 원본(16:9)과 완벽히 일치시켜 양옆 검은 여백을 100% 제거 */
       transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     }
     .cctv-cell:hover { 
