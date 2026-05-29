@@ -185,14 +185,13 @@
     .sortable-drag { opacity: 1; transform: scale(1.03); border-color: #22d3ee; box-shadow: 0 16px 40px rgba(34, 211, 238, 0.35); z-index: 100; transition: none !important; }
     .sortable-fallback { opacity: 0.95; transform: scale(1.03); border-color: #67e8f9; box-shadow: 0 20px 48px rgba(34, 211, 238, 0.4); border-radius: 12px; transition: none !important; }
 
-    /* === Expand overlay === */
     .cctv-expand-overlay {
-      position: absolute; z-index: 20; background: #000; display: none;
+      position: fixed; z-index: 200; background: #000; display: none;
       align-items: center; justify-content: center; cursor: pointer; overflow: hidden; border-radius: 10px;
       transition: all 0.45s cubic-bezier(0.16, 1, 0.3, 1);
       box-shadow: 0 24px 64px rgba(0, 0, 0, 0.8);
     }
-    .cctv-expand-overlay.active { left: 0!important; top: 0!important; width: 100%!important; height: 100%!important; border-radius: 0; }
+    .cctv-expand-overlay.active { left: 0!important; top: 0!important; width: 100vw!important; height: 100vh!important; border-radius: 0; }
     .cctv-expand-overlay img, .cctv-expand-overlay video { width: 100%; height: 100%; object-fit: contain; }
     .cctv-expand-overlay .expand-label {
       position: absolute; bottom: 0; left: 0; right: 0;
@@ -2135,12 +2134,11 @@
         grid.appendChild(overlay);
       }
 
-      // Position overlay exactly at the cell's current position
-      const gridRect = grid.getBoundingClientRect();
+      // Position overlay exactly at the cell's current window viewport coordinates (since it's fixed now)
       const cellRect = cellEl.getBoundingClientRect();
       overlay.style.transition = 'none';
-      overlay.style.left = (cellRect.left - gridRect.left) + 'px';
-      overlay.style.top = (cellRect.top - gridRect.top + grid.scrollTop) + 'px';
+      overlay.style.left = cellRect.left + 'px';
+      overlay.style.top = cellRect.top + 'px';
       overlay.style.width = cellRect.width + 'px';
       overlay.style.height = cellRect.height + 'px';
       overlay.style.display = 'flex';
@@ -2217,12 +2215,11 @@
         return;
       }
 
-      // Animate back to cell position
-      const gridRect = grid.getBoundingClientRect();
+      // Animate back to cell position using viewport absolute metrics
       const cellRect = cellEl.getBoundingClientRect();
       overlay.classList.remove('active');
-      overlay.style.left = (cellRect.left - gridRect.left) + 'px';
-      overlay.style.top = (cellRect.top - gridRect.top + grid.scrollTop) + 'px';
+      overlay.style.left = cellRect.left + 'px';
+      overlay.style.top = cellRect.top + 'px';
       overlay.style.width = cellRect.width + 'px';
       overlay.style.height = cellRect.height + 'px';
 
