@@ -92,6 +92,7 @@
     /* === CCTV Grid columns (JS toggles .grid-2/3/4) === */
     .cctv-grid { 
       flex: 1; 
+      min-height: 0; /* flex 컨테이너 내부에서 스크롤이 정상적으로 동작하도록 크기 축소 허용 */
       display: grid; /* flex에서 grid 아키텍처로 리팩토링 */
       gap: 2px; /* 사이 간격을 2px로 극도로 얇게 줄임 */
       padding: 2px; /* 바깥 여백도 2px로 최소화하여 영상 낭비 방지 */
@@ -99,7 +100,6 @@
       overflow-y: auto; /* 세로 스크롤 가능하게 복원 */
       align-content: start; /* 상단 정렬하여 비율 유지 */
       width: 100%;
-      height: 100%; /* 부모 레이아웃의 사용 가능한 세로 높이를 100% 꽉 채우도록 보장 */
     }
     .cctv-grid.grid-2 {
       grid-template-columns: repeat(2, 1fr);
@@ -218,7 +218,7 @@
     .mixed-overflow-row .cctv-cell img,
     .mixed-overflow-row .cctv-cell video { width: 100%; height: 100%; object-fit: contain; }
     .mixed-cctv-grid, .cctv-grid { position: relative; }
-    .mixed-cctv-grid { flex: 1; display: grid; gap: 3px; padding: 3px; background: #020408; overflow-y: auto; align-content: start; width: 100%; }
+    .mixed-cctv-grid { flex: 1; min-height: 0; display: grid; gap: 3px; padding: 3px; background: #020408; overflow-y: auto; align-content: start; width: 100%; }
     .mixed-cctv-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
     .mixed-cctv-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
     .mixed-cctv-grid .cctv-cell { cursor: default; border-radius: 6px; }
