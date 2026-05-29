@@ -1,22 +1,49 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- Light Mode — same geometry as icon-dark.svg -->
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="OpsView">
   <defs>
-    <linearGradient id="bg" x1="128" y1="96" x2="896" y2="928" gradientUnits="userSpaceOnUse">
+    <linearGradient id="bgBase" x1="512" y1="48" x2="512" y2="1024" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#e8eef6"/>
+      <stop offset="0.5" stop-color="#eef2f8"/>
+      <stop offset="1" stop-color="#c8d4e4"/>
     </linearGradient>
-    <linearGradient id="accent" x1="320" y1="300" x2="704" y2="720" gradientUnits="userSpaceOnUse">
+    <radialGradient id="bgShade" cx="512" cy="900" r="560" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8fa3bc" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#b8c6d8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="topSheen" x1="512" y1="0" x2="512" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="340" y1="300" x2="684" y2="700" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0c8aa8"/>
+      <stop offset="0.5" stop-color="#0e7490"/>
+      <stop offset="1" stop-color="#155e75"/>
+    </linearGradient>
+    <linearGradient id="accentFill" x1="512" y1="470" x2="512" y2="560" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#0891b2"/>
-      <stop offset="1" stop-color="#06b6d4"/>
+      <stop offset="1" stop-color="#0e7490"/>
     </linearGradient>
+    <filter id="markShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="16" stdDeviation="14" flood-color="#1e3a5f" flood-opacity="0.32"/>
+      <feDropShadow dx="0" dy="6" stdDeviation="5" flood-color="#0f172a" flood-opacity="0.18"/>
+    </filter>
+    <filter id="innerDepth" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="-3" stdDeviation="2" flood-color="#ffffff" flood-opacity="0.7"/>
+    </filter>
   </defs>
-  <rect width="1024" height="1024" rx="228" fill="url(#bg)"/>
-  <g fill="none" stroke="url(#accent)" stroke-linecap="round" stroke-linejoin="round">
-    <path stroke-width="52" d="M292 372V292h80"/>
-    <path stroke-width="52" d="M732 372V292h-80"/>
-    <path stroke-width="52" d="M292 652v80h80"/>
-    <path stroke-width="52" d="M732 652v80h-80"/>
-    <rect x="312" y="392" width="400" height="240" rx="32" stroke-width="36"/>
+  <rect width="1024" height="1024" fill="url(#bgBase)"/>
+  <rect width="1024" height="1024" fill="url(#bgShade)"/>
+  <rect width="1024" height="1024" fill="url(#topSheen)"/>
+  <g filter="url(#markShadow)">
+    <g fill="none" stroke="url(#accent)" stroke-linecap="round" stroke-linejoin="round" filter="url(#innerDepth)">
+      <path stroke-width="54" d="M288 376V288h88"/>
+      <path stroke-width="54" d="M736 376V288h-88"/>
+      <path stroke-width="54" d="M288 648v88h88"/>
+      <path stroke-width="54" d="M736 648v88h-88"/>
+      <rect x="308" y="396" width="408" height="248" rx="34" stroke-width="38"/>
+    </g>
+    <circle cx="512" cy="520" r="40" fill="url(#accentFill)"/>
+    <circle cx="512" cy="516" r="13" fill="#e0f2fe" opacity="0.75"/>
   </g>
-  <circle cx="512" cy="512" r="36" fill="#0891b2"/>
 </svg>

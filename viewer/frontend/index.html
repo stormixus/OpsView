@@ -1100,7 +1100,7 @@
     let channelConnecting = new Set();
     let channelPeerConns = [];
     let mixedPeerConns = [];
-    const MIXED_MISSING_RETRY_MS = [3500, 9000];
+    const MIXED_MISSING_RETRY_MS = [6000, 15000];
     let mixedRetryTimers = [];
 
     function cleanupChannelPCs() {
@@ -1110,22 +1110,161 @@
     function cleanupMixedPCs() {
       mixedPeerConns.forEach(pc => { try { pc.close(); } catch(e) {} });
       mixedPeerConns = [];
+      clearMixedRetryTimers();
     }
     let remoteHlsInstances = [];
     function cleanupRemoteHLS() {
       remoteHlsInstances.forEach(h => { try { h.destroy(); } catch(e) {} });
       remoteHlsInstances = [];
     }
-    function cleanupAllStreams() {
+    function cleanupAllStreams(stopBackend) {
       cleanupChannelPCs();
       cleanupMixedPCs();
       cleanupRemoteHLS();
       channelStreams = {};
       channelConnecting = new Set();
+      if (stopBackend && CM() && activeDvrId) {
+        CM().StopDVRStreams(activeDvrId).catch(() => {});
+      }
     }
     function clearMixedRetryTimers() {
       mixedRetryTimers.forEach(t => clearTimeout(t));
       mixedRetryTimers = [];
+    }
+
+    function streamKey(dvrID, chNum) {
+      return dvrID + '_' + chNum;
+    }
+
+    function streamTracksLive(stream) {
+      if (!stream) return false;
+      const tracks = stream.getTracks();
+      return tracks.length > 0 && tracks.some(t => t.readyState === 'live');
+    }
+
+    function hasLiveChannelStream(key) {
+      const cs = channelStreams[key];
+      if (!cs || !cs.stream) return false;
+      return streamTracksLive(cs.stream);
+    }
+
+    function cctvVideoHasLiveStream(chNum) {
+      const cctvVideo = document.getElementById('cctv-video-' + chNum);
+      return !!(cctvVideo && streamTracksLive(cctvVideo.srcObject));
+    }
+
+    function clearStaleChannelStream(key) {
+      const cs = channelStreams[key];
+      if (!cs) return;
+      if (streamTracksLive(cs.stream)) return;
+      if (cs.pc) { try { cs.pc.close(); } catch(e) {} }
+      delete channelStreams[key];
+    }
+
+    function isMixedVideoEl(video) {
+      return !!(video && video.id && String(video.id).startsWith('mixed-video-'));
+    }
+
+    /** Prefer CCTV tab's live WebRTC stream — never open a second RTSP session for mixed. */
+    function borrowCctvStreamForMixed(dvrID, chNum, video) {
+      if (!video) return false;
+      const key = streamKey(dvrID, chNum);
+      const cell = video.parentElement;
+      if (hasLiveChannelStream(key)) return bindStreamToVideo(key, video, cell);
+      const cctvVideo = document.getElementById('cctv-video-' + chNum);
+      if (!cctvVideo || !streamTracksLive(cctvVideo.srcObject)) return false;
+      if (!channelStreams[key] || !streamTracksLive(channelStreams[key].stream)) {
+        channelStreams[key] = { pc: cctvVideo._pc || channelStreams[key]?.pc, stream: cctvVideo.srcObject };
+      }
+      return bindStreamToVideo(key, video, cell);
+    }
+
+    function bindStreamToVideo(key, video, cell) {
+      const cs = channelStreams[key];
+      if (!cs || !cs.stream || !video) return false;
+      video.srcObject = cs.stream;
+      video.style.display = '';
+      video.play().catch(() => {});
+      const staleStatus = cell && cell.querySelector('.ch-status');
+      if (staleStatus) staleStatus.remove();
+      return true;
+    }
+
+    function isSnapshotCctvCell(cell) {
+      return !!(cell && !cell.querySelector('video') && cell.querySelector('img'));
+    }
+
+    async function waitForChannelStream(dvrID, chNum, video, maxWaitMs) {
+      const key = streamKey(dvrID, chNum);
+      const cell = video.parentElement;
+      const deadline = Date.now() + (maxWaitMs || 45000);
+      while (Date.now() < deadline) {
+        if (hasLiveChannelStream(key)) {
+          bindStreamToVideo(key, video, cell);
+          return true;
+        }
+        if (!channelConnecting.has(key)) return false;
+        await new Promise(r => setTimeout(r, 250));
+      }
+      return hasLiveChannelStream(key) && bindStreamToVideo(key, video, cell);
+    }
+
+    function bindAllPanelVideos(dvrID, getVideo) {
+      cctvChannels.filter(ch => ch.enabled).forEach(ch => {
+        const video = getVideo(ch.ch_num);
+        if (!video) return;
+        const key = streamKey(dvrID, ch.ch_num);
+        if (hasLiveChannelStream(key)) bindStreamToVideo(key, video, video.parentElement);
+      });
+    }
+
+    function playMixedCctvVideos() {
+      document.querySelectorAll('#panel-mixed video').forEach(v => {
+        if (v.srcObject || v.src) v.play().catch(() => {});
+      });
+    }
+
+    function refreshMixedCctvPlayback() {
+      if (!activeDvrId || !CM()) return;
+      const dvr = dvrs.find(d => d.id === activeDvrId);
+      if (!dvr) return;
+      if (shouldUseRelayHLS(dvr)) {
+        playMixedCctvVideos();
+        return;
+      }
+      if (dvr.protocol !== 'rtsp') return;
+      const enabled = cctvChannels.filter(ch => ch.enabled);
+      attachMixedFromCctv(activeDvrId, enabled);
+      playMixedCctvVideos();
+    }
+
+    function attachMixedFromCctv(dvrID, channels) {
+      channels.forEach(ch => {
+        const video = document.getElementById('mixed-video-' + ch.ch_num);
+        if (!video) return;
+        if (isSnapshotCctvCell(video.parentElement)) return;
+        borrowCctvStreamForMixed(dvrID, ch.ch_num, video);
+      });
+      scheduleMixedMissingRetry(dvrID, channels);
+    }
+
+    function channelsNeedingRTSP(dvrID, channels, getVideo) {
+      return channels.filter(ch => {
+        const video = getVideo(ch.ch_num);
+        if (!video) return false;
+        const cell = video.parentElement;
+        if (isSnapshotCctvCell(cell)) return false;
+        if (isMixedVideoEl(video)) {
+          if (borrowCctvStreamForMixed(dvrID, ch.ch_num, video)) return false;
+          return !cctvVideoHasLiveStream(ch.ch_num);
+        }
+        const key = streamKey(dvrID, ch.ch_num);
+        if (hasLiveChannelStream(key)) {
+          bindStreamToVideo(key, video, cell);
+          return false;
+        }
+        return true;
+      });
     }
 
     const MAX_RETRIES = 6;
@@ -1163,23 +1302,32 @@
     }
 
     async function startRTSPChannel(dvrID, chNum, video, instanceArr) {
-      const key = dvrID + '_' + chNum;
+      const key = streamKey(dvrID, chNum);
       const cell = video.parentElement;
 
-      // Reuse existing stream if already alive.
-      if (channelStreams[key] && channelStreams[key].stream) {
-        const tracks = channelStreams[key].stream.getTracks();
-        const alive = tracks.length > 0 && tracks.every(t => t.readyState === 'live');
-        if (alive) {
-          video.srcObject = channelStreams[key].stream;
-          video.play().catch(() => {});
-          const staleStatus = cell.querySelector('.ch-status');
-          if (staleStatus) staleStatus.remove();
+      // Mixed panel: only mirror CCTV — never start a competing RTSP/WebRTC session.
+      if (isMixedVideoEl(video)) {
+        if (borrowCctvStreamForMixed(dvrID, chNum, video)) return;
+        if (cctvVideoHasLiveStream(chNum)) {
+          borrowCctvStreamForMixed(dvrID, chNum, video);
           return;
         }
+        if (channelConnecting.has(key)) {
+          await waitForChannelStream(dvrID, chNum, video, 60000);
+          if (borrowCctvStreamForMixed(dvrID, chNum, video)) return;
+        }
+        return;
       }
 
-      // Another panel is connecting this channel right now.
+      clearStaleChannelStream(key);
+
+      // Reuse existing stream if already alive.
+      if (hasLiveChannelStream(key)) {
+        bindStreamToVideo(key, video, cell);
+        return;
+      }
+
+      // Another panel is connecting — brief wait to attach; then take over if stuck.
       if (channelConnecting.has(key)) {
         let waitStatus = cell.querySelector('.ch-status');
         if (!waitStatus) {
@@ -1189,7 +1337,10 @@
           cell.appendChild(waitStatus);
         }
         waitStatus.textContent = 'CH' + chNum + ' ' + t('chConnWait');
-        return;
+        const attached = await waitForChannelStream(dvrID, chNum, video, 4000);
+        if (attached) return;
+        clearStaleChannelStream(key);
+        channelConnecting.delete(key);
       }
 
       channelConnecting.add(key);
@@ -1236,6 +1387,14 @@
               video.srcObject = stream;
               video.style.display = '';
               video.play().catch(() => {});
+              const mixedVideo = document.getElementById('mixed-video-' + chNum);
+              if (mixedVideo && mixedVideo !== video) {
+                mixedVideo.srcObject = stream;
+                mixedVideo.play().catch(() => {});
+                const mixedCell = mixedVideo.parentElement;
+                const mixedStatus = mixedCell && mixedCell.querySelector('.ch-status');
+                if (mixedStatus) mixedStatus.remove();
+              }
               if (statusEl && statusEl.parentElement) statusEl.remove();
             };
 
@@ -1256,7 +1415,13 @@
                   setTimeout(() => attempt(), 2000);
                 } else {
                   console.log('[cctv] ch' + chNum + ': all retries exhausted, switching to snapshot');
-                  switchToSnapshot(dvrID, chNum, cell);
+                  if (isMixedVideoEl(video)) {
+                    if (!borrowCctvStreamForMixed(dvrID, chNum, video)) {
+                      switchToSnapshot(dvrID, chNum, cell);
+                    }
+                  } else {
+                    switchToSnapshot(dvrID, chNum, cell);
+                  }
                 }
               }
             };
@@ -1285,7 +1450,13 @@
               return attempt();
             } else {
               console.log('[cctv] ch' + chNum + ': all retries exhausted, switching to snapshot');
-              switchToSnapshot(dvrID, chNum, cell);
+              if (isMixedVideoEl(video)) {
+                if (!borrowCctvStreamForMixed(dvrID, chNum, video)) {
+                  switchToSnapshot(dvrID, chNum, cell);
+                }
+              } else {
+                switchToSnapshot(dvrID, chNum, cell);
+              }
             }
           }
         }
@@ -1298,6 +1469,26 @@
 
     // Switch a failed WebRTC channel to ISAPI-style snapshot polling
     function switchToSnapshot(dvrID, chNum, cell) {
+      if (cell && cell.closest('#panel-mixed')) {
+        const mixedVideo = document.getElementById('mixed-video-' + chNum);
+        if (mixedVideo && borrowCctvStreamForMixed(dvrID, chNum, mixedVideo)) return;
+        if (mixedVideo) {
+          let statusEl = cell.querySelector('.ch-status');
+          if (!statusEl) {
+            statusEl = document.createElement('div');
+            statusEl.className = 'ch-status';
+            statusEl.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:11px;text-align:center;padding:8px;pointer-events:none;z-index:1;';
+            cell.appendChild(statusEl);
+          }
+          statusEl.textContent = 'CH' + chNum + ' ' + t('chConnWait');
+          setTimeout(() => {
+            if (activeDvrId !== dvrID) return;
+            if (borrowCctvStreamForMixed(dvrID, chNum, mixedVideo)) return;
+            attachMixedFromCctv(dvrID, cctvChannels.filter(ch => ch.enabled));
+          }, 2000);
+        }
+        return;
+      }
       // Remove video and status
       const video = cell.querySelector('video');
       if (video) video.remove();
@@ -1444,8 +1635,7 @@
         if (prevDvr && shouldUseRelayHLS(prevDvr)) {
           cleanupRemoteHLS();
         } else if (prevDvr && prevDvr.protocol === 'rtsp' && CM()) {
-          cleanupAllStreams();
-          CM().StopDVRStreams(activeDvrId).catch(() => {});
+          cleanupAllStreams(true);
         }
       }
       activeDvrId = id;
@@ -1949,7 +2139,7 @@
       cctvTimers.forEach(t => clearInterval(t));
       cctvTimers = [];
       collapseCell(true);
-      cleanupAllStreams();
+      cleanupAllStreams(true);
       if (sortableInstance) { sortableInstance.destroy(); sortableInstance = null; }
 
       const enabled = cctvChannels.filter(ch => ch.enabled);
@@ -2229,14 +2419,14 @@
     let dvrTabsSortable = null;
     let mixedCctvTimers = [];
     window._mixedReady = true;
-    function getMissingMixedChannels(channels) {
+    function getMissingMixedChannels(dvrID, channels) {
       return channels.filter(ch => {
         const video = document.getElementById('mixed-video-' + ch.ch_num);
         if (!video) return false;
-        const stream = video.srcObject;
-        const hasLiveTrack = !!(stream && stream.getTracks().some(t => t.readyState === 'live'));
-        const hasStatus = !!video.parentElement.querySelector('.ch-status');
-        return !hasLiveTrack && !hasStatus;
+        const cell = video.parentElement;
+        if (isSnapshotCctvCell(cell)) return true;
+        if (borrowCctvStreamForMixed(dvrID, ch.ch_num, video)) return false;
+        return !cctvVideoHasLiveStream(ch.ch_num);
       });
     }
     function scheduleMixedMissingRetry(dvrID, channels) {
@@ -2244,13 +2434,27 @@
       MIXED_MISSING_RETRY_MS.forEach((delay, idx) => {
         const t = setTimeout(() => {
           if (activeDvrId !== dvrID) return;
-          const missing = getMissingMixedChannels(channels);
-          if (missing.length === 0) return;
-          console.log('[cctv] mixed retry ' + (idx + 1) + ': ' + missing.length + ' channels');
-          startRTSPChannelsStaggered(dvrID, missing,
-            (chNum) => document.getElementById('mixed-video-' + chNum),
-            mixedPeerConns
-          );
+          attachMixedFromCctv(dvrID, channels);
+          const missing = getMissingMixedChannels(dvrID, channels);
+          if (missing.length === 0) {
+            playMixedCctvVideos();
+            return;
+          }
+          console.log('[cctv] mixed retry ' + (idx + 1) + ': snapshot/low ' + missing.length + ' channels');
+          missing.forEach(ch => {
+            const cell = document.querySelector('#panel-mixed .cctv-cell[data-chnum="' + ch.ch_num + '"]');
+            if (cell && isSnapshotCctvCell(cell)) {
+              const video = document.createElement('video');
+              video.autoplay = true;
+              video.muted = true;
+              video.playsInline = true;
+              video.id = 'mixed-video-' + ch.ch_num;
+              cell.querySelector('img')?.remove();
+              cell.insertBefore(video, cell.firstChild);
+              borrowCctvStreamForMixed(dvrID, ch.ch_num, video);
+            }
+          });
+          requestAnimationFrame(() => playMixedCctvVideos());
         }, delay);
         mixedRetryTimers.push(t);
       });
@@ -2336,6 +2540,9 @@
           video.playsInline = true;
           video.id = 'mixed-video-' + ch.ch_num;
           cell.appendChild(video);
+          if (activeDvrId) {
+            borrowCctvStreamForMixed(activeDvrId, ch.ch_num, video);
+          }
         } else {
           const img = document.createElement('img');
           img.alt = ch.name;
@@ -2439,13 +2646,12 @@
         }
       });
 
-      // Start RTSP streams with staggered connections (after grid is built)
+      // Mirror CCTV WebRTC only — do not open parallel RTSP sessions (avoids ch3/4 snapshot fallback)
       if (isRTSP && !useRelayHLS && CM()) {
-        startRTSPChannelsStaggered(dvr.id, enabled,
-          (chNum) => document.getElementById('mixed-video-' + chNum),
-          mixedPeerConns
-        );
-        scheduleMixedMissingRetry(dvr.id, enabled);
+        attachMixedFromCctv(dvr.id, enabled);
+        requestAnimationFrame(() => playMixedCctvVideos());
+      } else if (useRelayHLS) {
+        requestAnimationFrame(() => playMixedCctvVideos());
       }
     }
 
@@ -2639,7 +2845,13 @@
         if (dvr && cctvRenderedDvrId !== activeDvrId) renderCCTVGrid(dvr);
       }
       if (targetPanel === 'mixed' && activeDvrId) {
-        if (mixedRenderedDvrId !== activeDvrId) renderMixedCCTV();
+        const hasMixedVideos = !!document.querySelector('#panel-mixed .cctv-cell video, #panel-mixed .cctv-cell img');
+        if (mixedRenderedDvrId !== activeDvrId || !hasMixedVideos) {
+          renderMixedCCTV();
+        } else {
+          refreshMixedCctvPlayback();
+        }
+        requestAnimationFrame(() => playMixedCctvVideos());
       }
     };
 

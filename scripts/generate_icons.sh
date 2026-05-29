@@ -19,7 +19,8 @@ echo "Generating viewer appicon (appicon.png + build/appicon.png)..."
 "$PY" -c "
 import cairosvg, shutil
 out = '${ROOT}/viewer/appicon.png'
-cairosvg.svg2png(url='${ROOT}/icon-dark-apple.svg', write_to=out, output_width=1024, output_height=1024)
+# Full-bleed PNG (no transparent corners). icon-dark.svg == icon-dark-apple.svg
+cairosvg.svg2png(url='${ROOT}/icon-dark.svg', write_to=out, output_width=1024, output_height=1024)
 shutil.copy(out, '${ROOT}/viewer/build/appicon.png')
 "
 
