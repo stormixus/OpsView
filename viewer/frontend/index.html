@@ -91,31 +91,30 @@
 
     /* === CCTV Grid columns (JS toggles .grid-2/3/4) === */
     .cctv-grid { 
-      flex: 1; display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; 
-      background: rgba(4, 6, 12, 0.95); overflow-y: auto; align-content: start; 
+      flex: 1; display: flex; flex-wrap: wrap; 
+      gap: 2px; /* 사이 간격을 2px로 극도로 얇게 줄임 */
+      padding: 2px; /* 바깥 여백도 2px로 최소화하여 영상 낭비 방지 */
+      background: #020408; overflow-y: auto; align-content: start; 
     }
-    .cctv-grid.grid-2 .cctv-cell { width: calc(50% - 4px); }
-    .cctv-grid.grid-3 .cctv-cell { width: calc(33.333% - 5.333px); }
-    .cctv-grid.grid-4 .cctv-cell { width: calc(25% - 6px); }
+    .cctv-grid.grid-2 .cctv-cell { width: calc(50% - 1px); }
+    .cctv-grid.grid-3 .cctv-cell { width: calc(33.333% - 1.333px); }
+    .cctv-grid.grid-4 .cctv-cell { width: calc(25% - 1.5px); }
 
     /* === CCTV Cell === */
     .cctv-cell {
       position: relative; 
-      background: #070a13; 
-      border: 1px solid rgba(255, 255, 255, 0.04);
-      border-radius: 10px; 
+      background: #000000; 
+      border: 1px solid rgba(255, 255, 255, 0.08); /* 얇고 정교한 경계선 */
+      border-radius: 4px; /* 붙었을 때 빈틈이 생겨 보기 흉해지지 않도록 곡률을 4px로 최적화 */
       overflow: hidden; 
       cursor: grab;
-      box-shadow: 0 4px 16px -4px rgba(0, 0, 0, 0.5);
-      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     }
     .cctv-cell:hover { 
-      border-color: rgba(34, 211, 238, 0.3); 
-      box-shadow: 
-        0 12px 24px -8px rgba(0, 0, 0, 0.7),
-        0 0 0 1px rgba(34, 211, 238, 0.2),
-        0 0 20px -5px rgba(34, 211, 238, 0.15);
-      transform: translateY(-2px);
+      border-color: #22d3ee; 
+      z-index: 10; /* 호버한 셀의 경계선이 다닥다닥 붙은 인접 셀 위로 띄워지도록 */
+      box-shadow: 0 0 12px rgba(34, 211, 238, 0.45);
+      transform: scale(1.008); /* 꽉 찬 화면에서 호버 시 살짝 확대되어 가독성 극대화 */
     }
     .cctv-cell:active { cursor: grabbing; }
     .cctv-cell img, .cctv-cell video { width: 100%; height: 100%; object-fit: cover; background: #000; display: block; }
