@@ -91,9 +91,14 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
 
       - name: Generate app icons
+        shell: bash
         run: |
           python3 -m venv .venv-icons
-          .venv-icons/bin/pip install cairosvg pillow
+          if [ -d ".venv-icons/Scripts" ]; then
+            .venv-icons/Scripts/pip install cairosvg pillow
+          else
+            .venv-icons/bin/pip install cairosvg pillow
+          fi
           ./scripts/generate_icons.sh
 
       - name: Build viewer

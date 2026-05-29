@@ -2,13 +2,19 @@
 # Regenerate raster icons from SVG sources. Requires: python venv at repo root (.venv-icons).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PY="${ROOT}/.venv-icons/bin/python"
-GEN="${ROOT}/generate_ico.py"
 
-if [[ ! -x "$PY" ]]; then
-  echo "Run: python3 -m venv ${ROOT}/.venv-icons && ${ROOT}/.venv-icons/bin/pip install cairosvg pillow"
+if [[ -d "${ROOT}/.venv-icons/Scripts" ]]; then
+  PY="${ROOT}/.venv-icons/Scripts/python.exe"
+else
+  PY="${ROOT}/.venv-icons/bin/python"
+fi
+
+if [[ ! -f "$PY" ]]; then
+  echo "Error: Python executable not found at $PY"
   exit 1
 fi
+
+GEN="${ROOT}/generate_ico.py"
 
 echo "Generating tray.ico (agent + relay)..."
 "$PY" "$GEN" "${ROOT}/icon-dark.svg" "${ROOT}/agent/tray.ico"
