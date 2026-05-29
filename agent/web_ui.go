@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -82,9 +83,23 @@ func openBrowser(url string) {
 	var err error
 	switch runtime.GOOS {
 	case "windows":
-		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+		// Windows에서는 기본 탑재된 Edge의 Chromium App Mode를 사용하여 프레임리스(주소창 없는) 네이티브 앱 창처럼 띄웁니다.
+		err = exec.Command("cmd", "/c", "start", "msedge", "--app="+url).Start()
+		if err != nil {
+			// Edge 실행 실패 시 크롬 시도 후, 최종 폴백으로 기본 브라우저 열기
+			err = exec.Command("cmd", "/c", "start", "chrome", "--app="+url).Start()
+			if err != nil {
+				err = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+			}
+		}
 	case "darwin":
-		err = exec.Command("open", url).Start()
+		// macOS에서는 구글 크롬이 있으면 App Mode로 띄우고, 없으면 기본 브라우저로 엽니다.
+		chromePath := "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+		if _, statErr := os.Stat(chromePath); statErr == nil {
+			err = exec.Command(chromePath, "--app="+url).Start()
+		} else {
+			err = exec.Command("open", url).Start()
+		}
 	default:
 		err = exec.Command("xdg-open", url).Start()
 	}
