@@ -28,10 +28,11 @@
     body {
       user-select: none;
       font-family: 'Pretendard Variable', 'Pretendard', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'SUIT Variable', 'Segoe UI', sans-serif;
-      background:
-        radial-gradient(120% 70% at 10% -10%, rgba(34, 211, 238, 0.1), transparent 50%),
-        radial-gradient(80% 80% at 90% -10%, rgba(99, 102, 241, 0.08), transparent 50%),
-        #050811;
+      background: 
+        radial-gradient(circle at 10% -10%, rgba(34, 211, 238, 0.15) 0%, transparent 60%),
+        radial-gradient(circle at 90% -10%, rgba(99, 102, 241, 0.12) 0%, transparent 60%),
+        radial-gradient(circle at 50% 110%, rgba(8, 47, 73, 0.25) 0%, transparent 70%),
+        #060913;
       color: #e2eaf8;
       -webkit-font-smoothing: antialiased;
     }
@@ -83,11 +84,11 @@
     .tab:hover::before { opacity: 1; }
     
     .ops-toolbar { 
-      position: absolute; top: 50%; transform: translateY(-50%); right: 12px; 
+      position: absolute; top: 12px; right: 12px; 
       display: flex; gap: 6px; z-index: 11; opacity: 0; 
       transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); pointer-events: none; 
     }
-    #panel-ops:hover .ops-toolbar.visible { opacity: 1; pointer-events: auto; }
+    .ops-toolbar.visible.hud-show { opacity: 1; pointer-events: auto; }
 
     /* === CCTV Grid columns (JS toggles .grid-2/3/4) === */
     .cctv-grid { 
@@ -97,7 +98,7 @@
       flex-wrap: wrap;
       gap: 2px; /* 사이 간격을 2px로 극도로 얇게 줄임 */
       padding: 2px; /* 바깥 여백도 2px로 최소화하여 영상 낭비 방지 */
-      background: #020408; 
+      background: transparent; /* 검은색 배경을 제거하여 바디의 프리미엄 그라데이션이 비치도록 투명화 */
       overflow-y: auto; /* 세로 스크롤 가능하게 복원 */
       align-content: start; /* 상단 정렬하여 비율 유지 */
       align-items: flex-start; /* 셀 수직 늘어남 방지 및 aspect-ratio 강제 */
@@ -116,21 +117,24 @@
     /* === CCTV Cell === */
     .cctv-cell {
       position: relative; 
-      background: #000000; 
-      border: 1px solid rgba(255, 255, 255, 0.08); /* 얇고 정교한 경계선 */
-      border-radius: 4px; /* 붙었을 때 빈틈이 생겨 보기 흉해지지 않도록 곡률을 4px로 최적화 */
+      background: linear-gradient(135deg, rgba(16, 28, 48, 0.4) 0%, rgba(8, 16, 28, 0.65) 100%);
+      border: 1px solid rgba(34, 211, 238, 0.12); /* 얇고 정교한 경계선 */
+      border-radius: 6px; /* 붙었을 때 빈틈이 생겨 보기 흉해지지 않도록 곡률을 6px로 최적화 */
       overflow: hidden; 
       cursor: grab;
       flex-shrink: 0;
       flex-grow: 0;
       aspect-ratio: 5 / 3; /* reference 이미지 960x576 비율로 완벽히 통일 */
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.05);
     }
     .cctv-cell:hover { 
       border-color: #22d3ee; 
       z-index: 10; /* 호버한 셀의 경계선이 다닥다닥 붙은 인접 셀 위로 띄워지도록 */
-      box-shadow: 0 0 12px rgba(34, 211, 238, 0.45);
-      transform: scale(1.008); /* 꽉 찬 화면에서 호버 시 살짝 확대되어 가독성 극대화 */
+      box-shadow: 0 0 16px rgba(34, 211, 238, 0.35), 0 8px 30px rgba(0, 0, 0, 0.5);
+      transform: scale(1.01); /* 꽉 찬 화면에서 호버 시 살짝 확대되어 가독성 극대화 */
     }
     .cctv-cell:active { cursor: grabbing; }
     .cctv-cell img, .cctv-cell video { 
@@ -140,8 +144,22 @@
       width: 100%; 
       height: 100%; 
       object-fit: cover; /* 대다수의 보편적 비율에 맞추되, 다른 화면 비율(예: 4:3)의 카메라도 찌그러짐이나 검은 여백 없이 꽉 찬 비율로 채움 */
-      background: #000; 
+      background: transparent; 
       display: block; 
+    }
+    /* Empty / Loading Slot Placeholder */
+    .cctv-cell:not(:has(video)):not(:has(img))::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 24px;
+      height: 24px;
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='rgba(34, 211, 238, 0.25)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' class='lucide lucide-video'%3E%3Cpath d='M15 10l5-3v10l-5-3v-4z'/%3E%3Crect x='2' y='5' width='13' height='10' rx='2' ry='2'/%3E%3C/svg%3E") no-repeat center;
+      background-size: contain;
+      opacity: 0.65;
+      animation: pulse-glow 2s infinite ease-in-out;
     }
     
     .cctv-cell .ch-label {
@@ -189,7 +207,7 @@
     .sortable-fallback { opacity: 0.95; transform: scale(1.03); border-color: #67e8f9; box-shadow: 0 20px 48px rgba(34, 211, 238, 0.4); border-radius: 12px; transition: none !important; }
 
     .cctv-expand-overlay {
-      position: fixed; z-index: 200; background: #000; display: none;
+      position: fixed; z-index: 200; background: rgba(4, 6, 12, 0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); display: none;
       align-items: center; justify-content: center; cursor: pointer; overflow: hidden; border-radius: 10px;
       transition: all 0.45s cubic-bezier(0.16, 1, 0.3, 1);
       box-shadow: 0 24px 64px rgba(0, 0, 0, 0.8);
@@ -209,11 +227,11 @@
     .mixed-left { display: flex; flex-direction: column; overflow: hidden; min-width: 200px; flex-shrink: 0; flex-grow: 0; border-right: 1px solid rgba(255, 255, 255, 0.03); }
     .mixed-divider { width: 4px; background: #0f172a; cursor: col-resize; flex-shrink: 0; transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
     .mixed-divider:hover, .mixed-divider.dragging { background: linear-gradient(180deg, #22d3ee, #6366f1); box-shadow: 0 0 10px rgba(34, 211, 238, 0.4); }
-    .mixed-right { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 200px; background: #020408; }
+    .mixed-right { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 200px; background: transparent; }
     .mixed-main-area { flex: 1; display: flex; position: relative; overflow: hidden; }
     .mixed-main-area .canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; }
     .mixed-main-area canvas { width: 100%; height: 100%; object-fit: contain; }
-    .mixed-overflow-row { display: flex; gap: 3px; background: #000; flex-shrink: 0; padding: 3px; }
+    .mixed-overflow-row { display: flex; gap: 3px; background: rgba(6, 10, 18, 0.35); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); flex-shrink: 0; padding: 3px; }
     .mixed-overflow-row:empty { display: none; }
     .mixed-sortable-item { cursor: grab; }
     .mixed-sortable-item:active { cursor: grabbing; }
@@ -221,7 +239,7 @@
     .mixed-overflow-row .cctv-cell img,
     .mixed-overflow-row .cctv-cell video { width: 100%; height: 100%; object-fit: cover; }
     .mixed-cctv-grid, .cctv-grid { position: relative; }
-    .mixed-cctv-grid { flex: 1; min-height: 0; display: flex; flex-wrap: wrap; gap: 3px; padding: 3px; background: #020408; overflow-y: auto; align-content: start; align-items: flex-start; width: 100%; }
+    .mixed-cctv-grid { flex: 1; min-height: 0; display: flex; flex-wrap: wrap; gap: 3px; padding: 3px; background: transparent; overflow-y: auto; align-content: start; align-items: flex-start; width: 100%; }
     .mixed-cctv-grid.cols-3 .cctv-cell { width: calc(33.3333% - 2px); }
     .mixed-cctv-grid.cols-4 .cctv-cell { width: calc(25% - 2.25px); }
     .mixed-cctv-grid .cctv-cell { cursor: default; border-radius: 6px; flex-shrink: 0; flex-grow: 0; }
@@ -265,7 +283,7 @@
     .region-rect { position: absolute; border: 2px dashed #22d3ee; background: rgba(34, 211, 238, 0.1); pointer-events: none; box-shadow: 0 0 10px rgba(34, 211, 238, 0.2); }
 
     /* === Canvas wrap === */
-    .canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; background: #020408; }
+    .canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; background: transparent; }
     canvas { width: 100%; height: 100%; object-fit: contain; }
 
     /* === No channels placeholder === */
@@ -692,6 +710,34 @@
     // Initialize Lucide icons
     lucide.createIcons();
 
+    // Auto-hide Ops Toolbar on mouse inactivity
+    let opsToolbarTimeout = null;
+    function showOpsToolbar() {
+      const toolbar = document.getElementById('opsToolbar');
+      if (!toolbar) return;
+      toolbar.classList.add('hud-show');
+      
+      clearTimeout(opsToolbarTimeout);
+      opsToolbarTimeout = setTimeout(() => {
+        if (toolbar.matches(':hover')) {
+          showOpsToolbar(); // Keep visible if mouse is directly hovering over the settings/disconnect buttons
+          return;
+        }
+        toolbar.classList.remove('hud-show');
+      }, 2500);
+    }
+
+    const panelOpsEl = document.getElementById('panel-ops');
+    if (panelOpsEl) {
+      panelOpsEl.addEventListener('mousemove', showOpsToolbar);
+      panelOpsEl.addEventListener('mouseenter', showOpsToolbar);
+      panelOpsEl.addEventListener('mouseleave', () => {
+        const toolbar = document.getElementById('opsToolbar');
+        if (toolbar) toolbar.classList.remove('hud-show');
+        clearTimeout(opsToolbarTimeout);
+      });
+    }
+
     // Tab switching (saves last tab)
     function switchTab(el) {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -996,7 +1042,7 @@
         clearTimeout(reconnectTimeout);
         setStatus('connected', t('connected'));
         // Send OVP HELLO + AUTH
-        const hello = { role: 'watcher', client: 'opsview-web', client_version: '0.1.8', supports: ['zstd'], want_profile: null };
+        const hello = { role: 'watcher', client: 'opsview-web', client_version: '0.2.65', supports: ['zstd'], want_profile: null };
         sendOVPMsg(1, JSON.stringify(hello));
         const auth = { token: pin };
         sendOVPMsg(2, JSON.stringify(auth));
@@ -2295,10 +2341,10 @@
           video.autoplay = true;
           video.muted = true;
           video.playsInline = true;
-          video.style.width = '100%';
+           video.style.width = '100%';
           video.style.height = '100%';
           video.style.objectFit = 'cover';
-          video.style.background = '#000';
+          video.style.background = 'transparent';
           const { ip, port } = resolveRelayHLSEndpoint(dvr);
           const hlsUrl = 'http://' + ip + ':' + port + '/surv/dvr' + streamDvrId + '_ch' + ch.ch_num + '/index.m3u8';
           if (typeof Hls !== 'undefined' && Hls.isSupported()) {
@@ -2670,7 +2716,7 @@
           video.style.width = '100%';
           video.style.height = '100%';
           video.style.objectFit = 'cover';
-          video.style.background = '#000';
+          video.style.background = 'transparent';
           const { ip, port } = resolveRelayHLSEndpoint(dvr);
           const hlsUrl = 'http://' + ip + ':' + port + '/surv/dvr' + streamDvrId + '_ch' + ch.ch_num + '/index.m3u8';
           if (typeof Hls !== 'undefined' && Hls.isSupported()) {
