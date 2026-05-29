@@ -494,6 +494,9 @@ func (m *SurveillanceManager) discoverISAPIDeviceInfo(dvr DVRConfig) ([]ChannelC
 	var channels []ChannelConfig
 	for ch := 1; ch <= total; ch++ {
 		w, h := m.fetchChannelResolution(dvr, ch)
+		if w == 0 || h == 0 {
+			continue // Skip unconnected or empty channels
+		}
 		channels = append(channels, ChannelConfig{DVRID: dvr.ID, ChNum: ch, Name: fmt.Sprintf("Channel %d", ch), Order: ch - 1, Width: w, Height: h})
 	}
 	return channels, nil
@@ -535,6 +538,9 @@ func (m *SurveillanceManager) discoverISAPIStreaming(dvr DVRConfig) ([]ChannelCo
 			name = fmt.Sprintf("Channel %d", chNum)
 		}
 		w, h := m.fetchChannelResolution(dvr, chNum)
+		if w == 0 || h == 0 {
+			continue // Skip unconnected or empty channels
+		}
 		channels = append(channels, ChannelConfig{DVRID: dvr.ID, ChNum: chNum, Name: name, Order: chNum - 1, Width: w, Height: h})
 	}
 	return channels, nil
@@ -570,6 +576,9 @@ func (m *SurveillanceManager) discoverISAPIVideoInputs(dvr DVRConfig) ([]Channel
 			name = fmt.Sprintf("Channel %d", ch.ID)
 		}
 		w, h := m.fetchChannelResolution(dvr, ch.ID)
+		if w == 0 || h == 0 {
+			continue // Skip unconnected or empty channels
+		}
 		channels = append(channels, ChannelConfig{DVRID: dvr.ID, ChNum: ch.ID, Name: name, Order: ch.ID - 1, Width: w, Height: h})
 	}
 	return channels, nil

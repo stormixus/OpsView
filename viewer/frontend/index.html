@@ -825,7 +825,7 @@
       if (!dvr) return false;
       if (dvr._remote) return true;
       if (!opsConnected || !dvr.agent_id) return false;
-      return !!dvr._lanUnreachable;
+      return true; // Always prefer relay HLS routing when connected to the relay to avoid direct RTSP session limits!
     }
 
     function relayStreamDvrId(dvr) {
@@ -1267,7 +1267,7 @@
       });
     }
 
-    const MAX_RETRIES = 6;
+    const MAX_RETRIES = 2;
     const ICE_GATHER_TIMEOUT_MS = 900;
 
     function getConcurrentLimit(channelCount) {
@@ -1412,7 +1412,7 @@
                     statusEl.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#eab308;font-size:11px;text-align:center;padding:8px;pointer-events:none;z-index:1;';
                     cell.appendChild(statusEl);
                   }
-                  setTimeout(() => attempt(), 2000);
+                  setTimeout(() => attempt(), 4000);
                 } else {
                   console.log('[cctv] ch' + chNum + ': all retries exhausted, switching to snapshot');
                   if (isMixedVideoEl(video)) {
@@ -1446,7 +1446,7 @@
             if (retries < MAX_RETRIES) {
               statusEl.style.color = '#eab308';
               statusEl.textContent = 'CH' + chNum + ' ' + t('retry') + ' ' + retries + '/' + MAX_RETRIES;
-              await new Promise(r => setTimeout(r, 2000));
+              await new Promise(r => setTimeout(r, 4000));
               return attempt();
             } else {
               console.log('[cctv] ch' + chNum + ': all retries exhausted, switching to snapshot');
@@ -1552,7 +1552,7 @@
       dvrs.forEach(d => {
         const tab = document.createElement('div');
         tab.className = 'dvr-tab flex items-center gap-1 px-3 py-1.5 text-[11px] text-gray-500 cursor-pointer rounded-md transition-all hover:text-gray-300 hover:bg-white/[0.04]' + (d.id === activeDvrId ? ' active !text-cyan-300 bg-cyan-500/10' : '');
-        const icon = (d._remote || (d.agent_id && d._lanUnreachable)) ? 'cloud' : 'hard-drive';
+        const icon = shouldUseRelayHLS(d) ? 'cloud' : 'hard-drive';
         let actionBtns = '';
         if (!d._remote) {
           actionBtns = '<span class="rescan-btn ml-1.5 text-gray-600 text-[10px] cursor-pointer hover:text-emerald-400 transition-colors" title="' + t('rescanChannels') + '">&#8635;</span>'
@@ -2441,9 +2441,12 @@
             return;
           }
           console.log('[cctv] mixed retry ' + (idx + 1) + ': snapshot/low ' + missing.length + ' channels');
+          const dvr = dvrs.find(d => d.id === dvrID);
+          const refreshMs = (dvr && dvr.refresh_rate) ? dvr.refresh_rate : 2000;
           missing.forEach(ch => {
             const cell = document.querySelector('#panel-mixed .cctv-cell[data-chnum="' + ch.ch_num + '"]');
-            if (cell && isSnapshotCctvCell(cell)) {
+            if (!cell) return;
+            if (isSnapshotCctvCell(cell)) {
               const video = document.createElement('video');
               video.autoplay = true;
               video.muted = true;
@@ -2451,7 +2454,36 @@
               video.id = 'mixed-video-' + ch.ch_num;
               cell.querySelector('img')?.remove();
               cell.insertBefore(video, cell.firstChild);
-              borrowCctvStreamForMixed(dvrID, ch.ch_num, video);
+              if (borrowCctvStreamForMixed(dvrID, ch.ch_num, video)) {
+                cell.querySelector('.ch-status')?.remove();
+              } else {
+                video.remove();
+                const img = document.createElement('img');
+                img.alt = ch.name;
+                img.src = '/cctv/snapshot/' + dvrID + '/' + ch.ch_num + '?t=' + Date.now();
+                cell.insertBefore(img, cell.firstChild);
+              }
+            } else {
+              const cctvCell = document.querySelector('#panel-cctv .cctv-cell[data-chnum="' + ch.ch_num + '"]');
+              const isCctvSnapshot = !!(cctvCell && isSnapshotCctvCell(cctvCell));
+              const isLastRetry = (idx === MIXED_MISSING_RETRY_MS.length - 1);
+              if (isCctvSnapshot || isLastRetry) {
+                const video = cell.querySelector('video');
+                if (video) video.remove();
+                cell.querySelector('.ch-status')?.remove();
+                const img = document.createElement('img');
+                img.alt = ch.name;
+                img.src = '/cctv/snapshot/' + dvrID + '/' + ch.ch_num + '?t=' + Date.now();
+                img.onerror = function() { this.style.opacity = '0.3'; };
+                img.onload = function() { this.style.opacity = '1'; };
+                cell.insertBefore(img, cell.firstChild);
+                const timer = setInterval(() => {
+                  const preload = new Image();
+                  preload.onload = () => { img.src = preload.src; img.style.opacity = '1'; };
+                  preload.src = '/cctv/snapshot/' + dvrID + '/' + ch.ch_num + '?t=' + Date.now();
+                }, refreshMs);
+                mixedCctvTimers.push(timer);
+              }
             }
           });
           requestAnimationFrame(() => playMixedCctvVideos());
@@ -2534,14 +2566,32 @@
           }
           cell.appendChild(video);
         } else if (isRTSP) {
-          const video = document.createElement('video');
-          video.autoplay = true;
-          video.muted = true;
-          video.playsInline = true;
-          video.id = 'mixed-video-' + ch.ch_num;
-          cell.appendChild(video);
-          if (activeDvrId) {
-            borrowCctvStreamForMixed(activeDvrId, ch.ch_num, video);
+          const cctvCell = document.querySelector('#panel-cctv .cctv-cell[data-chnum="' + ch.ch_num + '"]');
+          const isCctvSnapshot = !!(cctvCell && isSnapshotCctvCell(cctvCell));
+          if (isCctvSnapshot) {
+            const img = document.createElement('img');
+            img.alt = ch.name;
+            img.src = '/cctv/snapshot/' + activeDvrId + '/' + ch.ch_num + '?t=' + Date.now();
+            img.onerror = function() { this.style.opacity = '0.3'; };
+            img.onload = function() { this.style.opacity = '1'; };
+            cell.appendChild(img);
+
+            const timer = setInterval(() => {
+              const preload = new Image();
+              preload.onload = () => { img.src = preload.src; img.style.opacity = '1'; };
+              preload.src = '/cctv/snapshot/' + activeDvrId + '/' + ch.ch_num + '?t=' + Date.now();
+            }, refreshMs);
+            mixedCctvTimers.push(timer);
+          } else {
+            const video = document.createElement('video');
+            video.autoplay = true;
+            video.muted = true;
+            video.playsInline = true;
+            video.id = 'mixed-video-' + ch.ch_num;
+            cell.appendChild(video);
+            if (activeDvrId) {
+              borrowCctvStreamForMixed(activeDvrId, ch.ch_num, video);
+            }
           }
         } else {
           const img = document.createElement('img');

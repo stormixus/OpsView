@@ -810,6 +810,9 @@ func (m *CCTVManager) discoverISAPIDeviceInfo(dvr DVRConfig) ([]ChannelConfig, e
 	var channels []ChannelConfig
 	for ch := 1; ch <= totalChannels; ch++ {
 		w, h := m.fetchChannelResolution(dvr, ch)
+		if w == 0 || h == 0 {
+			continue // Skip unconnected or empty channels
+		}
 		channels = append(channels, ChannelConfig{
 			DVRID:  dvr.ID,
 			ChNum:  ch,
@@ -869,6 +872,9 @@ func (m *CCTVManager) discoverISAPIStreaming(dvr DVRConfig) ([]ChannelConfig, er
 		}
 
 		w, h := m.fetchChannelResolution(dvr, chNum)
+		if w == 0 || h == 0 {
+			continue // Skip unconnected or empty channels
+		}
 
 		channels = append(channels, ChannelConfig{
 			DVRID:  dvr.ID,
@@ -920,6 +926,9 @@ func (m *CCTVManager) discoverISAPIVideoInputs(dvr DVRConfig) ([]ChannelConfig, 
 		}
 
 		w, h := m.fetchChannelResolution(dvr, ch.ID)
+		if w == 0 || h == 0 {
+			continue // Skip unconnected or empty channels
+		}
 
 		channels = append(channels, ChannelConfig{
 			DVRID:  dvr.ID,
