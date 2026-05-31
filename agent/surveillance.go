@@ -247,6 +247,16 @@ func (m *SurveillanceManager) DiscoverChannels(dvrID int64) ([]ChannelConfig, er
 		}
 	}
 
+	// Clean up any channels that are no longer in the discovered list (e.g. capped to 16)
+	if len(discovered) > 0 {
+		var activeChs []string
+		for _, ch := range discovered {
+			activeChs = append(activeChs, fmt.Sprintf("%d", ch.ChNum))
+		}
+		query := fmt.Sprintf(`DELETE FROM channels WHERE dvr_id=? AND ch_num NOT IN (%s)`, strings.Join(activeChs, ","))
+		m.db.Exec(query, dvrID)
+	}
+
 	if m.onChange != nil {
 		m.onChange()
 	}
@@ -751,6 +761,10 @@ func normalizeChannelDiscovery(channels []ChannelConfig) []ChannelConfig {
 	sort.SliceStable(channels, func(i, j int) bool {
 		return channels[i].ChNum < channels[j].ChNum
 	})
+	// Cap to 16 channels max
+	if len(channels) > 16 {
+		channels = channels[:16]
+	}
 	for i := range channels {
 		channels[i].Order = i
 	}
