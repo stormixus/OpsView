@@ -185,8 +185,8 @@ func (sp *SurvProxy) StartChannel(id, name, rawURL string) error {
 
 	muxer := &gohlslib.Muxer{
 		Variant:            variant,
-		SegmentCount:       5,
-		SegmentMinDuration: 5 * time.Second,
+		SegmentCount:       3,
+		SegmentMinDuration: 1 * time.Second,
 		Tracks:             []*gohlslib.Track{track},
 	}
 	if err := muxer.Start(); err != nil {
