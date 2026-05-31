@@ -614,9 +614,29 @@ func (m *SurveillanceManager) discoverFromDVRDahua(dvr DVRConfig) ([]ChannelConf
 
 	var channels []ChannelConfig
 	for ch := 1; ch <= totalChannels; ch++ {
+		if !m.verifyDahuaSnapshot(dvr, ch) {
+			continue // Skip unconnected or empty channels
+		}
 		channels = append(channels, ChannelConfig{DVRID: dvr.ID, ChNum: ch, Name: fmt.Sprintf("Channel %d", ch), Order: ch - 1})
 	}
 	return channels, nil
+}
+
+func (m *SurveillanceManager) verifyDahuaSnapshot(dvr DVRConfig, chNum int) bool {
+	url := fmt.Sprintf("http://%s:%d/cgi-bin/snapshot.cgi?channel=%d&subtype=2", dvr.Addr, dvr.Port, chNum)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.SetBasicAuth(dvr.Username, dvr.Password)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	resp, err := m.shortClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == 200
 }
 
 func (m *SurveillanceManager) discoverFromDVRRTSP(dvr DVRConfig) ([]ChannelConfig, error) {
@@ -698,6 +718,29 @@ func (m *SurveillanceManager) fetchChannelResolution(dvr DVRConfig, chNum int) (
 	defer resp.Body.Close()
 	var info isAPIVideoInfo
 	xml.NewDecoder(resp.Body).Decode(&info)
+
+	if info.Width == 0 || info.Height == 0 {
+		return 0, 0
+	}
+
+	// Verify that a live video signal/snapshot actually exists for this channel to filter out unconnected slots
+	picUrl := fmt.Sprintf("http://%s:%d/ISAPI/Streaming/channels/%d02/picture", dvr.Addr, dvr.Port, chNum)
+	picReq, _ := http.NewRequest("GET", picUrl, nil)
+	picReq.SetBasicAuth(dvr.Username, dvr.Password)
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	picReq = picReq.WithContext(ctx)
+
+	picResp, picErr := m.shortClient.Do(picReq)
+	if picErr != nil {
+		return 0, 0
+	}
+	defer picResp.Body.Close()
+	if picResp.StatusCode != 200 {
+		return 0, 0 // Return 0, 0 to skip this offline/unconnected channel
+	}
+
 	return info.Width, info.Height
 }
 
