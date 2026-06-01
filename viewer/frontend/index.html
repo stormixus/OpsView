@@ -1042,7 +1042,7 @@
         clearTimeout(reconnectTimeout);
         setStatus('connected', t('connected'));
         // Send OVP HELLO + AUTH
-        const hello = { role: 'watcher', client: 'opsview-web', client_version: '0.2.71', supports: ['zstd'], want_profile: null };
+        const hello = { role: 'watcher', client: 'opsview-web', client_version: '0.2.72', supports: ['zstd'], want_profile: null };
         sendOVPMsg(1, JSON.stringify(hello));
         const auth = { token: pin };
         sendOVPMsg(2, JSON.stringify(auth));
@@ -3371,16 +3371,26 @@
         if (CM()) {
           try {
             const localDvr = await CM().AddDVR(d.name, d.addr, d.port, d.ext_addr || '', d.ext_port || 0, d.username, d.password, d.protocol || 'rtsp');
-            await CM().UpdateDVR(localDvr.id, d.name, d.addr, d.port, d.ext_addr || '', d.ext_port || 0, d.username, d.password,
-              d.refresh_rate || 2000, d.stream_quality || 'sub', d.protocol || 'rtsp');
-            // Test if DVR is reachable by discovering channels
-            const chs = await CM().DiscoverChannels(localDvr.id);
-            if (chs && chs.length > 0) {
-              console.log('[surv] DVR', d.name, 'reachable locally:', chs.length, 'channels');
-              localAdded = true;
+            let discoverySuccess = false;
+            try {
+              await CM().UpdateDVR(localDvr.id, d.name, d.addr, d.port, d.ext_addr || '', d.ext_port || 0, d.username, d.password,
+                d.refresh_rate || 2000, d.stream_quality || 'sub', d.protocol || 'rtsp');
+              // Test if DVR is reachable by discovering channels
+              const chs = await CM().DiscoverChannels(localDvr.id);
+              if (chs && chs.length > 0) {
+                console.log('[surv] DVR', d.name, 'reachable locally:', chs.length, 'channels');
+                localAdded = true;
+                discoverySuccess = true;
+              }
+            } catch(discoveryErr) {
+              console.log('[surv] DVR discovery failed with error:', discoveryErr);
+            }
+
+            if (discoverySuccess) {
               continue; // registered as local DVR successfully
             }
-            // Not reachable: remove the local entry
+
+            // Not reachable/discovery failed: remove the local entry
             await CM().DeleteDVR(localDvr.id);
             console.log('[surv] DVR', d.name, 'not reachable locally, using relay');
           } catch(err) {

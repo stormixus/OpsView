@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +18,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bluenviron/gortsplib/v5"
+	"github.com/bluenviron/gortsplib/v5/pkg/base"
 	_ "modernc.org/sqlite"
 )
 
@@ -691,17 +692,22 @@ func (m *SurveillanceManager) discoverFromDVRRTSP(dvr DVRConfig) ([]ChannelConfi
 }
 
 func probeRTSPChannel(rtspURL string) bool {
-	// Simple TCP connect probe to RTSP port
-	u, err := url.Parse(rtspURL)
+	u, err := base.ParseURL(rtspURL)
 	if err != nil {
 		return false
 	}
-	conn, err := net.DialTimeout("tcp", u.Host, 5*time.Second)
-	if err != nil {
+	c := &gortsplib.Client{
+		Scheme:       u.Scheme,
+		Host:         u.Host,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+	}
+	if err := c.Start(); err != nil {
 		return false
 	}
-	conn.Close()
-	return true
+	defer c.Close()
+	_, _, err = c.Describe(u)
+	return err == nil
 }
 
 func (m *SurveillanceManager) fetchChannelResolution(dvr DVRConfig, chNum int) (int, int) {
