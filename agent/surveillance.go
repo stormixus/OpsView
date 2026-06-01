@@ -446,34 +446,31 @@ type isAPIVideoInput struct {
 }
 
 func (m *SurveillanceManager) discoverFromDVRISAPI(dvr DVRConfig) ([]ChannelConfig, error) {
-	// Prefer videoInputs — it returns only physical video inputs,
-	// excluding empty IP camera slots that streaming channels includes.
+	// Query all available discovery endpoints to ensure we don't miss both physical (analog) and digital (IP/streaming) channels
 	videoInputs, err := m.discoverISAPIVideoInputs(dvr)
 	if err != nil {
 		log.Printf("[surv] ISAPI video inputs discovery failed: %v", err)
-	}
-	if len(videoInputs) > 0 {
-		log.Printf("[surv] using videoInputs: %d channels", len(videoInputs))
-		return normalizeChannelDiscovery(videoInputs), nil
 	}
 
 	streamingChannels, streamingErr := m.discoverISAPIStreaming(dvr)
 	if streamingErr != nil {
 		log.Printf("[surv] ISAPI streaming discovery failed: %v", streamingErr)
 	}
-	if len(streamingChannels) > 0 {
-		return normalizeChannelDiscovery(streamingChannels), nil
+
+	deviceInfoChannels, devInfoErr := m.discoverISAPIDeviceInfo(dvr)
+	if devInfoErr != nil {
+		log.Printf("[surv] ISAPI deviceInfo discovery failed: %v", devInfoErr)
 	}
 
-	log.Printf("[surv] trying deviceInfo fallback")
-	channels, err := m.discoverISAPIDeviceInfo(dvr)
-	if err != nil {
-		return nil, fmt.Errorf("ISAPI discovery failed: %w", err)
-	}
-	if len(channels) == 0 {
+	// Merge all discovered lists to form a comprehensive set of potential channels,
+	// then active snapshot checks inside those methods will filter out the unconnected/offline ones.
+	merged := mergeChannelDiscovery(videoInputs, streamingChannels, deviceInfoChannels)
+	if len(merged) == 0 {
 		return nil, fmt.Errorf("no channels found via ISAPI")
 	}
-	return normalizeChannelDiscovery(channels), nil
+
+	log.Printf("[surv] merged discovery found %d active channels total", len(merged))
+	return normalizeChannelDiscovery(merged), nil
 }
 
 func (m *SurveillanceManager) discoverISAPIDeviceInfo(dvr DVRConfig) ([]ChannelConfig, error) {
