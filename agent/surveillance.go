@@ -720,7 +720,14 @@ func (m *SurveillanceManager) fetchChannelResolution(dvr DVRConfig, chNum int) (
 	}
 	defer resp.Body.Close()
 	var info isAPIVideoInfo
-	xml.NewDecoder(resp.Body).Decode(&info)
+	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		info.Width = 1920
+		info.Height = 1080
+	} else if resp.StatusCode == 200 {
+		xml.NewDecoder(resp.Body).Decode(&info)
+	} else {
+		return 0, 0
+	}
 
 	if info.Width == 0 || info.Height == 0 {
 		return 0, 0
