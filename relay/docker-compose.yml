@@ -1,5 +1,6 @@
 services:
   relay:
+    container_name: OpsView-relay
     image: ghcr.io/stormixus/opsview-relay:latest
     ports:
       - "${RELAY_EXTERNAL_PORT:-28186}:8080"
