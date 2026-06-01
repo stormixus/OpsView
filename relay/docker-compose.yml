@@ -1,8 +1,6 @@
 services:
   relay:
-    build:
-      context: ..
-      dockerfile: relay/Dockerfile
+    image: ghcr.io/stormixus/opsview-relay:latest
     ports:
       - "${RELAY_EXTERNAL_PORT:-28186}:8080"
     environment:
