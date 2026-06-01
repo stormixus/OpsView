@@ -634,7 +634,7 @@ func (m *SurveillanceManager) verifyDahuaSnapshot(dvr DVRConfig, chNum int) bool
 		return false
 	}
 	defer resp.Body.Close()
-	return resp.StatusCode == 200
+	return resp.StatusCode == 200 || resp.StatusCode == 401 || resp.StatusCode == 403
 }
 
 func (m *SurveillanceManager) discoverFromDVRRTSP(dvr DVRConfig) ([]ChannelConfig, error) {
@@ -740,7 +740,9 @@ func (m *SurveillanceManager) fetchChannelResolution(dvr DVRConfig, chNum int) (
 		return 0, 0
 	}
 	defer picResp.Body.Close()
-	if picResp.StatusCode != 200 {
+	// 401/403 means the channel is configured and authenticating (possibly requires Digest auth for snapshots),
+	// so it is definitely a valid stream channel. We should only skip on 404, 503, 400 etc. (offline/no camera).
+	if picResp.StatusCode != 200 && picResp.StatusCode != 401 && picResp.StatusCode != 403 {
 		return 0, 0 // Return 0, 0 to skip this offline/unconnected channel
 	}
 
