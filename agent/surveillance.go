@@ -192,6 +192,32 @@ func (m *SurveillanceManager) DeleteDVR(id int64) error {
 	return err
 }
 
+func (m *SurveillanceManager) ClearDVRChannels(id int64) error {
+	_, err := m.db.Exec(`DELETE FROM channels WHERE dvr_id=?`, id)
+	if err == nil && m.onChange != nil {
+		m.onChange()
+	}
+	return err
+}
+
+func (m *SurveillanceManager) ResetDB() error {
+	m.db.Close()
+	err := os.Remove(m.dbPath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	db, err := sql.Open("sqlite", m.dbPath)
+	if err != nil {
+		return err
+	}
+	m.db = db
+	m.migrate()
+	if m.onChange != nil {
+		m.onChange()
+	}
+	return nil
+}
+
 // --- Channel management ---
 
 func (m *SurveillanceManager) ListChannels(dvrID int64) ([]ChannelConfig, error) {

@@ -52,6 +52,7 @@ func startWebUI() {
 	mux.HandleFunc("/api/update", handleAPIUpdate)
 	mux.HandleFunc("/api/surv/dvrs", handleSurvDVRs)
 	mux.HandleFunc("/api/surv/dvrs/", handleSurvDVR)
+	mux.HandleFunc("/api/surv/reset-db", handleSurvResetDB)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -262,6 +263,19 @@ func handleSurvDVR(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(chs)
 
+	case "clear-channels":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		err := webSurvMgr.ClearDVRChannels(id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+
 	case "channels":
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -313,6 +327,24 @@ func handleSurvDVR(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func handleSurvResetDB(w http.ResponseWriter, r *http.Request) {
+	if webSurvMgr == nil {
+		http.Error(w, "surveillance manager not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	err := webSurvMgr.ResetDB()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 const htmlTemplate = `
@@ -425,6 +457,11 @@ const htmlTemplate = `
                     <label class="block text-sm font-medium text-slate-300 mb-2">Relay URL (직접 입력)</label>
                     <input type="text" id="relay-url" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition font-mono text-sm" placeholder="ws://127.0.0.1:8080/publish">
                     <p class="text-xs text-slate-500 mt-1">직접 URL을 입력하면 위 IP/Port 대신 이 값이 사용됩니다.</p>
+                </div>
+                <div class="mt-4 pt-4 border-t border-slate-700/50">
+                    <label class="block text-sm font-medium text-slate-300 mb-2">데이터베이스 초기화</label>
+                    <button type="button" onclick="resetDatabase()" class="text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 px-3 py-2 rounded-lg transition font-medium">전체 DB 초기화 (DVR 및 채널 전체 삭제)</button>
+                    <p class="text-xs text-slate-500 mt-1">에이전트 데이터베이스(cctv.db)를 완전히 지우고 깨끗하게 재시작합니다.</p>
                 </div>
             </details>
 
@@ -735,6 +772,7 @@ const htmlTemplate = `
                         '<div class="flex gap-2">' +
                             '<button onclick="editDVR(\'' + dj + '\')" class="text-xs bg-slate-600/30 text-slate-300 hover:bg-slate-600/50 px-3 py-1.5 rounded-lg transition">\uc218\uc815</button>' +
                             '<button onclick="discoverChannels(' + d.id + ')" class="text-xs bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600/30 px-3 py-1.5 rounded-lg transition">\ucc44\ub110 \ud0d0\uc0c9</button>' +
+                            '<button onclick="clearChannels(' + d.id + ')" class="text-xs bg-amber-600/20 text-amber-400 hover:bg-amber-600/30 px-3 py-1.5 rounded-lg transition">\ucc44\ub110 \ucd08\uae30\ud654</button>' +
                             '<button onclick="deleteDVR(' + d.id + ')" class="text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 px-3 py-1.5 rounded-lg transition">\uc0ad\uc81c</button>' +
                         '</div>' +
                     '</div>';
@@ -859,6 +897,41 @@ const htmlTemplate = `
                 }
             } catch (err) {
                 showMsg('채널 탐색 중 오류가 발생했습니다.', 'error');
+            }
+        }
+
+        async function clearChannels(id) {
+            if (!confirm('이 DVR의 탐색된 채널 정보를 모두 삭제하고 초기 상태로 되돌리시겠습니까?\n(DVR 연결 정보는 그대로 유지됩니다.)')) {
+                return;
+            }
+            showMsg('채널 초기화 중...', 'success');
+            try {
+                const res = await fetch('/api/surv/dvrs/' + id + '/clear-channels', { method: 'POST' });
+                if (res.ok) {
+                    showMsg('채널이 성공적으로 초기화되었습니다.', 'success');
+                } else {
+                    showMsg('채널 초기화 실패: ' + await res.text(), 'error');
+                }
+            } catch (err) {
+                showMsg('채널 초기화 중 오류가 발생했습니다.', 'error');
+            }
+        }
+
+        async function resetDatabase() {
+            if (!confirm('경고: 에이전트 데이터베이스를 완전히 초기화하시겠습니까?\n모든 DVR 설정과 탐색된 채널이 영구적으로 지워집니다.')) {
+                return;
+            }
+            showMsg('DB 초기화 중...', 'success');
+            try {
+                const res = await fetch('/api/surv/reset-db', { method: 'POST' });
+                if (res.ok) {
+                    showMsg('데이터베이스가 초기화되었습니다. 에이전트를 재시작하거나 설정을 새로고침하세요.', 'success');
+                    setTimeout(() => { location.reload(); }, 1500);
+                } else {
+                    showMsg('DB 초기화 실패: ' + await res.text(), 'error');
+                }
+            } catch (err) {
+                showMsg('DB 초기화 중 오류가 발생했습니다.', 'error');
             }
         }
 
