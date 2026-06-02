@@ -432,8 +432,8 @@ type isAPIChannel struct {
 }
 
 type isAPIVideoInfo struct {
-	Width  int `xml:"videoResolutionWidth"`
-	Height int `xml:"videoResolutionHeight"`
+	Width  int `xml:"Video>videoResolutionWidth"`
+	Height int `xml:"Video>videoResolutionHeight"`
 }
 
 type isAPIVideoInputList struct {
