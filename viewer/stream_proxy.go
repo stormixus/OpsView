@@ -62,23 +62,18 @@ func (p *StreamProxy) StartStream(rawURL string) (string, error) {
 		return "", fmt.Errorf("RTSP describe: %w", err)
 	}
 
-	track, isH265, err := p.setupCodec(c, desc)
+	track, _, err := p.setupCodec(c, desc)
 	if err != nil {
 		c.Close()
 		return "", err
 	}
 
-	variant := gohlslib.MuxerVariantMPEGTS
-	if isH265 {
-		variant = gohlslib.MuxerVariantFMP4
-	}
-
+	// Low-Latency HLS (fMP4 + ~200ms parts) — see relay surv_proxy.go.
 	muxer := &gohlslib.Muxer{
-		Variant: variant,
-		// 6-segment window gives recovery headroom against drift (see relay
-		// surv_proxy.go). Live target latency is unchanged.
-		SegmentCount:       6,
+		Variant:            gohlslib.MuxerVariantLowLatency,
+		SegmentCount:       7,
 		SegmentMinDuration: 1 * time.Second,
+		PartMinDuration:    200 * time.Millisecond,
 		Tracks:             []*gohlslib.Track{track},
 	}
 	if err := muxer.Start(); err != nil {
