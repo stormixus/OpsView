@@ -302,6 +302,12 @@ function connect() {
     const msgType = view.getUint16(6, true);
     const payloadLen = view.getUint32(8, true);
 
+    // payloadLen is attacker-controlled (uint32). Reject any frame claiming more
+    // bytes than actually arrived so the TypedArray views below (and the tile
+    // reads in handleFrameDelta, which bound against payloadLen) can't throw a
+    // RangeError on a malformed/oversized length.
+    if (OVP_HEADER_SIZE + payloadLen > buf.byteLength) return;
+
     if (msgType === MSG_FRAME_DELTA) {
       handleFrameDelta(buf, OVP_HEADER_SIZE, payloadLen);
     } else if (msgType === MSG_ERROR) {
