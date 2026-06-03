@@ -41,8 +41,9 @@ type streamEntry struct {
 
 // SurvProxy manages multiple RTSP→HLS streams, one per surveillance channel.
 type SurvProxy struct {
-	mu      sync.RWMutex
-	streams map[string]*streamEntry // "ch1", "ch2", ...
+	mu       sync.RWMutex
+	streams  map[string]*streamEntry // "ch1", "ch2", ...
+	configMu sync.Mutex              // serializes HandleSurvConfig runs
 }
 
 // StreamInfo is returned by the streams list API.
@@ -58,8 +59,13 @@ func NewSurvProxy() *SurvProxy {
 	}
 }
 
-// HandleSurvConfig parses a MsgSurvConfig payload and starts/stops channels accordingly.
+// HandleSurvConfig parses a MsgSurvConfig payload and starts/stops channels
+// accordingly. It may be invoked from a goroutine (off the publisher read loop);
+// configMu serializes concurrent applications so start/stop logic stays coherent.
 func (sp *SurvProxy) HandleSurvConfig(payload []byte) {
+	sp.configMu.Lock()
+	defer sp.configMu.Unlock()
+
 	var cfg proto.SurvConfig
 	if err := json.Unmarshal(payload, &cfg); err != nil {
 		log.Printf("[surv] config parse error: %v", err)

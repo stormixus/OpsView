@@ -217,8 +217,10 @@ func (h *Hub) HandlePublish(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[relay] cached surveillance config (%d bytes)", len(data))
 			h.broadcast <- data
 
-			// Start RTSP→HLS proxy streams
-			h.survProxy.HandleSurvConfig(data[proto.HeaderSize:])
+			// Start RTSP→HLS proxy streams off the read loop — blocking DVR
+			// connects must not stall publisher frame ingestion. configData is a
+			// private copy, so it is safe to hand to the goroutine.
+			go h.survProxy.HandleSurvConfig(configData[proto.HeaderSize:])
 
 		case proto.MsgSurvSnapshot:
 			// Snapshot response from publisher — route to specific watcher
