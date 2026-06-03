@@ -14,6 +14,21 @@ function escapeHtml(s) {
     .replace(/'/g, '&#39;');
 }
 
+// Low-latency live-HLS config shared by every surveillance player. Caps how far
+// the player may drift from the live edge (liveMaxLatencyDuration) and catches
+// up smoothly by speeding playback (maxLiveSyncPlaybackRate) instead of letting
+// latency accumulate to 10–30s.
+const SURV_HLS_CONFIG = {
+  enableWorker: true,
+  lowLatencyMode: true,
+  backBufferLength: 0,
+  liveSyncDuration: 1.5,
+  liveMaxLatencyDuration: 5,
+  maxLiveSyncPlaybackRate: 1.5,
+  maxBufferLength: 6,
+  maxMaxBufferLength: 8,
+};
+
 // --- OVP Protocol constants ---
 const OVP_MAGIC = 0x4F565031;
 const OVP_HEADER_SIZE = 12;
@@ -745,7 +760,7 @@ function startStream(dvr, ch) {
     cell.prepend(video);
 
     if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+      const hls = new Hls(SURV_HLS_CONFIG);
       hls.loadSource(hlsUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
@@ -763,7 +778,7 @@ function startStream(dvr, ch) {
       video.autoplay = true; video.muted = true; video.playsInline = true;
       cell.prepend(video);
       if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-        const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+        const hls = new Hls(SURV_HLS_CONFIG);
         hls.loadSource(ch.url);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
