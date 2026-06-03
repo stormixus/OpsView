@@ -250,11 +250,13 @@ func (m *SurveillanceManager) ListChannels(dvrID int64) ([]ChannelConfig, error)
 	for rows.Next() {
 		var ch ChannelConfig
 		var en int
-		rows.Scan(&ch.ID, &ch.DVRID, &ch.ChNum, &ch.Name, &ch.Order, &en, &ch.Width, &ch.Height)
+		if err := rows.Scan(&ch.ID, &ch.DVRID, &ch.ChNum, &ch.Name, &ch.Order, &en, &ch.Width, &ch.Height); err != nil {
+			return nil, err
+		}
 		ch.Enabled = en == 1
 		chs = append(chs, ch)
 	}
-	return chs, nil
+	return chs, rows.Err()
 }
 
 func (m *SurveillanceManager) DiscoverChannels(dvrID int64) ([]ChannelConfig, error) {
@@ -717,23 +719,30 @@ func (m *SurveillanceManager) discoverFromDVRRTSP(dvr DVRConfig) ([]ChannelConfi
 		}
 	}
 
-	var channels []ChannelConfig
-	misses := 0
-	for ch := 1; ch <= maxChannels; ch++ {
-		if foundSet[ch] {
-			misses = 0
-			channels = append(channels, ChannelConfig{DVRID: dvr.ID, ChNum: ch, Name: fmt.Sprintf("Channel %d", ch), Order: ch - 1})
-		} else if len(channels) > 0 {
-			misses++
-			if misses >= 3 {
-				break
-			}
-		}
-	}
+	channels := channelsFromFoundSet(dvr.ID, foundSet, maxChannels)
 	if len(channels) == 0 {
 		return nil, fmt.Errorf("no RTSP channels found")
 	}
 	return channels, nil
+}
+
+// channelsFromFoundSet builds the channel list from an exhaustive probe result.
+// Because every channel up to maxChannels was probed, we include every hit — a
+// gap in the middle must not drop the valid higher channels (the old
+// consecutive-miss early-break did exactly that).
+func channelsFromFoundSet(dvrID int64, foundSet map[int]bool, maxChannels int) []ChannelConfig {
+	var channels []ChannelConfig
+	for ch := 1; ch <= maxChannels; ch++ {
+		if foundSet[ch] {
+			channels = append(channels, ChannelConfig{
+				DVRID: dvrID,
+				ChNum: ch,
+				Name:  fmt.Sprintf("Channel %d", ch),
+				Order: ch - 1,
+			})
+		}
+	}
+	return channels
 }
 
 func probeRTSPChannel(rtspURL string) bool {
@@ -810,6 +819,9 @@ func mergeChannelDiscovery(channelSets ...[]ChannelConfig) []ChannelConfig {
 			if ch.ChNum == 0 {
 				continue
 			}
+			// Names originate from DVR devices (discovery XML) — sanitize at
+			// ingestion (defense-in-depth alongside output-escaping).
+			ch.Name = sanitizeChannelName(ch.Name)
 			existing, ok := merged[ch.ChNum]
 			if !ok {
 				merged[ch.ChNum] = ch
@@ -835,6 +847,22 @@ func mergeChannelDiscovery(channelSets ...[]ChannelConfig) []ChannelConfig {
 		result = append(result, merged[chNum])
 	}
 	return result
+}
+
+// sanitizeChannelName strips control characters and caps length on a
+// device-supplied channel name.
+func sanitizeChannelName(name string) string {
+	out := make([]rune, 0, len(name))
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f { // control characters
+			continue
+		}
+		out = append(out, r)
+		if len(out) >= 64 {
+			break
+		}
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func shouldReplaceChannelName(current, candidate string, chNum int) bool {
