@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,6 +22,10 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 256 * 1024,
 	CheckOrigin:     func(r *http.Request) bool { return true },
 }
+
+// maxWSMessageBytes caps a single inbound WebSocket message so a malicious peer
+// cannot force an unbounded allocation. Far above any legitimate frame.
+const maxWSMessageBytes = 32 << 20 // 32 MiB
 
 // Hub manages the publisher and all watchers.
 type Hub struct {
@@ -55,6 +60,9 @@ type Hub struct {
 
 	// Full-frame accumulator for REST snapshot
 	frameBuf *FrameBuffer
+
+	// Per-IP watcher PIN brute-force limiter
+	pinLimiter *pinLimiter
 }
 
 // Watcher wraps a viewer WebSocket connection with a send queue.
@@ -67,12 +75,13 @@ type Watcher struct {
 
 func NewHub(cfg Config) *Hub {
 	h := &Hub{
-		cfg:       cfg,
-		watchers:  make(map[*Watcher]struct{}),
-		broadcast: make(chan []byte, 64),
-		done:      make(chan struct{}),
-		survProxy: NewSurvProxy(),
-		frameBuf:  NewFrameBuffer(),
+		cfg:        cfg,
+		watchers:   make(map[*Watcher]struct{}),
+		broadcast:  make(chan []byte, 64),
+		done:       make(chan struct{}),
+		survProxy:  NewSurvProxy(),
+		frameBuf:   NewFrameBuffer(),
+		pinLimiter: newPinLimiter(),
 	}
 	h.testPattern = NewTestPattern(h)
 	return h
@@ -121,6 +130,7 @@ func (h *Hub) HandlePublish(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[relay] publish upgrade error: %v", err)
 		return
 	}
+	conn.SetReadLimit(maxWSMessageBytes)
 
 	ip := r.RemoteAddr
 	log.Printf("[relay] publisher connecting from %s", ip)
@@ -233,11 +243,12 @@ func (h *Hub) HandleWatch(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[relay] watch upgrade error: %v", err)
 		return
 	}
+	conn.SetReadLimit(maxWSMessageBytes)
 
 	ip := r.RemoteAddr
 	log.Printf("[relay] watcher connecting from %s", ip)
 
-	if !h.authenticateWatcher(conn) {
+	if !h.authenticateWatcher(conn, clientIP(ip)) {
 		conn.Close()
 		return
 	}
@@ -470,7 +481,21 @@ func (h *Hub) authenticatePublisher(conn *websocket.Conn) (proto.Auth, bool) {
 	return auth, true
 }
 
-func (h *Hub) authenticateWatcher(conn *websocket.Conn) bool {
+// clientIP strips the port from a RemoteAddr ("ip:port" -> "ip").
+func clientIP(remoteAddr string) string {
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return host
+	}
+	return remoteAddr
+}
+
+func (h *Hub) authenticateWatcher(conn *websocket.Conn, ip string) bool {
+	// Throttle PIN guessing before doing any work for this connection.
+	if !h.pinLimiter.allowed(ip) {
+		sendError(conn, 429, "too many attempts; try again later")
+		return false
+	}
+
 	_, hello, auth, err := h.readHelloAuth(conn)
 	if err != nil {
 		sendError(conn, 400, err.Error())
@@ -490,11 +515,14 @@ func (h *Hub) authenticateWatcher(conn *websocket.Conn) bool {
 		sendError(conn, 503, "no publisher connected")
 		return false
 	}
-	if auth.Token != pin {
+	// Constant-time compare so the PIN can't be recovered by timing.
+	if subtle.ConstantTimeCompare([]byte(auth.Token), []byte(pin)) != 1 {
+		h.pinLimiter.recordFailure(ip)
 		sendError(conn, 401, "invalid PIN")
 		log.Printf("[relay] watcher PIN mismatch from %s", conn.RemoteAddr())
 		return false
 	}
+	h.pinLimiter.recordSuccess(ip)
 	return true
 }
 

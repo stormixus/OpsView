@@ -20,6 +20,19 @@ type FrameBuffer struct {
 	dec    *zstd.Decoder
 }
 
+// Frame dimension caps. The agent only emits 720p/1080p; these generous bounds
+// (8K) prevent an attacker-controlled Width/Height from driving a multi-GB
+// allocation (up to 65535*65535*4 ≈ 17 GB before this guard).
+const (
+	maxFrameWidth  = 7680
+	maxFrameHeight = 4320
+)
+
+// validFrameDimensions rejects zero/negative and out-of-bounds frame sizes.
+func validFrameDimensions(w, h int) bool {
+	return w > 0 && h > 0 && w <= maxFrameWidth && h <= maxFrameHeight
+}
+
 func NewFrameBuffer() *FrameBuffer {
 	dec, _ := zstd.NewReader(nil)
 	return &FrameBuffer{dec: dec}
@@ -32,6 +45,11 @@ func (fb *FrameBuffer) Update(fd *proto.FrameDelta) {
 	w := int(fd.Width)
 	h := int(fd.Height)
 	ts := int(fd.TileSize)
+
+	// Reject malformed/oversized frames before allocating or indexing.
+	if !validFrameDimensions(w, h) || ts <= 0 {
+		return
+	}
 
 	if w != fb.width || h != fb.height {
 		fb.width = w
@@ -51,6 +69,11 @@ func (fb *FrameBuffer) Update(fd *proto.FrameDelta) {
 
 		ox := int(t.TX) * ts
 		oy := int(t.TY) * ts
+		// Skip tiles whose origin lies outside the frame (prevents negative
+		// widths / out-of-range slice panics below).
+		if ox < 0 || oy < 0 || ox >= w || oy >= h {
+			continue
+		}
 		tw := ts
 		th := ts
 		if ox+tw > w {
@@ -59,10 +82,13 @@ func (fb *FrameBuffer) Update(fd *proto.FrameDelta) {
 		if oy+th > h {
 			th = h - oy
 		}
+		if tw <= 0 || th <= 0 {
+			continue
+		}
 
 		for row := 0; row < th; row++ {
 			srcOff := row * ts * 4
-			dstOff := ((oy + row) * w + ox) * 4
+			dstOff := ((oy+row)*w + ox) * 4
 			rowBytes := tw * 4
 			if srcOff+rowBytes <= len(raw) && dstOff+rowBytes <= len(fb.pixels) {
 				copy(fb.pixels[dstOff:dstOff+rowBytes], raw[srcOff:srcOff+rowBytes])
