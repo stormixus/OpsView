@@ -33,8 +33,10 @@ func TestDiscoverISAPIMergesVideoInputsAndStreaming(t *testing.T) {
 	mux.HandleFunc("/ISAPI/Streaming/channels/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
 <StreamingChannel>
-  <videoResolutionWidth>1920</videoResolutionWidth>
-  <videoResolutionHeight>1080</videoResolutionHeight>
+  <Video>
+    <videoResolutionWidth>1920</videoResolutionWidth>
+    <videoResolutionHeight>1080</videoResolutionHeight>
+  </Video>
 </StreamingChannel>`)
 	})
 
@@ -82,8 +84,10 @@ func TestDiscoverISAPIFallsBackToStreamingWhenVideoInputs404(t *testing.T) {
 	mux.HandleFunc("/ISAPI/Streaming/channels/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>
 <StreamingChannel>
-  <videoResolutionWidth>1920</videoResolutionWidth>
-  <videoResolutionHeight>1080</videoResolutionHeight>
+  <Video>
+    <videoResolutionWidth>1920</videoResolutionWidth>
+    <videoResolutionHeight>1080</videoResolutionHeight>
+  </Video>
 </StreamingChannel>`)
 	})
 
