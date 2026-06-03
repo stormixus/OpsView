@@ -297,8 +297,11 @@ func (m *CCTVManager) ReorderDVRs(orderedIDs []int64) error {
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback() // no-op after a successful Commit
 	for i, id := range orderedIDs {
-		tx.Exec(`UPDATE dvrs SET display_order=? WHERE id=?`, i, id)
+		if _, err := tx.Exec(`UPDATE dvrs SET display_order=? WHERE id=?`, i, id); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -308,8 +311,11 @@ func (m *CCTVManager) ReorderChannels(dvrID int64, orderedChNums []int) error {
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback() // no-op after a successful Commit
 	for i, chNum := range orderedChNums {
-		tx.Exec(`UPDATE channels SET display_order=? WHERE dvr_id=? AND ch_num=?`, i, dvrID, chNum)
+		if _, err := tx.Exec(`UPDATE channels SET display_order=? WHERE dvr_id=? AND ch_num=?`, i, dvrID, chNum); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
