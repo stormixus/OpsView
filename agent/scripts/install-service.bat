@@ -6,8 +6,20 @@ set NSSM=nssm.exe
 set SERVICE_NAME=opsview-agent
 set AGENT_EXE=%~dp0\..\opsview-agent.exe
 
+REM === REQUIRED: shared publisher secret — must equal the relay's ===
+REM === RELAY_PUBLISHER_TOKEN. The relay rejects the agent without it. ===
+REM Either fill it in below, or set RELAY_PUBLISHER_TOKEN in the environment
+REM before running this script (generate one with: openssl rand -hex 32).
+if "%RELAY_PUBLISHER_TOKEN%"=="" set RELAY_PUBLISHER_TOKEN=
+if "%RELAY_PUBLISHER_TOKEN%"=="" (
+  echo ERROR: RELAY_PUBLISHER_TOKEN is not set.
+  echo   Set it at the top of this script, or run:  set RELAY_PUBLISHER_TOKEN=^<token^>
+  exit /b 1
+)
+
 echo Installing %SERVICE_NAME%...
 %NSSM% install %SERVICE_NAME% "%AGENT_EXE%"
+%NSSM% set %SERVICE_NAME% AppEnvironmentExtra RELAY_PUBLISHER_TOKEN=%RELAY_PUBLISHER_TOKEN%
 %NSSM% set %SERVICE_NAME% DisplayName "OpsView Agent"
 %NSSM% set %SERVICE_NAME% Description "OpsView screen capture and streaming agent"
 %NSSM% set %SERVICE_NAME% Start SERVICE_AUTO_START
