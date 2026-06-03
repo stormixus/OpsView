@@ -44,10 +44,23 @@ func main() {
 type AgentConfig struct {
 	RelayURL string
 	PIN      string
-	Profile  int // 1080 or 720
-	FPSMin   int
-	FPSMax   int
-	TileSize int
+	// PublisherToken is the shared relay secret the agent presents to claim the
+	// publisher slot. Sourced from RELAY_PUBLISHER_TOKEN (or AGENT_TOKEN).
+	PublisherToken string
+	Profile        int // 1080 or 720
+	FPSMin         int
+	FPSMax         int
+	TileSize       int
+}
+
+// loadPublisherToken returns the shared relay publisher secret from the
+// environment. Empty means the relay (which is fail-closed) will reject this
+// agent — surfaced as a clear connect error.
+func loadPublisherToken() string {
+	if t := os.Getenv("RELAY_PUBLISHER_TOKEN"); t != "" {
+		return t
+	}
+	return os.Getenv("AGENT_TOKEN")
 }
 
 func loadOrCreateAgentPIN() (string, error) {

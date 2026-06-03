@@ -26,19 +26,25 @@ Windows 객실관리 앱 화면을 원격으로 시청하는 View-only 스트리
 ## Quick Start
 
 ```bash
+# 0) Publisher 시크릿 설정 (필수). relay와 agent가 동일한 값을 사용해야 합니다.
+#    미설정 시 relay는 기동을 거부합니다(fail-closed).
+export RELAY_PUBLISHER_TOKEN=$(openssl rand -hex 16)
+
 # 1) Relay 시작
 cd relay
 go build -o opsview-relay .
 ./opsview-relay
 
-# 2) Agent 시작
+# 2) Agent 시작 (같은 RELAY_PUBLISHER_TOKEN 환경에서)
 cd agent
 go build -o opsview-agent .
 ./opsview-agent
 
-# 3) 브라우저에서 시청
+# 3) 브라우저에서 시청 (에이전트에 표시된 6자리 PIN 입력)
 open http://127.0.0.1:8080
 ```
+
+> **보안:** `RELAY_PUBLISHER_TOKEN`은 publisher(agent)만 아는 공유 시크릿으로, 시청자 PIN과 별개입니다. 시청자는 여전히 6자리 PIN으로 인증합니다.
 
 ## Environment Variables
 
