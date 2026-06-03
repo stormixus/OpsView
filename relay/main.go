@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/NebulousLabs/go-upnp"
@@ -21,6 +22,11 @@ func runServer() (stop func()) {
 	// start rather than run an unauthenticated relay.
 	if cfg.PublisherToken == "" {
 		log.Fatalf("[relay] RELAY_PUBLISHER_TOKEN (or AGENT_TOKEN) must be set; refusing to start without publisher authentication")
+	}
+
+	allowedOrigins = cfg.AllowedOrigins
+	if len(allowedOrigins) == 0 {
+		log.Printf("[relay] RELAY_ALLOWED_ORIGINS not set; accepting WebSocket connections from any Origin")
 	}
 
 	hub := NewHub(cfg)
@@ -107,6 +113,9 @@ type Config struct {
 	// single publisher slot. Loaded from RELAY_PUBLISHER_TOKEN (falling back to
 	// AGENT_TOKEN). The relay refuses to start if it is empty (fail-closed).
 	PublisherToken string
+	// AllowedOrigins is the WebSocket Origin allowlist (RELAY_ALLOWED_ORIGINS,
+	// comma-separated). Empty = accept any Origin.
+	AllowedOrigins []string
 }
 
 func loadConfig() Config {
@@ -117,9 +126,17 @@ func loadConfig() Config {
 		token = os.Getenv("AGENT_TOKEN")
 	}
 
+	var origins []string
+	for _, o := range strings.Split(os.Getenv("RELAY_ALLOWED_ORIGINS"), ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			origins = append(origins, o)
+		}
+	}
+
 	return Config{
 		Port:            port,
 		MaxWatcherQueue: 4,
 		PublisherToken:  token,
+		AllowedOrigins:  origins,
 	}
 }

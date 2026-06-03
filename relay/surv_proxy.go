@@ -151,6 +151,11 @@ func (sp *SurvProxy) StartChannel(id, name, rawURL string) error {
 	if err != nil {
 		return fmt.Errorf("invalid RTSP URL: %w", err)
 	}
+	// SSRF guard: the RTSP target host is publisher-supplied. Block loopback and
+	// link-local (incl. cloud-metadata) targets; private LAN DVRs stay allowed.
+	if isBlockedRTSPHost(u.Host) {
+		return fmt.Errorf("refusing to connect to blocked RTSP host %q", u.Host)
+	}
 
 	c := &gortsplib.Client{
 		Scheme:       u.Scheme,
@@ -219,7 +224,7 @@ func (sp *SurvProxy) StartChannel(id, name, rawURL string) error {
 	sp.streams[id] = entry
 	sp.mu.Unlock()
 
-	log.Printf("[surv] started %s (%s)", id, rawURL)
+	log.Printf("[surv] started %s (%s)", id, redactRTSPURL(rawURL))
 	return nil
 }
 
@@ -497,8 +502,8 @@ func isRTSPNotFound(err error) bool {
 }
 
 const (
-	reconnectMinDelay = 2 * time.Second
-	reconnectMaxDelay = 30 * time.Second
+	reconnectMinDelay   = 2 * time.Second
+	reconnectMaxDelay   = 30 * time.Second
 	reconnectMaxRetries = 10
 )
 

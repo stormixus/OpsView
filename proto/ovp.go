@@ -19,12 +19,12 @@ const (
 type MessageType uint16
 
 const (
-	MsgHello      MessageType = 1
-	MsgAuth       MessageType = 2
-	MsgFrameDelta MessageType = 3
-	MsgFullFrame  MessageType = 4
-	MsgControl    MessageType = 5
-	MsgHeartbeat  MessageType = 6
+	MsgHello        MessageType = 1
+	MsgAuth         MessageType = 2
+	MsgFrameDelta   MessageType = 3
+	MsgFullFrame    MessageType = 4
+	MsgControl      MessageType = 5
+	MsgHeartbeat    MessageType = 6
 	MsgError        MessageType = 7
 	MsgReady        MessageType = 8
 	MsgSurvConfig   MessageType = 9  // Surveillance config (publisher→relay→watcher)
@@ -60,6 +60,10 @@ func (m MessageType) String() string {
 
 // HeaderSize is the fixed size of the OVP header in bytes.
 const HeaderSize = 4 + 2 + 2 + 4 // magic(4) + version(2) + type(2) + payload_len(4) = 12
+
+// MaxPayloadSize bounds a single OVP message payload so a malicious header
+// cannot drive an unbounded allocation (PayloadLen is uint32, up to 4 GiB).
+const MaxPayloadSize = 64 << 20 // 64 MiB
 
 // Header is the common prefix of every OVP message.
 type Header struct {
@@ -106,6 +110,9 @@ func ReadMessage(r io.Reader) (Header, []byte, error) {
 	h, err := DecodeHeader(hbuf)
 	if err != nil {
 		return h, nil, err
+	}
+	if h.PayloadLen > MaxPayloadSize {
+		return h, nil, fmt.Errorf("ovp: payload length %d exceeds max %d", h.PayloadLen, MaxPayloadSize)
 	}
 	payload := make([]byte, h.PayloadLen)
 	if h.PayloadLen > 0 {

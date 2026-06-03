@@ -17,10 +17,16 @@ import (
 	"github.com/opsview/opsview/proto"
 )
 
+// allowedOrigins is the WebSocket Origin allowlist (RELAY_ALLOWED_ORIGINS).
+// Empty = permissive (accept all), preserving prior behavior unless configured.
+var allowedOrigins []string
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  64 * 1024,
 	WriteBufferSize: 256 * 1024,
-	CheckOrigin:     func(r *http.Request) bool { return true },
+	CheckOrigin: func(r *http.Request) bool {
+		return originAllowed(r.Header.Get("Origin"), r.Host, allowedOrigins)
+	},
 }
 
 // maxWSMessageBytes caps a single inbound WebSocket message so a malicious peer
