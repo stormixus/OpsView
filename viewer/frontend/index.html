@@ -1735,7 +1735,7 @@
             + '<span class="edit-btn ml-0.5 text-gray-600 text-[10px] cursor-pointer hover:text-cyan-300 transition-colors" title="' + t('editDvr') + '">&#9998;</span>'
             + '<span class="del-btn ml-0.5 text-gray-600 text-[10px] cursor-pointer hover:text-red-400 transition-colors" title="' + t('deleteDvr') + '">&times;</span>';
         }
-        tab.innerHTML = '<i data-lucide="' + icon + '" style="width:12px;height:12px;display:inline-block;"></i> ' + d.name + actionBtns;
+        tab.innerHTML = '<i data-lucide="' + icon + '" style="width:12px;height:12px;display:inline-block;"></i> ' + escapeHtml(d.name) + actionBtns;
         tab.addEventListener('click', e => {
           if (!d._remote) {
             if (e.target.closest('.del-btn')) { e.stopPropagation(); deleteDVR(d.id); return; }
@@ -2207,7 +2207,7 @@
         overlay.appendChild(video);
         const label = document.createElement('div');
         label.className = 'expand-label';
-        label.innerHTML = '<span class="expand-name">' + chName + ' (CH' + chNum + ')</span><span class="expand-hint">' + t('expandHint') + '</span>';
+        label.innerHTML = '<span class="expand-name">' + escapeHtml(chName) + ' (CH' + chNum + ')</span><span class="expand-hint">' + t('expandHint') + '</span>';
         overlay.appendChild(label);
       } else {
         // ISAPI: snapshot image with refresh
@@ -2808,7 +2808,7 @@
 
         const label = document.createElement('div');
         label.className = 'ch-label';
-        label.innerHTML = '<span style="font-size:11px;color:#d1d5db;">' + ch.name + '</span><span class="ch-id">CH' + ch.ch_num + '</span>';
+        label.innerHTML = '<span style="font-size:11px;color:#d1d5db;">' + escapeHtml(ch.name) + '</span><span class="ch-id">CH' + ch.ch_num + '</span>';
         cell.appendChild(label);
         cell.addEventListener('dblclick', () => {
           expandCell(ch.ch_num, ch.name, container, cell);
@@ -3165,6 +3165,17 @@
 
     function t(key) {
       return (i18n[currentLang] && i18n[currentLang][key]) || i18n['en'][key] || key;
+    }
+
+    // escapeHtml makes attacker-influenced strings (camera channel names, DVR
+    // names from devices) safe for innerHTML. Hoisted, so callers above can use it.
+    function escapeHtml(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
 
     function applyI18n() {

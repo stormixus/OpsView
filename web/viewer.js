@@ -3,6 +3,17 @@
 
 'use strict';
 
+// escapeHtml renders attacker-influenced strings (camera channel names, DVR
+// names — sourced from DVR devices) safe for innerHTML interpolation.
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // --- OVP Protocol constants ---
 const OVP_MAGIC = 0x4F565031;
 const OVP_HEADER_SIZE = 12;
@@ -540,7 +551,7 @@ function renderDVRTabs() {
     }
     tab.innerHTML = `
       <i data-lucide="${icon}" class="w-3 h-3"></i>
-      <span class="dvr-tab-name">${d.name}</span>
+      <span class="dvr-tab-name">${escapeHtml(d.name)}</span>
       <span class="dvr-tab-meta">${d.channelCount}ch</span>
       ${actionBtns}
     `;
@@ -701,8 +712,8 @@ function renderSurvGrid() {
   grid.innerHTML = channelsToRender.map(ch => `
     <div class="surv-cell" id="cell-${dvr.id}-${ch.ch_num || ch.ch}">
       <div class="label">
-        <span class="text-slate-300 font-medium">${ch.name}</span>
-        <span class="text-slate-600 text-[9px] ml-2">${dvr.name}</span>
+        <span class="text-slate-300 font-medium">${escapeHtml(ch.name)}</span>
+        <span class="text-slate-600 text-[9px] ml-2">${escapeHtml(dvr.name)}</span>
       </div>
     </div>
   `).join('');
