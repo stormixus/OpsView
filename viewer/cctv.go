@@ -204,11 +204,13 @@ func (m *CCTVManager) ListChannels(dvrID int64) ([]ChannelConfig, error) {
 	for rows.Next() {
 		var ch ChannelConfig
 		var en int
-		rows.Scan(&ch.ID, &ch.DVRID, &ch.ChNum, &ch.Name, &ch.Order, &en, &ch.Width, &ch.Height)
+		if err := rows.Scan(&ch.ID, &ch.DVRID, &ch.ChNum, &ch.Name, &ch.Order, &en, &ch.Width, &ch.Height); err != nil {
+			return nil, err
+		}
 		ch.Enabled = en == 1
 		chs = append(chs, ch)
 	}
-	return chs, nil
+	return chs, rows.Err()
 }
 
 func (m *CCTVManager) DiscoverChannels(dvrID int64) ([]ChannelConfig, error) {
