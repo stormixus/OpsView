@@ -40,6 +40,36 @@ func getPublicIP() string {
 	return string(ip)
 }
 
+// isLoopbackHost reports whether a request Host header targets the local agent.
+func isLoopbackHost(hostHeader string) bool {
+	h := hostHeader
+	if hostOnly, _, err := net.SplitHostPort(hostHeader); err == nil {
+		h = hostOnly
+	}
+	h = strings.Trim(h, "[]")
+	switch h {
+	case "127.0.0.1", "localhost", "::1":
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// localOnly rejects requests whose Host header is not loopback, defeating
+// DNS-rebinding attacks against the localhost-bound web UI (incl. the
+// destructive reset-db / clear-channels endpoints).
+func localOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isLoopbackHost(r.Host) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func startWebUI() {
 	if webSrv != nil {
 		return
@@ -61,7 +91,7 @@ func startWebUI() {
 	}
 	webPort = listener.Addr().(*net.TCPAddr).Port
 
-	webSrv = &http.Server{Handler: mux}
+	webSrv = &http.Server{Handler: localOnly(mux)}
 	go func() {
 		log.Printf("[webui] started on port %d", webPort)
 		if err := webSrv.Serve(listener); err != nil && err != http.ErrServerClosed {

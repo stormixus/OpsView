@@ -86,7 +86,7 @@ func loadOrCreateAgentPIN() (string, error) {
 	}
 	pin := fmt.Sprintf("%06d", pinInt.Int64())
 
-	os.MkdirAll(filepath.Dir(pinPath), 0755)
-	os.WriteFile(pinPath, []byte(pin+"\n"), 0644)
+	os.MkdirAll(filepath.Dir(pinPath), 0700)
+	os.WriteFile(pinPath, []byte(pin+"\n"), 0600) // secret: owner-only
 	return pin, nil
 }
