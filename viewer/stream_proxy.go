@@ -74,8 +74,10 @@ func (p *StreamProxy) StartStream(rawURL string) (string, error) {
 	}
 
 	muxer := &gohlslib.Muxer{
-		Variant:            variant,
-		SegmentCount:       3,
+		Variant: variant,
+		// 6-segment window gives recovery headroom against drift (see relay
+		// surv_proxy.go). Live target latency is unchanged.
+		SegmentCount:       6,
 		SegmentMinDuration: 1 * time.Second,
 		Tracks:             []*gohlslib.Track{track},
 	}

@@ -195,8 +195,12 @@ func (sp *SurvProxy) StartChannel(id, name, rawURL string) error {
 	}
 
 	muxer := &gohlslib.Muxer{
-		Variant:            variant,
-		SegmentCount:       3,
+		Variant: variant,
+		// 6 segments (~6s window) gives the player headroom to recover from a
+		// jitter-induced drift instead of the needed segment being evicted
+		// (which forces a stall + conservative re-sync = the 10–30s lag). Live
+		// target latency is unchanged — the player still syncs near the edge.
+		SegmentCount:       6,
 		SegmentMinDuration: 1 * time.Second,
 		Tracks:             []*gohlslib.Track{track},
 	}
