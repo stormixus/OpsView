@@ -168,3 +168,39 @@ To remove:
 ```batch
 uninstall-service.bat
 ```
+
+## Update Signing (viewer auto-updater)
+
+The viewer auto-updater is **fail-closed**: it downloads an installer only over
+HTTPS from a pinned GitHub host, then verifies an **Ed25519 signature** over the
+installer's SHA-256 digest before executing it. With no key configured, the
+updater refuses to install anything.
+
+**One-time setup:**
+
+1. Generate a keypair:
+   ```bash
+   go run ./viewer/cmd/updatesign gen
+   ```
+   It prints a base64 **public key** (32 bytes) and **private key** (64 bytes).
+
+2. Embed the public key: paste it into `updatePublicKeyB64` in
+   `viewer/updater.go`, or inject it at build time:
+   ```bash
+   wails build -ldflags "-X main.updatePublicKeyB64=<PUBLIC_KEY_B64>"
+   ```
+
+3. Store the private key as the **`ED25519_UPDATE_PRIVATE_KEY`** GitHub Actions
+   secret (Settings → Secrets and variables → Actions). Keep it secret — anyone
+   with it can sign malicious updates. Prefer an offline-generated key.
+
+On every tagged release, CI signs each viewer asset (`*.dmg`, `*-setup.exe`,
+`*.tar.gz`) and uploads a detached `<asset>.sig`. The updater fetches
+`<download_url>.sig` and verifies it before installing. If the secret is unset,
+the release is unsigned and clients will not auto-update (by design).
+
+To sign assets manually:
+```bash
+ED25519_UPDATE_PRIVATE_KEY=<PRIVATE_KEY_B64> \
+  go run ./viewer/cmd/updatesign sign path/to/asset.dmg
+```
