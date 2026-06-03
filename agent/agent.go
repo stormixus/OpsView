@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,6 +14,25 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/opsview/opsview/proto"
 )
+
+// isPlaintextPublicRelay reports whether relayURL sends traffic unencrypted
+// (ws://) to a non-local, non-private host — i.e. the PIN and DVR credentials
+// would cross the public internet in the clear. LAN ws:// (private/loopback)
+// is an intentional supported mode and is not flagged.
+func isPlaintextPublicRelay(relayURL string) bool {
+	u, err := url.Parse(relayURL)
+	if err != nil || u.Scheme != "ws" {
+		return false
+	}
+	host := u.Hostname()
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+			return false
+		}
+		return true
+	}
+	return host != "localhost" && host != ""
+}
 
 // Agent orchestrates capture → tile → compress → send pipeline.
 type Agent struct {
@@ -83,6 +104,9 @@ func (a *Agent) Stop() {
 
 func (a *Agent) connect() error {
 	log.Printf("[agent] connecting to %s", a.cfg.RelayURL)
+	if isPlaintextPublicRelay(a.cfg.RelayURL) {
+		log.Printf("[agent] WARNING: %s is plaintext ws:// to a public host — the PIN and DVR credentials are sent unencrypted. Use wss:// (TLS) for internet relays.", a.cfg.RelayURL)
+	}
 	conn, _, err := websocket.DefaultDialer.Dial(a.cfg.RelayURL, nil)
 	if err != nil {
 		return err
