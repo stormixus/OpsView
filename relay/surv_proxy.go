@@ -183,25 +183,21 @@ func (sp *SurvProxy) StartChannel(id, name, rawURL string) error {
 
 	entry := &streamEntry{id: id, name: name}
 
-	track, isH265, err := setupSurvCodec(c, desc, entry)
+	track, _, err := setupSurvCodec(c, desc, entry)
 	if err != nil {
 		c.Close()
 		return err
 	}
 
-	variant := gohlslib.MuxerVariantMPEGTS
-	if isH265 {
-		variant = gohlslib.MuxerVariantFMP4
-	}
-
+	// Low-Latency HLS: fMP4 + partial segments. Parts (~200ms) are published as
+	// they're encoded, so the player reaches the live edge in ~0.5–1s instead of
+	// waiting for whole 1s segments. Works for both H264 and H265. The deep
+	// SegmentCount window remains as drift-recovery headroom.
 	muxer := &gohlslib.Muxer{
-		Variant: variant,
-		// 6 segments (~6s window) gives the player headroom to recover from a
-		// jitter-induced drift instead of the needed segment being evicted
-		// (which forces a stall + conservative re-sync = the 10–30s lag). Live
-		// target latency is unchanged — the player still syncs near the edge.
-		SegmentCount:       6,
+		Variant:            gohlslib.MuxerVariantLowLatency,
+		SegmentCount:       7,
 		SegmentMinDuration: 1 * time.Second,
+		PartMinDuration:    200 * time.Millisecond,
 		Tracks:             []*gohlslib.Track{track},
 	}
 	if err := muxer.Start(); err != nil {
