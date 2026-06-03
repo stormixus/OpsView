@@ -15,20 +15,23 @@ import (
 
 // Agent orchestrates capture → tile → compress → send pipeline.
 type Agent struct {
-	cfg      AgentConfig
-	conn     *websocket.Conn
-	connMu   sync.Mutex
-	seq      atomic.Uint32
-	profile  atomic.Int32
-	capturer Capturer
-	survMgr  *SurveillanceManager
-	stopped  chan struct{}
+	cfg         AgentConfig
+	conn        *websocket.Conn
+	connMu      sync.Mutex
+	seq         atomic.Uint32
+	profile     atomic.Int32
+	capturer    Capturer
+	survMgr     *SurveillanceManager
+	stopped     chan struct{}
+	stopOnce    sync.Once
+	snapshotSem chan struct{} // bounds concurrent snapshot handlers
 }
 
 func NewAgent(cfg AgentConfig) *Agent {
 	a := &Agent{
-		cfg:     cfg,
-		stopped: make(chan struct{}),
+		cfg:         cfg,
+		stopped:     make(chan struct{}),
+		snapshotSem: make(chan struct{}, 8),
 	}
 	a.profile.Store(int32(cfg.Profile))
 	return a
@@ -72,8 +75,10 @@ func (a *Agent) Run() {
 }
 
 func (a *Agent) Stop() {
-	close(a.stopped)
-	a.closeConn()
+	a.stopOnce.Do(func() {
+		close(a.stopped)
+		a.closeConn()
+	})
 }
 
 func (a *Agent) connect() error {
@@ -178,7 +183,18 @@ func (a *Agent) readPump(conn *websocket.Conn) {
 				}
 			}
 		} else if hdr.Type == proto.MsgSurvSnapshot {
-			go a.handleSnapshotRequest(data[proto.HeaderSize:])
+			// Bound concurrent snapshot handlers; drop when saturated so a flood
+			// of requests cannot exhaust goroutines/connections.
+			payload := append([]byte(nil), data[proto.HeaderSize:]...)
+			select {
+			case a.snapshotSem <- struct{}{}:
+				go func() {
+					defer func() { <-a.snapshotSem }()
+					a.handleSnapshotRequest(payload)
+				}()
+			default:
+				log.Printf("[agent] snapshot request dropped (too many in flight)")
+			}
 		}
 	}
 }
