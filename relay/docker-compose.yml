@@ -6,4 +6,10 @@ services:
       - "${RELAY_EXTERNAL_PORT:-28186}:8080"
     environment:
       - RELAY_PORT=8080
+      # REQUIRED shared publisher secret — must match the agent's
+      # RELAY_PUBLISHER_TOKEN/AGENT_TOKEN. Put the value in relay/.env
+      # (see relay/.env.example). Compose errors out early if it's unset.
+      - RELAY_PUBLISHER_TOKEN=${RELAY_PUBLISHER_TOKEN:?set RELAY_PUBLISHER_TOKEN in relay/.env}
+      # Optional WebSocket Origin allowlist (comma-separated); empty = allow all.
+      - RELAY_ALLOWED_ORIGINS=${RELAY_ALLOWED_ORIGINS:-}
     restart: unless-stopped
