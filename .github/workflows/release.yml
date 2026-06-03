@@ -255,11 +255,41 @@ jobs:
     needs: [build-agent, build-viewer]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           pattern: opsview-*
           merge-multiple: true
+
+      # Sign update assets so the viewer auto-updater can verify them (C-3).
+      # Requires the ED25519_UPDATE_PRIVATE_KEY repo secret (see docs/BUILD.md).
+      # If unset, signing is skipped and the fail-closed updater refuses to
+      # install — generate a keypair before relying on auto-update.
+      - name: Sign update assets (Ed25519)
+        if: env.HAS_UPDATE_KEY == 'true'
+        env:
+          HAS_UPDATE_KEY: ${{ secrets.ED25519_UPDATE_PRIVATE_KEY != '' }}
+          ED25519_UPDATE_PRIVATE_KEY: ${{ secrets.ED25519_UPDATE_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(artifacts/*.dmg artifacts/*-setup.exe artifacts/*.tar.gz)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no update assets to sign"; exit 0
+          fi
+          go run ./viewer/cmd/updatesign sign "${files[@]}"
+
+      - name: Warn if update signing key is missing
+        if: env.HAS_UPDATE_KEY != 'true'
+        env:
+          HAS_UPDATE_KEY: ${{ secrets.ED25519_UPDATE_PRIVATE_KEY != '' }}
+        run: echo "::warning::ED25519_UPDATE_PRIVATE_KEY not set; release assets are unsigned and the viewer auto-updater (fail-closed) will refuse to install them."
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -272,3 +302,4 @@ jobs:
             artifacts/*-setup.exe
             artifacts/*.tar.gz
             artifacts/*.zip
+            artifacts/*.sig
