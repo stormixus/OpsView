@@ -16,6 +16,13 @@ import (
 func runServer() (stop func()) {
 	cfg := loadConfig()
 
+	// Fail closed: without a configured publisher secret, anyone reachable on
+	// the (UPnP-forwarded) relay port could claim the publisher slot. Refuse to
+	// start rather than run an unauthenticated relay.
+	if cfg.PublisherToken == "" {
+		log.Fatalf("[relay] RELAY_PUBLISHER_TOKEN (or AGENT_TOKEN) must be set; refusing to start without publisher authentication")
+	}
+
 	hub := NewHub(cfg)
 	go hub.Run()
 
@@ -96,13 +103,23 @@ func getPort() string {
 type Config struct {
 	Port            string
 	MaxWatcherQueue int
+	// PublisherToken is the shared secret a publisher must present to claim the
+	// single publisher slot. Loaded from RELAY_PUBLISHER_TOKEN (falling back to
+	// AGENT_TOKEN). The relay refuses to start if it is empty (fail-closed).
+	PublisherToken string
 }
 
 func loadConfig() Config {
 	port := getPort()
 
+	token := os.Getenv("RELAY_PUBLISHER_TOKEN")
+	if token == "" {
+		token = os.Getenv("AGENT_TOKEN")
+	}
+
 	return Config{
 		Port:            port,
 		MaxWatcherQueue: 4,
+		PublisherToken:  token,
 	}
 }

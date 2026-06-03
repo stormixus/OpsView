@@ -103,8 +103,9 @@ func (a *Agent) connect() error {
 		return err
 	}
 
-	// Send AUTH
-	auth := proto.Auth{Token: a.cfg.PIN}
+	// Send AUTH: Token authenticates the publisher against the relay secret;
+	// PIN is the separate viewer PIN the relay advertises to watchers.
+	auth := proto.Auth{Token: a.cfg.PublisherToken, PIN: a.cfg.PIN}
 	authPayload, _ := json.Marshal(auth)
 	authMsg := proto.MarshalMessage(proto.MsgAuth, authPayload)
 	if err := conn.WriteMessage(websocket.BinaryMessage, authMsg); err != nil {

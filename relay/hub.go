@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -141,7 +142,7 @@ func (h *Hub) HandlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.publisher = conn
-	h.publisherPIN = auth.Token
+	h.publisherPIN = auth.PIN
 	h.mu.Unlock()
 
 	// Stop test pattern now that a real publisher is connected
@@ -358,8 +359,43 @@ func (h *Hub) routeSnapshotResponse(reqID string, rawMsg []byte) {
 	}
 }
 
-// HandleSurvConfig returns the cached surveillance config via REST.
+// redactSurvConfigPayload parses a SurvConfig JSON payload and returns a copy
+// with DVR credentials (username/password) removed. Used for any client-facing
+// surface so DVR admin logins never leave the relay.
+func redactSurvConfigPayload(payload []byte) ([]byte, error) {
+	var cfg proto.SurvConfig
+	if err := json.Unmarshal(payload, &cfg); err != nil {
+		return nil, err
+	}
+	for i := range cfg.DVRs {
+		cfg.DVRs[i].Username = ""
+		cfg.DVRs[i].Password = ""
+	}
+	return json.Marshal(cfg)
+}
+
+// pinFromRequest extracts the viewer PIN from a REST request (query param or
+// header), so /api/surv can be gated like the /watch WebSocket.
+func pinFromRequest(r *http.Request) string {
+	if p := r.URL.Query().Get("pin"); p != "" {
+		return p
+	}
+	return r.Header.Get("X-OpsView-PIN")
+}
+
+// HandleSurvConfig returns the cached surveillance config via REST. It requires
+// the viewer PIN and always strips DVR credentials from the response.
 func (h *Hub) HandleSurvConfig(w http.ResponseWriter, r *http.Request) {
+	h.mu.RLock()
+	pin := h.publisherPIN
+	hasPub := h.publisher != nil
+	h.mu.RUnlock()
+
+	if !hasPub || pin == "" || subtle.ConstantTimeCompare([]byte(pinFromRequest(r)), []byte(pin)) != 1 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	h.survConfigMu.RLock()
 	data := h.survConfig
 	h.survConfigMu.RUnlock()
@@ -369,8 +405,14 @@ func (h *Hub) HandleSurvConfig(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"dvrs":[],"channels":[]}`))
 		return
 	}
-	// Strip OVP header, return raw JSON payload
-	w.Write(data[proto.HeaderSize:])
+	// Strip OVP header, then redact credentials before returning the JSON.
+	redacted, err := redactSurvConfigPayload(data[proto.HeaderSize:])
+	if err != nil {
+		// Never fall back to the raw (credential-bearing) payload on error.
+		w.Write([]byte(`{"dvrs":[],"channels":[]}`))
+		return
+	}
+	w.Write(redacted)
 }
 
 func (h *Hub) watcherWritePump(w *Watcher) {
@@ -393,6 +435,16 @@ func (h *Hub) removeWatcher(w *Watcher) {
 	h.mu.Unlock()
 }
 
+// validPublisherToken reports whether the provided publisher token matches the
+// configured secret. It fails closed: an empty configured secret (or empty
+// provided token) is never valid. The comparison is constant-time.
+func validPublisherToken(provided, configured string) bool {
+	if configured == "" || provided == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(configured)) == 1
+}
+
 func (h *Hub) authenticatePublisher(conn *websocket.Conn) (proto.Auth, bool) {
 	// Expect HELLO then AUTH
 	_, hello, auth, err := h.readHelloAuth(conn)
@@ -404,8 +456,15 @@ func (h *Hub) authenticatePublisher(conn *websocket.Conn) (proto.Auth, bool) {
 		sendError(conn, 403, "expected publisher role")
 		return auth, false
 	}
-	if auth.Token == "" {
-		sendError(conn, 401, "missing PIN")
+	// The publisher must prove it knows the shared relay secret. The viewer PIN
+	// it advertises (auth.PIN) is a separate value and is NOT an authenticator.
+	if !validPublisherToken(auth.Token, h.cfg.PublisherToken) {
+		sendError(conn, 401, "invalid publisher token")
+		log.Printf("[relay] publisher auth failed from %s", conn.RemoteAddr())
+		return auth, false
+	}
+	if auth.PIN == "" {
+		sendError(conn, 400, "missing viewer PIN")
 		return auth, false
 	}
 	return auth, true

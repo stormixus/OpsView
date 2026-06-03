@@ -10,8 +10,13 @@ type Hello struct {
 }
 
 // Auth is the AUTH message payload (JSON-encoded).
+//
+// For a publisher, Token is the shared relay secret (RELAY_PUBLISHER_TOKEN) and
+// PIN is the viewer PIN it advertises to watchers. For a watcher, Token is the
+// viewer PIN and PIN is unused.
 type Auth struct {
 	Token string `json:"token"`
+	PIN   string `json:"pin,omitempty"` // publisher only: viewer PIN to advertise
 }
 
 // Control is the CONTROL message payload (JSON-encoded).
@@ -50,9 +55,9 @@ type DVRInfo struct {
 
 // ChannelInfo describes a single surveillance channel.
 type ChannelInfo struct {
-	ID      int   `json:"id"`
-	DVRID   int64 `json:"dvr_id"`
-	ChNum   int   `json:"ch_num"`
+	ID      int    `json:"id"`
+	DVRID   int64  `json:"dvr_id"`
+	ChNum   int    `json:"ch_num"`
 	Name    string `json:"name"`
 	Order   int    `json:"order"`
 	Enabled bool   `json:"enabled"`

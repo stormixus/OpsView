@@ -117,13 +117,18 @@ func startAgent(cfg Config) {
 		log.Printf("[tray] PIN auto-gen failed: %v", err)
 	}
 
+	token := loadPublisherToken()
+	if token == "" {
+		log.Printf("[tray] WARNING: RELAY_PUBLISHER_TOKEN/AGENT_TOKEN not set; the relay will reject this agent")
+	}
 	agentCfg := AgentConfig{
-		RelayURL: cfg.RelayURL,
-		PIN:      pin,
-		Profile:  cfg.Profile,
-		FPSMin:   5,
-		FPSMax:   10,
-		TileSize: 128,
+		RelayURL:       cfg.RelayURL,
+		PIN:            pin,
+		PublisherToken: token,
+		Profile:        cfg.Profile,
+		FPSMin:         5,
+		FPSMax:         10,
+		TileSize:       128,
 	}
 
 	trayAgent = NewAgent(agentCfg)
