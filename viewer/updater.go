@@ -30,7 +30,7 @@ var Version = "dev"
 // keypair with `go run ./cmd/updatesign gen`, paste the public key here (or
 // inject it via -ldflags "-X main.updatePublicKeyB64=..."), and keep the
 // private key as the ED25519_UPDATE_PRIVATE_KEY CI secret.
-var updatePublicKeyB64 = ""
+var updatePublicKeyB64 = "ngC0jByNST35TESJxtjWxvbDFlFCO6lN/fSlOEDfB6Y="
 
 // allowUpdateHostForTest is a test-only seam permitting one extra host (still
 // https-only). Empty in production.
