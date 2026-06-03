@@ -48,6 +48,9 @@ func NewSurveillanceManager() *SurveillanceManager {
 	if err != nil {
 		log.Fatalf("[surv] open db: %v", err)
 	}
+	// SQLite is single-writer; serialize all access through one connection so
+	// concurrent handlers/discovery never hit "database is locked" (SQLITE_BUSY).
+	db.SetMaxOpenConns(1)
 
 	m := &SurveillanceManager{
 		db:          db,
@@ -201,17 +204,33 @@ func (m *SurveillanceManager) ClearDVRChannels(id int64) error {
 }
 
 func (m *SurveillanceManager) ResetDB() error {
-	m.db.Close()
-	err := os.Remove(m.dbPath)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	db, err := sql.Open("sqlite", m.dbPath)
+	// Wipe all data on the EXISTING handle inside a transaction. We must NOT
+	// Close/reopen and swap m.db out from under in-flight callers (that was a
+	// data race + use-after-close, and the old error path could leave m.db
+	// permanently closed). DELETE (not DROP) keeps the schema present so a
+	// concurrent reader never sees a missing table; the transaction makes the
+	// wipe atomic. m.mu serializes destructive resets.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tx, err := m.db.Begin()
 	if err != nil {
 		return err
 	}
-	m.db = db
-	m.migrate()
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM channels`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM dvrs`); err != nil {
+		return err
+	}
+	// Reset AUTOINCREMENT counters (table is absent before the first insert).
+	_, _ = tx.Exec(`DELETE FROM sqlite_sequence`)
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
 	if m.onChange != nil {
 		m.onChange()
 	}
@@ -763,7 +782,7 @@ func (m *SurveillanceManager) fetchChannelResolution(dvr DVRConfig, chNum int) (
 	picUrl := fmt.Sprintf("http://%s:%d/ISAPI/Streaming/channels/%d02/picture", dvr.Addr, dvr.Port, chNum)
 	picReq, _ := http.NewRequest("GET", picUrl, nil)
 	picReq.SetBasicAuth(dvr.Username, dvr.Password)
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer cancel()
 	picReq = picReq.WithContext(ctx)
