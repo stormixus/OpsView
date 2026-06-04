@@ -98,6 +98,8 @@ func (m *SurveillanceManager) migrate() {
 		`ALTER TABLE dvrs ADD COLUMN protocol TEXT NOT NULL DEFAULT 'isapi'`,
 		`ALTER TABLE dvrs ADD COLUMN ext_addr TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE dvrs ADD COLUMN ext_port INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE channels ADD COLUMN rtsp_uri TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE channels ADD COLUMN snapshot_uri TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := m.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			log.Printf("[surv] migrate alter: %v", err)
@@ -123,14 +125,16 @@ type DVRConfig struct {
 }
 
 type ChannelConfig struct {
-	ID      int    `json:"id"`
-	DVRID   int64  `json:"dvr_id"`
-	ChNum   int    `json:"ch_num"`
-	Name    string `json:"name"`
-	Order   int    `json:"order"`
-	Enabled bool   `json:"enabled"`
-	Width   int    `json:"width"`
-	Height  int    `json:"height"`
+	ID          int    `json:"id"`
+	DVRID       int64  `json:"dvr_id"`
+	ChNum       int    `json:"ch_num"`
+	Name        string `json:"name"`
+	Order       int    `json:"order"`
+	Enabled     bool   `json:"enabled"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+	RtspURI     string `json:"rtsp_uri,omitempty"`
+	SnapshotURI string `json:"snapshot_uri,omitempty"`
 }
 
 func (m *SurveillanceManager) ListDVRs() ([]DVRConfig, error) {
@@ -250,7 +254,7 @@ func (m *SurveillanceManager) ResetDB() error {
 // --- Channel management ---
 
 func (m *SurveillanceManager) ListChannels(dvrID int64) ([]ChannelConfig, error) {
-	rows, err := m.db.Query(`SELECT id, dvr_id, ch_num, name, display_order, enabled, width, height FROM channels WHERE dvr_id=? ORDER BY display_order`, dvrID)
+	rows, err := m.db.Query(`SELECT id, dvr_id, ch_num, name, display_order, enabled, width, height, rtsp_uri, snapshot_uri FROM channels WHERE dvr_id=? ORDER BY display_order`, dvrID)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +264,7 @@ func (m *SurveillanceManager) ListChannels(dvrID int64) ([]ChannelConfig, error)
 	for rows.Next() {
 		var ch ChannelConfig
 		var en int
-		if err := rows.Scan(&ch.ID, &ch.DVRID, &ch.ChNum, &ch.Name, &ch.Order, &en, &ch.Width, &ch.Height); err != nil {
+		if err := rows.Scan(&ch.ID, &ch.DVRID, &ch.ChNum, &ch.Name, &ch.Order, &en, &ch.Width, &ch.Height, &ch.RtspURI, &ch.SnapshotURI); err != nil {
 			return nil, err
 		}
 		ch.Enabled = en == 1
@@ -296,10 +300,10 @@ func (m *SurveillanceManager) DiscoverChannels(dvrID int64) ([]ChannelConfig, er
 	discovered = normalizeChannelDiscovery(discovered)
 
 	for _, ch := range discovered {
-		_, err := m.db.Exec(`INSERT INTO channels (dvr_id, ch_num, name, display_order, enabled, width, height)
-			VALUES (?, ?, ?, ?, 1, ?, ?)
-			ON CONFLICT(dvr_id, ch_num) DO UPDATE SET width=excluded.width, height=excluded.height`,
-			dvrID, ch.ChNum, ch.Name, ch.Order, ch.Width, ch.Height)
+		_, err := m.db.Exec(`INSERT INTO channels (dvr_id, ch_num, name, display_order, enabled, width, height, rtsp_uri, snapshot_uri)
+			VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
+			ON CONFLICT(dvr_id, ch_num) DO UPDATE SET width=excluded.width, height=excluded.height, rtsp_uri=excluded.rtsp_uri, snapshot_uri=excluded.snapshot_uri`,
+			dvrID, ch.ChNum, ch.Name, ch.Order, ch.Width, ch.Height, ch.RtspURI, ch.SnapshotURI)
 		if err != nil {
 			log.Printf("[surv] upsert ch %d: %v", ch.ChNum, err)
 		}
@@ -327,6 +331,8 @@ func (m *SurveillanceManager) discoverWithProtocol(dvr DVRConfig) ([]ChannelConf
 		return m.discoverFromDVRRTSP(dvr)
 	case "dahua":
 		return m.discoverFromDVRDahua(dvr)
+	case "onvif":
+		return m.discoverFromDVROnvif(dvr)
 	default:
 		return m.discoverFromDVRISAPI(dvr)
 	}
@@ -349,6 +355,8 @@ func (m *SurveillanceManager) FetchSnapshot(dvrID int64, chNum int) ([]byte, err
 		}
 	case "dahua":
 		data, err = m.fetchSnapshotDahua(dvr, chNum)
+	case "onvif":
+		data, err = m.fetchSnapshotOnvif(dvr, chNum)
 	default:
 		data, err = m.fetchSnapshotISAPI(dvr, chNum)
 	}
@@ -414,6 +422,24 @@ func (m *SurveillanceManager) fetchSnapshotDahua(dvr DVRConfig, chNum int) ([]by
 	return io.ReadAll(resp.Body)
 }
 
+func (m *SurveillanceManager) fetchSnapshotOnvif(dvr DVRConfig, chNum int) ([]byte, error) {
+	var snapURI string
+	err := m.db.QueryRow(`SELECT snapshot_uri FROM channels WHERE dvr_id=? AND ch_num=?`, dvr.ID, chNum).Scan(&snapURI)
+	if err != nil {
+		return nil, err
+	}
+	if snapURI == "" {
+		return nil, fmt.Errorf("onvif: no snapshot URI for ch %d", chNum)
+	}
+	// The snapshot URI is device-provided; guard against SSRF to
+	// loopback/link-local/metadata before fetching it with credentials.
+	if !onvifFetchURLAllowed(snapURI) {
+		return nil, fmt.Errorf("onvif: snapshot URI host not allowed (ch %d)", chNum)
+	}
+	// ONVIF snapshot endpoints (e.g. Hikvision) require HTTP Digest auth.
+	return onvifHTTPGet(m.client, snapURI, dvr.Username, dvr.Password)
+}
+
 func (m *SurveillanceManager) fetchSnapshotRTSP(dvr DVRConfig, chNum int) ([]byte, error) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		return nil, fmt.Errorf("ffmpeg not found: install ffmpeg for RTSP snapshots")
@@ -473,6 +499,11 @@ func (m *SurveillanceManager) probeDVRProtocol(dvr DVRConfig) string {
 			log.Printf("[surv] Probed Dahua CGI for %s:%d", dvr.Addr, dvr.Port)
 			return "dahua"
 		}
+	}
+
+	if newOnvifClient(dvr.Username, dvr.Password, 3*time.Second).probeWith(m.shortClient, onvifDeviceURL(dvr.Addr, dvr.Port)) {
+		log.Printf("[surv] Probed ONVIF for %s:%d", dvr.Addr, dvr.Port)
+		return "onvif"
 	}
 
 	log.Printf("[surv] Probe fallback to RTSP for %s:%d", dvr.Addr, dvr.Port)
@@ -778,6 +809,23 @@ func channelsFromFoundSet(dvrID int64, foundSet map[int]bool, maxChannels int) [
 		}
 	}
 	return channels
+}
+
+func (m *SurveillanceManager) discoverFromDVROnvif(dvr DVRConfig) ([]ChannelConfig, error) {
+	c := newOnvifClient(dvr.Username, dvr.Password, 6*time.Second)
+	c.http = m.client
+	chans, err := c.discover(dvr.Addr, dvr.Port)
+	if err != nil {
+		return nil, err
+	}
+	var out []ChannelConfig
+	for _, ch := range chans {
+		out = append(out, ChannelConfig{
+			DVRID: dvr.ID, ChNum: ch.ChNum, Name: ch.Name, Order: ch.ChNum - 1,
+			Width: ch.Width, Height: ch.Height, RtspURI: ch.RTSPURI, SnapshotURI: ch.SnapshotURI,
+		})
+	}
+	return out, nil
 }
 
 func probeRTSPChannel(rtspURL string) bool {
