@@ -289,6 +289,7 @@ func (a *Agent) sendSurvConfig() {
 				ID: ch.ID, DVRID: ch.DVRID, ChNum: ch.ChNum,
 				Name: ch.Name, Order: ch.Order, Enabled: ch.Enabled,
 				Width: ch.Width, Height: ch.Height,
+				RtspURI: ch.RtspURI,
 			})
 		}
 	}

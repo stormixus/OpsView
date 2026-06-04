@@ -63,6 +63,7 @@ type ChannelInfo struct {
 	Enabled bool   `json:"enabled"`
 	Width   int    `json:"width"`
 	Height  int    `json:"height"`
+	RtspURI string `json:"rtsp_uri,omitempty"`
 }
 
 // SnapshotRequest is sent by watcher to request a snapshot via agent proxy.
