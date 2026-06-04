@@ -186,6 +186,13 @@ func (c *onvifClient) probe(deviceURL string) bool {
 	return strings.Contains(string(resp), "GetDeviceInformationResponse")
 }
 
+func (c *onvifClient) probeWith(httpc *http.Client, deviceURL string) bool {
+	if httpc != nil {
+		c.http = httpc
+	}
+	return c.probe(deviceURL)
+}
+
 // mediaXAddr resolves the Media service URL via GetServices, rewriting its host
 // to the host we actually dialed (devices often advertise their LAN IP, which
 // can differ from how we reach them).

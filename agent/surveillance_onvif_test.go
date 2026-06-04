@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
 func TestChannelStoresURIs(t *testing.T) {
 	m := newTestSurvManager(t)
@@ -21,3 +25,31 @@ func TestChannelStoresURIs(t *testing.T) {
 		t.Fatalf("uris not loaded: %+v", chs[0])
 	}
 }
+
+func TestDiscoverFromDVROnvif(t *testing.T) {
+	srv := onvifTestServer(t) // reuse helper from onvif_test.go (same package)
+	defer srv.Close()
+	host := strings.TrimPrefix(srv.URL, "http://")
+	parts := strings.Split(host, ":")
+	port := 0
+	if len(parts) == 2 {
+		_, _ = fmtSscan(parts[1], &port)
+	}
+	m := newTestSurvManager(t)
+	m.client = srv.Client()
+	m.shortClient = srv.Client()
+	dvr := DVRConfig{ID: 5, Addr: parts[0], Port: port, Username: "admin", Password: "test123", Protocol: "onvif"}
+
+	chans, err := m.discoverFromDVROnvif(dvr)
+	if err != nil {
+		t.Fatalf("discoverFromDVROnvif: %v", err)
+	}
+	if len(chans) != 2 {
+		t.Fatalf("got %d channels, want 2", len(chans))
+	}
+	if chans[0].RtspURI == "" || chans[0].ChNum != 1 {
+		t.Fatalf("chan0 = %+v", chans[0])
+	}
+}
+
+func fmtSscan(s string, p *int) (int, error) { return fmt.Sscanf(s, "%d", p) }

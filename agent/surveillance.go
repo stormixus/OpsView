@@ -300,10 +300,10 @@ func (m *SurveillanceManager) DiscoverChannels(dvrID int64) ([]ChannelConfig, er
 	discovered = normalizeChannelDiscovery(discovered)
 
 	for _, ch := range discovered {
-		_, err := m.db.Exec(`INSERT INTO channels (dvr_id, ch_num, name, display_order, enabled, width, height)
-			VALUES (?, ?, ?, ?, 1, ?, ?)
-			ON CONFLICT(dvr_id, ch_num) DO UPDATE SET width=excluded.width, height=excluded.height`,
-			dvrID, ch.ChNum, ch.Name, ch.Order, ch.Width, ch.Height)
+		_, err := m.db.Exec(`INSERT INTO channels (dvr_id, ch_num, name, display_order, enabled, width, height, rtsp_uri, snapshot_uri)
+			VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
+			ON CONFLICT(dvr_id, ch_num) DO UPDATE SET width=excluded.width, height=excluded.height, rtsp_uri=excluded.rtsp_uri, snapshot_uri=excluded.snapshot_uri`,
+			dvrID, ch.ChNum, ch.Name, ch.Order, ch.Width, ch.Height, ch.RtspURI, ch.SnapshotURI)
 		if err != nil {
 			log.Printf("[surv] upsert ch %d: %v", ch.ChNum, err)
 		}
@@ -331,6 +331,8 @@ func (m *SurveillanceManager) discoverWithProtocol(dvr DVRConfig) ([]ChannelConf
 		return m.discoverFromDVRRTSP(dvr)
 	case "dahua":
 		return m.discoverFromDVRDahua(dvr)
+	case "onvif":
+		return m.discoverFromDVROnvif(dvr)
 	default:
 		return m.discoverFromDVRISAPI(dvr)
 	}
@@ -477,6 +479,11 @@ func (m *SurveillanceManager) probeDVRProtocol(dvr DVRConfig) string {
 			log.Printf("[surv] Probed Dahua CGI for %s:%d", dvr.Addr, dvr.Port)
 			return "dahua"
 		}
+	}
+
+	if newOnvifClient(dvr.Username, dvr.Password, 3*time.Second).probeWith(m.shortClient, onvifDeviceURL(dvr.Addr, dvr.Port)) {
+		log.Printf("[surv] Probed ONVIF for %s:%d", dvr.Addr, dvr.Port)
+		return "onvif"
 	}
 
 	log.Printf("[surv] Probe fallback to RTSP for %s:%d", dvr.Addr, dvr.Port)
@@ -782,6 +789,23 @@ func channelsFromFoundSet(dvrID int64, foundSet map[int]bool, maxChannels int) [
 		}
 	}
 	return channels
+}
+
+func (m *SurveillanceManager) discoverFromDVROnvif(dvr DVRConfig) ([]ChannelConfig, error) {
+	c := newOnvifClient(dvr.Username, dvr.Password, 6*time.Second)
+	c.http = m.client
+	chans, err := c.discover(dvr.Addr, dvr.Port)
+	if err != nil {
+		return nil, err
+	}
+	var out []ChannelConfig
+	for _, ch := range chans {
+		out = append(out, ChannelConfig{
+			DVRID: dvr.ID, ChNum: ch.ChNum, Name: ch.Name, Order: ch.ChNum - 1,
+			Width: ch.Width, Height: ch.Height, RtspURI: ch.RTSPURI, SnapshotURI: ch.SnapshotURI,
+		})
+	}
+	return out, nil
 }
 
 func probeRTSPChannel(rtspURL string) bool {
