@@ -2,6 +2,21 @@
 
 All notable changes to OpsView are documented here.
 
+## [0.3.2] - 2026-06-04
+
+### Fixed
+
+- **Agent: editing a DVR no longer wipes its password.** The settings UI clears
+  the password field on edit, but saving an unrelated change (e.g. a rename)
+  overwrote the stored secret with an empty value. A blank password now means
+  "unchanged". This was the root cause of DVRs silently losing auth and being
+  misdetected as RTSP.
+- **Agent: clearer DVR auth errors.** A Hikvision DVR that returns 401/403
+  (wrong credentials, or an IP lock after repeated failed logins) is now
+  classified ISAPI and reports a precise "인증 실패 / IP 잠금" message instead of
+  falling through to an RTSP probe and reporting the misleading
+  "no RTSP channels found".
+
 ## [0.3.1] - 2026-06-04
 
 ### Added

@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -179,8 +180,17 @@ func (m *SurveillanceManager) UpdateDVR(id int64, name, addr string, port int, e
 	if protocol == "" {
 		protocol = "auto"
 	}
-	_, err := m.db.Exec(`UPDATE dvrs SET name=?, addr=?, port=?, ext_addr=?, ext_port=?, username=?, password=?, refresh_rate=?, stream_quality=?, protocol=? WHERE id=?`,
-		name, addr, port, extAddr, extPort, username, password, refreshRate, streamQuality, protocol, id)
+	// A blank password means "unchanged": the settings UI clears the password
+	// field on edit, so saving an unrelated change (e.g. a rename) must not wipe
+	// the stored secret. Only overwrite the password when a new one is provided.
+	var err error
+	if password == "" {
+		_, err = m.db.Exec(`UPDATE dvrs SET name=?, addr=?, port=?, ext_addr=?, ext_port=?, username=?, refresh_rate=?, stream_quality=?, protocol=? WHERE id=?`,
+			name, addr, port, extAddr, extPort, username, refreshRate, streamQuality, protocol, id)
+	} else {
+		_, err = m.db.Exec(`UPDATE dvrs SET name=?, addr=?, port=?, ext_addr=?, ext_port=?, username=?, password=?, refresh_rate=?, stream_quality=?, protocol=? WHERE id=?`,
+			name, addr, port, extAddr, extPort, username, password, refreshRate, streamQuality, protocol, id)
+	}
 	if err == nil && m.onChange != nil {
 		m.onChange()
 	}
@@ -432,14 +442,24 @@ func (m *SurveillanceManager) fetchSnapshotRTSP(dvr DVRConfig, chNum int) ([]byt
 
 // --- Protocol detection ---
 
+// errDVRAuth is returned when a DVR is reachable and identifies as a known brand
+// but rejects the credentials (HTTP 401/403). This is distinct from "wrong
+// protocol": the fix is correct credentials, not RTSP. Hikvision also locks the
+// source IP after repeated failed logins, which surfaces the same 401.
+var errDVRAuth = errors.New("DVR 인증 실패: 사용자명/비밀번호를 확인하세요. (로그인 실패가 반복되면 DVR이 이 PC의 IP를 일시적으로 잠글 수 있습니다 — DVR 재부팅 또는 보안 설정에서 잠금 해제)")
+
 func (m *SurveillanceManager) probeDVRProtocol(dvr DVRConfig) string {
 	urlHik := fmt.Sprintf("http://%s:%d/ISAPI/System/deviceInfo", dvr.Addr, dvr.Port)
 	reqHik, _ := http.NewRequest("GET", urlHik, nil)
 	reqHik.SetBasicAuth(dvr.Username, dvr.Password)
 	if respHik, err := m.shortClient.Do(reqHik); err == nil {
 		respHik.Body.Close()
-		if respHik.StatusCode == 200 {
-			log.Printf("[surv] Probed ISAPI (Hikvision) for %s:%d", dvr.Addr, dvr.Port)
+		// 200 = authenticated Hikvision. 401/403 = the ISAPI endpoint exists and
+		// demands auth, so it IS Hikvision — just rejected (bad creds or IP lock).
+		// Classify it as ISAPI either way so discovery surfaces a clear auth error
+		// instead of silently falling through to a misleading RTSP probe.
+		if respHik.StatusCode == 200 || respHik.StatusCode == 401 || respHik.StatusCode == 403 {
+			log.Printf("[surv] Probed ISAPI (Hikvision) for %s:%d (status %d)", dvr.Addr, dvr.Port, respHik.StatusCode)
 			return "isapi"
 		}
 	}
@@ -514,6 +534,12 @@ func (m *SurveillanceManager) discoverFromDVRISAPI(dvr DVRConfig) ([]ChannelConf
 	// then active snapshot checks inside those methods will filter out the unconnected/offline ones.
 	merged := mergeChannelDiscovery(videoInputs, streamingChannels, deviceInfoChannels)
 	if len(merged) == 0 {
+		// If the endpoints rejected our credentials, say so plainly instead of the
+		// generic "no channels" — this is the common cause (wrong password or an
+		// IP lock from repeated failed logins), and it's not a "no channels" case.
+		if errors.Is(err, errDVRAuth) || errors.Is(streamingErr, errDVRAuth) || errors.Is(devInfoErr, errDVRAuth) {
+			return nil, errDVRAuth
+		}
 		return nil, fmt.Errorf("no channels found via ISAPI")
 	}
 
@@ -530,6 +556,9 @@ func (m *SurveillanceManager) discoverISAPIDeviceInfo(dvr DVRConfig) ([]ChannelC
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		return nil, errDVRAuth
+	}
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("DVR returned %d", resp.StatusCode)
 	}
@@ -566,6 +595,9 @@ func (m *SurveillanceManager) discoverISAPIStreaming(dvr DVRConfig) ([]ChannelCo
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		return nil, errDVRAuth
+	}
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("DVR returned %d", resp.StatusCode)
 	}
@@ -610,6 +642,9 @@ func (m *SurveillanceManager) discoverISAPIVideoInputs(dvr DVRConfig) ([]Channel
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		return nil, errDVRAuth
+	}
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("DVR returned %d", resp.StatusCode)
 	}
