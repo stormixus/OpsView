@@ -8,8 +8,11 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -216,4 +219,97 @@ func (c *onvifClient) mediaXAddr(deviceURL string) (string, error) {
 		return "http://" + dialed.Host + "/onvif/Media", nil
 	}
 	return "", fmt.Errorf("onvif: media service not found")
+}
+
+type onvifChannel struct {
+	ChNum       int
+	Name        string
+	Width       int
+	Height      int
+	RTSPURI     string
+	SnapshotURI string
+}
+
+var onvifTrailingDigits = regexp.MustCompile(`(\d+)\s*$`)
+
+// chanNumFromSource derives a channel number from a VideoSource token like
+// "VideoSource_1" / "VideoSourceToken_2"; falls back to the 1-based index.
+func chanNumFromSource(sourceToken string, idx int) int {
+	if m := onvifTrailingDigits.FindStringSubmatch(sourceToken); m != nil {
+		if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
+			return n
+		}
+	}
+	return idx + 1
+}
+
+func (c *onvifClient) getProfiles(mediaURL string) ([]onvifProfile, error) {
+	resp, err := c.call(mediaURL, onvifNSMedia+"/GetProfiles",
+		`<trt:GetProfiles xmlns:trt="`+onvifNSMedia+`"/>`)
+	if err != nil {
+		return nil, err
+	}
+	return parseOnvifProfiles(resp)
+}
+
+func (c *onvifClient) getStreamURI(mediaURL, profileToken string) (string, error) {
+	body := `<trt:GetStreamUri xmlns:trt="` + onvifNSMedia + `" xmlns:tt="http://www.onvif.org/ver10/schema">` +
+		`<trt:StreamSetup><tt:Stream>RTP-Unicast</tt:Stream><tt:Transport><tt:Protocol>RTSP</tt:Protocol></tt:Transport></trt:StreamSetup>` +
+		`<trt:ProfileToken>` + xmlEscape(profileToken) + `</trt:ProfileToken></trt:GetStreamUri>`
+	resp, err := c.call(mediaURL, onvifNSMedia+"/GetStreamUri", body)
+	if err != nil {
+		return "", err
+	}
+	return parseOnvifMediaUri(resp)
+}
+
+func (c *onvifClient) getSnapshotURI(mediaURL, profileToken string) (string, error) {
+	body := `<trt:GetSnapshotUri xmlns:trt="` + onvifNSMedia + `"><trt:ProfileToken>` + xmlEscape(profileToken) + `</trt:ProfileToken></trt:GetSnapshotUri>`
+	resp, err := c.call(mediaURL, onvifNSMedia+"/GetSnapshotUri", body)
+	if err != nil {
+		return "", err
+	}
+	return parseOnvifMediaUri(resp)
+}
+
+// discover resolves all channels (one per video source; first profile per source
+// wins). Channel mapping by source token is verified against real hardware.
+func (c *onvifClient) discover(addr string, port int) ([]onvifChannel, error) {
+	devURL := onvifDeviceURL(addr, port)
+	mediaURL, err := c.mediaXAddr(devURL)
+	if err != nil {
+		return nil, err
+	}
+	profiles, err := c.getProfiles(mediaURL)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []onvifChannel
+	for i, p := range profiles {
+		key := p.SourceToken
+		if key == "" {
+			key = p.Token
+		}
+		if seen[key] {
+			continue // one channel per source; first (main) profile wins
+		}
+		seen[key] = true
+		stream, err := c.getStreamURI(mediaURL, p.Token)
+		if err != nil {
+			log.Printf("[onvif] GetStreamUri %s: %v", p.Token, err)
+			continue
+		}
+		snap, _ := c.getSnapshotURI(mediaURL, p.Token)
+		chNum := chanNumFromSource(p.SourceToken, len(out))
+		_ = i
+		out = append(out, onvifChannel{
+			ChNum: chNum, Name: p.Name, Width: p.Width, Height: p.Height,
+			RTSPURI: stream, SnapshotURI: snap,
+		})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("onvif: no channels discovered")
+	}
+	return out, nil
 }
