@@ -2,7 +2,12 @@ package main
 
 import (
 	"encoding/base64"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestOnvifPasswordDigest(t *testing.T) {
@@ -17,5 +22,31 @@ func TestOnvifPasswordDigest(t *testing.T) {
 	raw, err := base64.StdEncoding.DecodeString(got)
 	if err != nil || len(raw) != 20 {
 		t.Fatalf("digest not base64 sha1: err=%v len=%d", err, len(raw))
+	}
+}
+
+func TestOnvifSOAPCallSendsSecurityHeader(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Header().Set("Content-Type", "application/soap+xml")
+		w.Write([]byte(`<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><ok/></s:Body></s:Envelope>`))
+	}))
+	defer srv.Close()
+
+	c := &onvifClient{http: srv.Client(), user: "admin", pass: "test123", timeout: 5 * time.Second}
+	resp, err := c.call(srv.URL, "http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation",
+		`<tds:GetDeviceInformation xmlns:tds="http://www.onvif.org/ver10/device/wsdl"/>`)
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if !strings.Contains(string(resp), "<ok/>") {
+		t.Fatalf("unexpected resp: %s", resp)
+	}
+	for _, want := range []string{"UsernameToken", "admin", "PasswordDigest", "Nonce", "Created", "GetDeviceInformation"} {
+		if !strings.Contains(gotBody, want) {
+			t.Fatalf("request body missing %q\n%s", want, gotBody)
+		}
 	}
 }
