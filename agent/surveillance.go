@@ -355,6 +355,8 @@ func (m *SurveillanceManager) FetchSnapshot(dvrID int64, chNum int) ([]byte, err
 		}
 	case "dahua":
 		data, err = m.fetchSnapshotDahua(dvr, chNum)
+	case "onvif":
+		data, err = m.fetchSnapshotOnvif(dvr, chNum)
 	default:
 		data, err = m.fetchSnapshotISAPI(dvr, chNum)
 	}
@@ -416,6 +418,28 @@ func (m *SurveillanceManager) fetchSnapshotDahua(dvr DVRConfig, chNum int) ([]by
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("Dahua snapshot returned %d", resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+func (m *SurveillanceManager) fetchSnapshotOnvif(dvr DVRConfig, chNum int) ([]byte, error) {
+	var snapURI string
+	err := m.db.QueryRow(`SELECT snapshot_uri FROM channels WHERE dvr_id=? AND ch_num=?`, dvr.ID, chNum).Scan(&snapURI)
+	if err != nil {
+		return nil, err
+	}
+	if snapURI == "" {
+		return nil, fmt.Errorf("onvif: no snapshot URI for ch %d", chNum)
+	}
+	req, _ := http.NewRequest("GET", snapURI, nil)
+	req.SetBasicAuth(dvr.Username, dvr.Password)
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("onvif snapshot returned %d", resp.StatusCode)
 	}
 	return io.ReadAll(resp.Body)
 }

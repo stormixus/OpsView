@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -53,3 +55,24 @@ func TestDiscoverFromDVROnvif(t *testing.T) {
 }
 
 func fmtSscan(s string, p *int) (int, error) { return fmt.Sscanf(s, "%d", p) }
+
+func TestFetchSnapshotOnvif(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Write([]byte{0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3}) // fake jpeg
+	}))
+	defer srv.Close()
+	m := newTestSurvManager(t)
+	m.client = srv.Client()
+	id, _ := m.AddDVR("cam", "10.0.0.9", 80, "", 0, "admin", "pw", "onvif", 2000, "sub")
+	_, _ = m.db.Exec(`INSERT INTO channels (dvr_id, ch_num, name, display_order, enabled, width, height, rtsp_uri, snapshot_uri)
+		VALUES (?, 1, 'ch1', 0, 1, 1920, 1080, 'rtsp://x/ch1', ?)`, id.ID, srv.URL+"/snap.jpg")
+
+	data, err := m.FetchSnapshot(id.ID, 1)
+	if err != nil {
+		t.Fatalf("FetchSnapshot: %v", err)
+	}
+	if len(data) < 3 || data[0] != 0xFF || data[1] != 0xD8 {
+		t.Fatalf("not jpeg: %v", data)
+	}
+}
