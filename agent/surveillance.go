@@ -98,6 +98,8 @@ func (m *SurveillanceManager) migrate() {
 		`ALTER TABLE dvrs ADD COLUMN protocol TEXT NOT NULL DEFAULT 'isapi'`,
 		`ALTER TABLE dvrs ADD COLUMN ext_addr TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE dvrs ADD COLUMN ext_port INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE channels ADD COLUMN rtsp_uri TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE channels ADD COLUMN snapshot_uri TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := m.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			log.Printf("[surv] migrate alter: %v", err)
@@ -123,14 +125,16 @@ type DVRConfig struct {
 }
 
 type ChannelConfig struct {
-	ID      int    `json:"id"`
-	DVRID   int64  `json:"dvr_id"`
-	ChNum   int    `json:"ch_num"`
-	Name    string `json:"name"`
-	Order   int    `json:"order"`
-	Enabled bool   `json:"enabled"`
-	Width   int    `json:"width"`
-	Height  int    `json:"height"`
+	ID          int    `json:"id"`
+	DVRID       int64  `json:"dvr_id"`
+	ChNum       int    `json:"ch_num"`
+	Name        string `json:"name"`
+	Order       int    `json:"order"`
+	Enabled     bool   `json:"enabled"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+	RtspURI     string `json:"rtsp_uri,omitempty"`
+	SnapshotURI string `json:"snapshot_uri,omitempty"`
 }
 
 func (m *SurveillanceManager) ListDVRs() ([]DVRConfig, error) {
@@ -250,7 +254,7 @@ func (m *SurveillanceManager) ResetDB() error {
 // --- Channel management ---
 
 func (m *SurveillanceManager) ListChannels(dvrID int64) ([]ChannelConfig, error) {
-	rows, err := m.db.Query(`SELECT id, dvr_id, ch_num, name, display_order, enabled, width, height FROM channels WHERE dvr_id=? ORDER BY display_order`, dvrID)
+	rows, err := m.db.Query(`SELECT id, dvr_id, ch_num, name, display_order, enabled, width, height, rtsp_uri, snapshot_uri FROM channels WHERE dvr_id=? ORDER BY display_order`, dvrID)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +264,7 @@ func (m *SurveillanceManager) ListChannels(dvrID int64) ([]ChannelConfig, error)
 	for rows.Next() {
 		var ch ChannelConfig
 		var en int
-		if err := rows.Scan(&ch.ID, &ch.DVRID, &ch.ChNum, &ch.Name, &ch.Order, &en, &ch.Width, &ch.Height); err != nil {
+		if err := rows.Scan(&ch.ID, &ch.DVRID, &ch.ChNum, &ch.Name, &ch.Order, &en, &ch.Width, &ch.Height, &ch.RtspURI, &ch.SnapshotURI); err != nil {
 			return nil, err
 		}
 		ch.Enabled = en == 1
