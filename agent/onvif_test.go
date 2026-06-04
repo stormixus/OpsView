@@ -50,3 +50,47 @@ func TestOnvifSOAPCallSendsSecurityHeader(t *testing.T) {
 		}
 	}
 }
+
+func TestOnvifParseProfiles(t *testing.T) {
+	xmlData := []byte(`<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body>
+<trt:GetProfilesResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema">
+  <trt:Profiles token="Profile_101">
+    <tt:Name>mainStream</tt:Name>
+    <tt:VideoSourceConfiguration><tt:SourceToken>VideoSource_1</tt:SourceToken></tt:VideoSourceConfiguration>
+    <tt:VideoEncoderConfiguration><tt:Resolution><tt:Width>1920</tt:Width><tt:Height>1080</tt:Height></tt:Resolution></tt:VideoEncoderConfiguration>
+  </trt:Profiles>
+  <trt:Profiles token="Profile_201">
+    <tt:Name>mainStream</tt:Name>
+    <tt:VideoSourceConfiguration><tt:SourceToken>VideoSource_2</tt:SourceToken></tt:VideoSourceConfiguration>
+    <tt:VideoEncoderConfiguration><tt:Resolution><tt:Width>1280</tt:Width><tt:Height>720</tt:Height></tt:Resolution></tt:VideoEncoderConfiguration>
+  </trt:Profiles>
+</trt:GetProfilesResponse></s:Body></s:Envelope>`)
+	profiles, err := parseOnvifProfiles(xmlData)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(profiles) != 2 {
+		t.Fatalf("got %d profiles, want 2", len(profiles))
+	}
+	if profiles[0].Token != "Profile_101" || profiles[0].SourceToken != "VideoSource_1" ||
+		profiles[0].Width != 1920 || profiles[0].Height != 1080 {
+		t.Fatalf("profile0 = %+v", profiles[0])
+	}
+	if profiles[1].Token != "Profile_201" || profiles[1].Width != 1280 {
+		t.Fatalf("profile1 = %+v", profiles[1])
+	}
+}
+
+func TestOnvifParseUri(t *testing.T) {
+	xmlData := []byte(`<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body>
+<trt:GetStreamUriResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema">
+  <trt:MediaUri><tt:Uri>rtsp://192.168.0.46:554/Streaming/Channels/101</tt:Uri></trt:MediaUri>
+</trt:GetStreamUriResponse></s:Body></s:Envelope>`)
+	uri, err := parseOnvifMediaUri(xmlData)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if uri != "rtsp://192.168.0.46:554/Streaming/Channels/101" {
+		t.Fatalf("uri = %q", uri)
+	}
+}

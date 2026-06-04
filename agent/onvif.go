@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"encoding/base64"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -98,4 +99,65 @@ func xmlEscapeTo(b *bytes.Buffer, s string) error {
 		}
 	}
 	return nil
+}
+
+type onvifProfile struct {
+	Token       string
+	Name        string
+	SourceToken string
+	Width       int
+	Height      int
+}
+
+func parseOnvifProfiles(data []byte) ([]onvifProfile, error) {
+	var env struct {
+		Profiles []struct {
+			Token  string `xml:"token,attr"`
+			Name   string `xml:"Name"`
+			Source struct {
+				SourceToken string `xml:"SourceToken"`
+			} `xml:"VideoSourceConfiguration"`
+			Enc struct {
+				Resolution struct {
+					Width  int `xml:"Width"`
+					Height int `xml:"Height"`
+				} `xml:"Resolution"`
+			} `xml:"VideoEncoderConfiguration"`
+		} `xml:"Body>GetProfilesResponse>Profiles"`
+	}
+	if err := xml.Unmarshal(data, &env); err != nil {
+		return nil, err
+	}
+	out := make([]onvifProfile, 0, len(env.Profiles))
+	for _, p := range env.Profiles {
+		out = append(out, onvifProfile{
+			Token:       p.Token,
+			Name:        p.Name,
+			SourceToken: p.Source.SourceToken,
+			Width:       p.Enc.Resolution.Width,
+			Height:      p.Enc.Resolution.Height,
+		})
+	}
+	return out, nil
+}
+
+// parseOnvifMediaUri extracts the <Uri> from a GetStreamUri/GetSnapshotUri
+// response (both wrap it in <MediaUri><Uri>).
+func parseOnvifMediaUri(data []byte) (string, error) {
+	var env struct {
+		Body struct {
+			Response struct {
+				MediaUri struct {
+					Uri string `xml:"Uri"`
+				} `xml:"MediaUri"`
+			} `xml:",any"`
+		} `xml:"Body"`
+	}
+	if err := xml.Unmarshal(data, &env); err != nil {
+		return "", err
+	}
+	if env.Body.Response.MediaUri.Uri == "" {
+		return "", fmt.Errorf("onvif: no MediaUri/Uri in response")
+	}
+	return env.Body.Response.MediaUri.Uri, nil
 }
