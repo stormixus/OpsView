@@ -12,9 +12,9 @@ func runTray(cfg Config) {
 		log.Printf("[tray] PIN auto-gen failed: %v", err)
 	}
 
-	token := loadPublisherToken()
+	token := resolvePublisherToken(cfg)
 	if token == "" {
-		log.Printf("[tray] WARNING: RELAY_PUBLISHER_TOKEN/AGENT_TOKEN not set; the relay will reject this agent")
+		log.Printf("[tray] WARNING: publisher token not set (Settings or RELAY_PUBLISHER_TOKEN/AGENT_TOKEN); the relay will reject this agent")
 	}
 	agentCfg := AgentConfig{
 		RelayURL:       cfg.RelayURL,
