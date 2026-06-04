@@ -104,7 +104,7 @@ func (sp *SurvProxy) HandleSurvConfig(payload []byte) {
 			perDVR[ch.DVRID] = append(perDVR[ch.DVRID], pendingCh{
 				chID:    chID,
 				name:    ch.Name,
-				rtspURL: buildSurvRTSPURL(dvr, ch.ChNum),
+				rtspURL: survRTSPURLForChannel(dvr, ch),
 			})
 		}
 	}
@@ -487,6 +487,22 @@ func buildSurvRTSPURL(dvr proto.DVRInfo, chNum int) string {
 		Path:   path,
 	}
 	return u.String()
+}
+
+// survRTSPURLForChannel uses the channel's ONVIF-provided RtspURI when present
+// (injecting DVR credentials if the URI has none), otherwise the per-protocol
+// template via buildSurvRTSPURL.
+func survRTSPURLForChannel(dvr proto.DVRInfo, ch proto.ChannelInfo) string {
+	if ch.RtspURI != "" {
+		u, err := url.Parse(ch.RtspURI)
+		if err == nil {
+			if u.User == nil && dvr.Username != "" {
+				u.User = url.UserPassword(dvr.Username, dvr.Password)
+			}
+			return u.String()
+		}
+	}
+	return buildSurvRTSPURL(dvr, ch.ChNum)
 }
 
 // resolveRTSPPort determines the RTSP port for a DVR.
