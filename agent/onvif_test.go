@@ -198,3 +198,25 @@ func TestOnvifDiscover(t *testing.T) {
 		t.Fatalf("chan1 = %+v", chans[1])
 	}
 }
+
+func TestOnvifFetchURLAllowed(t *testing.T) {
+	cases := []struct {
+		url  string
+		want bool
+	}{
+		{"http://192.168.0.46/onvif/snap.jpg", true},  // private LAN DVR
+		{"https://10.0.0.5:8000/snap", true},          // private + https
+		{"http://camera.local/snap.jpg", true},        // hostname literal
+		{"http://169.254.169.254/latest/meta", false}, // cloud-metadata (link-local)
+		{"http://127.0.0.1:9000/snap.jpg", true},      // loopback allowed (LAN desktop agent)
+		{"http://0.0.0.0/snap.jpg", false},            // unspecified
+		{"ftp://192.168.0.46/snap.jpg", false},        // non-http scheme
+		{"file:///etc/passwd", false},                 // non-http scheme
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := onvifFetchURLAllowed(c.url); got != c.want {
+			t.Errorf("onvifFetchURLAllowed(%q) = %v, want %v", c.url, got, c.want)
+		}
+	}
+}

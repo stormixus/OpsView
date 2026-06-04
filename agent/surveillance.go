@@ -431,6 +431,11 @@ func (m *SurveillanceManager) fetchSnapshotOnvif(dvr DVRConfig, chNum int) ([]by
 	if snapURI == "" {
 		return nil, fmt.Errorf("onvif: no snapshot URI for ch %d", chNum)
 	}
+	// The snapshot URI is device-provided; guard against SSRF to
+	// loopback/link-local/metadata before fetching it with credentials.
+	if !onvifFetchURLAllowed(snapURI) {
+		return nil, fmt.Errorf("onvif: snapshot URI host not allowed (ch %d)", chNum)
+	}
 	req, _ := http.NewRequest("GET", snapURI, nil)
 	req.SetBasicAuth(dvr.Username, dvr.Password)
 	resp, err := m.client.Do(req)

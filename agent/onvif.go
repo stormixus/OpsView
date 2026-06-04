@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -176,6 +177,29 @@ func onvifDeviceURL(addr string, port int) string {
 	return fmt.Sprintf("http://%s:%d/onvif/device_service", addr, port)
 }
 
+// onvifFetchURLAllowed limits SSRF from a device-provided snapshot URL: it must
+// be http(s) and must not target link-local (incl. the 169.254.169.254
+// cloud-metadata endpoint), link-local-multicast, or the unspecified address.
+// Loopback is allowed (the agent is a LAN desktop app; the cloud-metadata
+// endpoint is the real threat). Private LAN addresses (the usual DVR) pass.
+// Hostnames are allowed (DVRs use IP literals; classifying a hostname would need
+// DNS we don't want in this path).
+func onvifFetchURLAllowed(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	h := u.Hostname()
+	if h == "" {
+		return false
+	}
+	ip := net.ParseIP(h)
+	if ip == nil {
+		return true // hostname literal
+	}
+	return !(ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified())
+}
+
 // probe returns true if the device answers GetDeviceInformation as ONVIF.
 func (c *onvifClient) probe(deviceURL string) bool {
 	resp, err := c.call(deviceURL, onvifNSDevice+"/GetDeviceInformation",
@@ -293,7 +317,7 @@ func (c *onvifClient) discover(addr string, port int) ([]onvifChannel, error) {
 	}
 	seen := map[string]bool{}
 	var out []onvifChannel
-	for i, p := range profiles {
+	for _, p := range profiles {
 		key := p.SourceToken
 		if key == "" {
 			key = p.Token
@@ -307,9 +331,8 @@ func (c *onvifClient) discover(addr string, port int) ([]onvifChannel, error) {
 			log.Printf("[onvif] GetStreamUri %s: %v", p.Token, err)
 			continue
 		}
-		snap, _ := c.getSnapshotURI(mediaURL, p.Token)
+		snap, _ := c.getSnapshotURI(mediaURL, p.Token) // best-effort; snapshots optional
 		chNum := chanNumFromSource(p.SourceToken, len(out))
-		_ = i
 		out = append(out, onvifChannel{
 			ChNum: chNum, Name: p.Name, Width: p.Width, Height: p.Height,
 			RTSPURI: stream, SnapshotURI: snap,
