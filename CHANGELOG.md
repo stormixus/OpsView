@@ -2,6 +2,18 @@
 
 All notable changes to OpsView are documented here.
 
+## [0.3.3] - 2026-06-04
+
+### Performance
+
+- **Much lower 1080p screen latency.** Screen tiles are now encoded as JPEG
+  (quality 85) instead of zstd-compressed raw BGRA. JPEG is ~5–10x smaller for
+  screen content and the viewers decode it natively and asynchronously
+  (`createImageBitmap`) off the main thread, instead of decompressing raw BGRA
+  on it. This removes the viewer-side backlog that pushed 1080p latency to
+  several seconds. Viewers still accept the legacy zstd tile codec for
+  backward compatibility.
+
 ## [0.3.2] - 2026-06-04
 
 ### Fixed

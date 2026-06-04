@@ -58,7 +58,7 @@ function connect() {
     const hello = {
       role: 'watcher',
       client: 'opsview-web',
-      client_version: '0.3.2',
+      client_version: '0.3.3',
       supports: ['zstd'],
       want_profile: null
     };
@@ -190,6 +190,10 @@ function requestSnapshotProxy(dvrId, chNum, callback) {
   sendOVPMessage(MSG_SURV_SNAPSHOT, req);
 }
 
+// Frames are drawn through this promise chain so tiles never apply out of order
+// while JPEG decode (async, variable latency) is in flight.
+let frameChain = Promise.resolve();
+
 function handleFrameDelta(buffer, offset, payloadLen) {
   if (payloadLen < FRAME_DELTA_HEADER_SIZE) return;
 
@@ -212,7 +216,8 @@ function handleFrameDelta(buffer, offset, payloadLen) {
     canvas.height = height;
   }
 
-  // Process tiles
+  // Collect tiles; the actual draw runs asynchronously (JPEG native decode).
+  const tiles = [];
   for (let i = 0; i < tileCount; i++) {
     if (pos + TILE_HEADER_SIZE > payloadLen) break;
 
@@ -223,27 +228,13 @@ function handleFrameDelta(buffer, offset, payloadLen) {
 
     if (pos + dataLen > payloadLen) break;
 
-    const compressedData = new Uint8Array(buffer, offset + pos, dataLen);
+    // Copy out: we must not retain a view into the WebSocket frame buffer
+    // across the async decode.
+    const data = new Uint8Array(buffer, offset + pos, dataLen).slice();
     pos += dataLen;
 
     tilesReceived++;
 
-    // Decompress
-    let bgraData;
-    try {
-      if (codec === 1) {
-        // zstd compressed BGRA
-        bgraData = fzstd.decompress(compressedData);
-      } else {
-        console.warn('[ovp] unknown codec:', codec);
-        continue;
-      }
-    } catch (e) {
-      console.error('[ovp] decompress error:', e);
-      continue;
-    }
-
-    // Calculate actual tile dimensions (edge tiles may be smaller)
     const pixelX = tx * tileSize;
     const pixelY = ty * tileSize;
     const tileW = Math.min(tileSize, width - pixelX);
@@ -251,20 +242,10 @@ function handleFrameDelta(buffer, offset, payloadLen) {
 
     if (tileW <= 0 || tileH <= 0) continue;
 
-    // Convert BGRA → RGBA for Canvas ImageData
-    const rgbaData = new Uint8ClampedArray(tileW * tileH * 4);
-    for (let p = 0; p < tileW * tileH; p++) {
-      const srcOff = p * 4;
-      const dstOff = p * 4;
-      rgbaData[dstOff + 0] = bgraData[srcOff + 2]; // R ← B position
-      rgbaData[dstOff + 1] = bgraData[srcOff + 1]; // G
-      rgbaData[dstOff + 2] = bgraData[srcOff + 0]; // B ← R position
-      rgbaData[dstOff + 3] = bgraData[srcOff + 3]; // A
-    }
-
-    const imgData = new ImageData(rgbaData, tileW, tileH);
-    ctx.putImageData(imgData, pixelX, pixelY);
+    tiles.push({ codec, data, pixelX, pixelY, tileW, tileH });
   }
+
+  frameChain = frameChain.then(() => drawTiles(tiles)).catch(() => {});
 
   // FPS counter
   frameCount++;
@@ -273,6 +254,48 @@ function handleFrameDelta(buffer, offset, payloadLen) {
     fps = frameCount;
     frameCount = 0;
     lastFpsTime = now;
+  }
+}
+
+// drawTiles decodes a frame's tiles (JPEG natively/async, zstd-BGRA on-thread)
+// then blits them in order onto the canvas.
+async function drawTiles(tiles) {
+  const drawables = await Promise.all(tiles.map(async (tn) => {
+    if (tn.codec === 2) { // CodecJPEG — native async decode, off the main thread
+      try {
+        const bmp = await createImageBitmap(new Blob([tn.data], { type: 'image/jpeg' }));
+        return { bitmap: bmp, x: tn.pixelX, y: tn.pixelY };
+      } catch (e) { return null; }
+    }
+    if (tn.codec === 1) { // CodecZstdRawBGRA — legacy path
+      try {
+        const bgra = fzstd.decompress(tn.data);
+        const rgba = new Uint8ClampedArray(tn.tileW * tn.tileH * 4);
+        for (let p = 0; p < tn.tileW * tn.tileH; p++) {
+          const o = p * 4;
+          rgba[o + 0] = bgra[o + 2]; // R ← B position
+          rgba[o + 1] = bgra[o + 1]; // G
+          rgba[o + 2] = bgra[o + 0]; // B ← R position
+          rgba[o + 3] = bgra[o + 3]; // A
+        }
+        return { image: new ImageData(rgba, tn.tileW, tn.tileH), x: tn.pixelX, y: tn.pixelY };
+      } catch (e) {
+        console.error('[ovp] decompress error:', e);
+        return null;
+      }
+    }
+    console.warn('[ovp] unknown codec:', tn.codec);
+    return null;
+  }));
+
+  for (const d of drawables) {
+    if (!d) continue;
+    if (d.bitmap) {
+      ctx.drawImage(d.bitmap, d.x, d.y);
+      if (d.bitmap.close) d.bitmap.close();
+    } else {
+      ctx.putImageData(d.image, d.x, d.y);
+    }
   }
 }
 
