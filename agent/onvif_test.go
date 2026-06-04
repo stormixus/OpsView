@@ -94,3 +94,41 @@ func TestOnvifParseUri(t *testing.T) {
 		t.Fatalf("uri = %q", uri)
 	}
 }
+
+func TestOnvifProbeAndMediaXAddr(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/onvif/device_service", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		body := string(b)
+		if strings.Contains(body, "GetDeviceInformation") {
+			w.Write([]byte(`<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body>
+<tds:GetDeviceInformationResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+<tds:Manufacturer>HIKVISION</tds:Manufacturer></tds:GetDeviceInformationResponse></s:Body></s:Envelope>`))
+			return
+		}
+		// GetServices
+		w.Write([]byte(`<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body>
+<tds:GetServicesResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+<tds:Service><tds:Namespace>http://www.onvif.org/ver10/media/wsdl</tds:Namespace>
+<tds:XAddr>http://HOST/onvif/Media</tds:XAddr></tds:Service></tds:GetServicesResponse></s:Body></s:Envelope>`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	host := strings.TrimPrefix(srv.URL, "http://")
+	c := newOnvifClient("admin", "test123", 5*time.Second)
+	c.http = srv.Client()
+
+	devURL := srv.URL + "/onvif/device_service"
+	if !c.probe(devURL) {
+		t.Fatalf("probe should succeed")
+	}
+	media, err := c.mediaXAddr(devURL)
+	if err != nil {
+		t.Fatalf("mediaXAddr: %v", err)
+	}
+	// XAddr host is rewritten to the device host the agent dialed.
+	want := "http://" + host + "/onvif/Media"
+	if media != want {
+		t.Fatalf("media = %q, want %q", media, want)
+	}
+}

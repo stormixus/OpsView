@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -160,4 +162,58 @@ func parseOnvifMediaUri(data []byte) (string, error) {
 		return "", fmt.Errorf("onvif: no MediaUri/Uri in response")
 	}
 	return env.Body.Response.MediaUri.Uri, nil
+}
+
+const (
+	onvifNSDevice = "http://www.onvif.org/ver10/device/wsdl"
+	onvifNSMedia  = "http://www.onvif.org/ver10/media/wsdl"
+)
+
+func onvifDeviceURL(addr string, port int) string {
+	return fmt.Sprintf("http://%s:%d/onvif/device_service", addr, port)
+}
+
+// probe returns true if the device answers GetDeviceInformation as ONVIF.
+func (c *onvifClient) probe(deviceURL string) bool {
+	resp, err := c.call(deviceURL, onvifNSDevice+"/GetDeviceInformation",
+		`<tds:GetDeviceInformation xmlns:tds="`+onvifNSDevice+`"/>`)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(resp), "GetDeviceInformationResponse")
+}
+
+// mediaXAddr resolves the Media service URL via GetServices, rewriting its host
+// to the host we actually dialed (devices often advertise their LAN IP, which
+// can differ from how we reach them).
+func (c *onvifClient) mediaXAddr(deviceURL string) (string, error) {
+	resp, err := c.call(deviceURL, onvifNSDevice+"/GetServices",
+		`<tds:GetServices xmlns:tds="`+onvifNSDevice+`"><tds:IncludeCapability>false</tds:IncludeCapability></tds:GetServices>`)
+	if err != nil {
+		return "", err
+	}
+	var env struct {
+		Services []struct {
+			Namespace string `xml:"Namespace"`
+			XAddr     string `xml:"XAddr"`
+		} `xml:"Body>GetServicesResponse>Service"`
+	}
+	if err := xml.Unmarshal(resp, &env); err != nil {
+		return "", err
+	}
+	dialed, _ := url.Parse(deviceURL)
+	for _, s := range env.Services {
+		if strings.Contains(s.Namespace, "/media/") && s.XAddr != "" {
+			if u, err := url.Parse(s.XAddr); err == nil && dialed != nil {
+				u.Host = dialed.Host
+				return u.String(), nil
+			}
+			return s.XAddr, nil
+		}
+	}
+	// Fallback to the conventional Hikvision media path.
+	if dialed != nil {
+		return "http://" + dialed.Host + "/onvif/Media", nil
+	}
+	return "", fmt.Errorf("onvif: media service not found")
 }
