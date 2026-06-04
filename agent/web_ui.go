@@ -544,6 +544,7 @@ const htmlTemplate = `
                                 <option value="isapi">Hikvision (ISAPI)</option>
                                 <option value="dahua">Dahua</option>
                                 <option value="rtsp">RTSP</option>
+                                <option value="onvif">ONVIF (범용)</option>
                             </select>
                         </div>
                     </div>
@@ -631,6 +632,7 @@ const htmlTemplate = `
                             <option value="isapi">Hikvision (ISAPI)</option>
                             <option value="dahua">Dahua</option>
                             <option value="rtsp">RTSP</option>
+                            <option value="onvif">ONVIF (범용)</option>
                         </select>
                     </div>
                 </div>
