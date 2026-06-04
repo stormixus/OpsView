@@ -231,6 +231,13 @@
     .mixed-main-area { flex: 1; display: flex; position: relative; overflow: hidden; }
     .mixed-main-area .canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; }
     .mixed-main-area canvas { width: 100%; height: 100%; object-fit: contain; }
+    /* Draggable Ops-pane height (collage). When set, the Ops pane takes a fixed
+       % of the right column so the overflow channel rows get more room. */
+    .mixed-ops-resizer { position: absolute; left: 0; right: 0; bottom: 0; height: 7px; cursor: row-resize; z-index: 14; background: transparent; transition: background 0.2s; }
+    .mixed-ops-resizer::after { content: ""; position: absolute; left: 50%; transform: translateX(-50%); bottom: 2px; width: 36px; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.18); transition: all 0.2s; }
+    .mixed-ops-resizer:hover::after, .mixed-ops-resizer.dragging::after { background: linear-gradient(90deg, #22d3ee, #6366f1); width: 60px; box-shadow: 0 0 10px rgba(34,211,238,0.4); }
+    .mixed-right.ops-custom .mixed-main-area { flex: 0 0 var(--ops-pct, 58%); }
+    .mixed-right.ops-custom .mixed-overflow-row:last-child { margin-top: auto; }
     .mixed-overflow-row { display: flex; gap: 3px; background: rgba(6, 10, 18, 0.35); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); flex-shrink: 0; padding: 3px; }
     .mixed-overflow-row:empty { display: none; }
     .mixed-sortable-item { cursor: grab; }
@@ -249,6 +256,18 @@
     /* Vertical layout */
     .mixed-split.vertical { flex-direction: column; }
     .mixed-split.vertical .mixed-left { min-width: unset; min-height: 120px; flex-basis: 40%; border-right: none; border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
+    /* Smart Fit: JS sizes every left tile to fill the left column (width AND
+       height, no empty space, no scroll) and moves the divider to
+       cols/(cols+2) so the right column is exactly 2 tiles wide — tiles match
+       across both sides and the Ops board fills the leftover middle. */
+    .mixed-split.smart-fit .mixed-cctv-grid { overflow: hidden; align-content: flex-start; }
+    .mixed-split.smart-fit .mixed-overflow-row:last-child { margin-top: 0; }
+    /* Smooth, slightly-staggered transition while toggling Smart Fit on/off
+       (the .sf-animating class is added briefly around the layout change). */
+    .mixed-split.sf-animating .mixed-left { transition: flex-basis 0.5s cubic-bezier(0.22, 1, 0.36, 1); }
+    .mixed-split.sf-animating .mixed-cctv-grid .cctv-cell { transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1), height 0.5s cubic-bezier(0.22, 1, 0.36, 1); }
+    .mixed-split.sf-animating .mixed-overflow-row { transition: flex-basis 0.5s cubic-bezier(0.22, 1, 0.36, 1), height 0.5s cubic-bezier(0.22, 1, 0.36, 1); }
+    .mixed-split.sf-animating .mixed-main-area { transition: flex-basis 0.5s cubic-bezier(0.22, 1, 0.36, 1); }
     .mixed-split.vertical .mixed-divider { width: auto; height: 4px; cursor: row-resize; }
     .mixed-split.vertical .mixed-right { min-width: unset; min-height: 120px; }
 
@@ -297,9 +316,18 @@
     ::-webkit-scrollbar-thumb:hover { background: rgba(34, 211, 238, 0.3); }
 
     /* === Fullscreen auto-hide bars === */
-    .tabs, .dvr-tabs { transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s; }
+    .tabs, .dvr-tabs, .mixed-layout-bar { transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s; }
     body.fs-bars-hidden .tabs { transform: translateY(-100%); opacity: 0; pointer-events: none; }
-    body.fs-bars-hidden .dvr-tabs { transform: translateY(-100%); opacity: 0; pointer-events: none; }
+    body.fs-bars-hidden .dvr-tabs,
+    body.fs-bars-hidden #panel-mixed .mixed-layout-bar { transform: translateY(-100%); opacity: 0; pointer-events: none; }
+
+    /* In fullscreen, float the top bars as overlays so the panel content uses the
+       full viewport height — otherwise the bars stay in flow and the bottom of the
+       Mixed/collage grid is clipped. The fs-bars-hidden rules above still fade them
+       out after inactivity. The second bar sits just below the 40px tab bar. */
+    body.is-fullscreen .tabs { position: fixed; top: 0; left: 0; right: 0; z-index: 50; }
+    body.is-fullscreen .dvr-tabs,
+    body.is-fullscreen #panel-mixed .mixed-layout-bar { position: fixed; top: 40px; left: 0; right: 0; z-index: 49; }
 
     @media (max-width: 900px) {
       .tab { padding-left: 12px !important; padding-right: 12px !important; }
@@ -665,6 +693,9 @@
       <button class="layout-toggle-btn" id="swapBtn" onclick="swapMixedPanes()">
         <i data-lucide="arrow-left-right" class="w-3 h-3"></i> <span data-i18n="swap">Swap</span>
       </button>
+      <button class="layout-toggle-btn" id="smartFitBtn" onclick="toggleSmartFit()">
+        <i data-lucide="scaling" class="w-3 h-3"></i> <span data-i18n="smartFit">Smart Fit</span>
+      </button>
     </div>
     <div class="mixed-split" id="mixedSplit">
       <div class="mixed-left" id="mixedLeft" style="flex-basis:40%;">
@@ -695,6 +726,7 @@
           <div class="canvas-wrap">
             <canvas id="mixedScreen"></canvas>
           </div>
+          <div class="mixed-ops-resizer" id="mixedOpsResizer" title="Ops 높이 조절"></div>
         </div>
         <div class="mixed-overflow-row mixed-sortable-item" id="mixedCctvBottomRow"></div>
       </div>
@@ -832,8 +864,10 @@
 
     async function onFullscreenChange() {
       if (await isFullscreenActive()) {
+        document.body.classList.add('is-fullscreen');
         fsScheduleHide();
       } else {
+        document.body.classList.remove('is-fullscreen');
         clearTimeout(fsHideTimer);
         fsShowBars();
       }
@@ -2521,17 +2555,244 @@
         const saved = localStorage.getItem('opsview_mixed_split');
         left.style.flexBasis = saved ? saved + '%' : '40%';
       }
+      applyOpsHeight();
       applyMixedOrder();
       if (window._mixedReady) renderMixedCCTV();
+      if (smartFitEnabled) setSmartFitAnimating(); // animate the re-fit on layout change
     }
+
+    // === Smart Fit: size every channel tile uniformly so they all fit the
+    // viewport with no scroll and no empty space; the Ops pane shrinks to the
+    // leftover middle. Collage layout only. ===
+    let smartFitEnabled = localStorage.getItem('opsview_smart_fit') === 'true';
+
+    // Briefly enable transitions (with a per-tile stagger) around a Smart Fit
+    // toggle so tiles glide into place instead of snapping.
+    function setSmartFitAnimating() {
+      const split = document.getElementById('mixedSplit');
+      if (!split) return;
+      split.classList.add('sf-animating');
+      const cells = document.querySelectorAll('#mixedCctvGrid .cctv-cell');
+      cells.forEach((c, i) => { c.style.transitionDelay = (i * 22) + 'ms'; });
+      clearTimeout(window._sfAnimTimer);
+      window._sfAnimTimer = setTimeout(() => {
+        split.classList.remove('sf-animating');
+        cells.forEach(c => { c.style.transitionDelay = ''; });
+      }, 600 + cells.length * 22);
+    }
+
+    function toggleSmartFit() {
+      smartFitEnabled = !smartFitEnabled;
+      localStorage.setItem('opsview_smart_fit', smartFitEnabled);
+      const btn = document.getElementById('smartFitBtn');
+      if (btn) btn.classList.toggle('active', smartFitEnabled);
+      const split = document.getElementById('mixedSplit');
+      if (smartFitEnabled) {
+        setSmartFitAnimating();
+        split.classList.add('smart-fit');
+        requestAnimationFrame(applySmartFit);
+      } else {
+        setSmartFitAnimating();
+        split.classList.remove('smart-fit');
+        clearSmartFit();
+      }
+    }
+
+    function clearSmartFit() {
+      const split = document.getElementById('mixedSplit');
+      const left = document.getElementById('mixedLeft');
+      const grid = document.getElementById('mixedCctvGrid');
+      if (split) {
+        split.style.removeProperty('--sf-cols');
+        split.style.removeProperty('--sf-rows');
+        split.style.removeProperty('--sf-rowh');
+      }
+      if (grid) grid.querySelectorAll('.cctv-cell').forEach(c => { c.style.width = ''; c.style.height = ''; c.style.aspectRatio = ''; });
+      ['mixedCctvTopRow', 'mixedCctvBottomRow'].forEach(id => {
+        const r = document.getElementById(id);
+        if (r) { r.style.flex = ''; r.style.height = ''; }
+      });
+      const mainArea = document.querySelector('#mixedRight .mixed-main-area');
+      if (mainArea) mainArea.style.flex = '';
+      // Only collage moved the divider, so only collage restores it.
+      if (left && mixedLayout === 'collage') {
+        const saved = localStorage.getItem('opsview_mixed_split');
+        left.style.flexBasis = (saved || '40') + '%';
+      }
+      applyOpsHeight(); // restore manual Ops height for non-smart-fit collage
+    }
+
+    // Choose the left-grid column count whose tile shape is closest to a natural
+    // CCTV aspect; the divider then sits at cols/(cols+rightCols) so the right
+    // column is exactly `rightCols` tiles wide and the whole screen is filled.
+    function computeSmartFit(W, H, nLeft, rightCols) {
+      const target = 1.55;       // desired tile width / height
+      const minOpsFrac = 0.16;   // Ops keeps >= this fraction of the right column
+      const emptyPenalty = 0.35; // strongly prefer grids that leave no empty cells
+      let best = null;
+      for (let cols = 1; cols <= nLeft; cols++) {
+        const rows = Math.ceil(nLeft / cols);
+        if (rightCols > 0 && (1 - 2 / rows) < minOpsFrac) continue; // 2 overflow rows
+        const leftW = W * cols / (cols + rightCols);
+        const tileAspect = (leftW / cols) / (H / rows);
+        const empty = cols * rows - nLeft; // unfilled slots in the last row
+        const score = Math.abs(Math.log(tileAspect / target)) + empty * emptyPenalty;
+        if (!best || score < best.score) best = { cols, rows, score };
+      }
+      if (!best) {
+        const cols = Math.min(nLeft, 3);
+        best = { cols, rows: Math.ceil(nLeft / cols), score: 0 };
+      }
+      return best;
+    }
+
+    function applySmartFit() {
+      if (!smartFitEnabled) return;
+      const split = document.getElementById('mixedSplit');
+      const grid = document.getElementById('mixedCctvGrid');
+      const left = document.getElementById('mixedLeft');
+      const right = document.getElementById('mixedRight');
+      const topRow = document.getElementById('mixedCctvTopRow');
+      const bottomRow = document.getElementById('mixedCctvBottomRow');
+      if (!split || !grid || !left) return;
+      const cells = grid.querySelectorAll('.cctv-cell');
+      const nLeft = cells.length;
+      if (!nLeft) return;
+      const gap = 3, pad = 3;
+      const sizeCells = (cellW, cellH) => {
+        if (cellW <= 0 || cellH <= 0) return false;
+        cells.forEach(c => { c.style.width = cellW + 'px'; c.style.height = cellH + 'px'; c.style.aspectRatio = 'auto'; });
+        return true;
+      };
+
+      if (mixedLayout === 'collage') {
+        const W = split.clientWidth, H = split.clientHeight;
+        if (W <= 0 || H <= 0) return;
+        const rightCols = ((topRow && topRow.children.length) || (bottomRow && bottomRow.children.length)) ? 2 : 0;
+        const fit = computeSmartFit(W, H, nLeft, rightCols);
+        // Move the divider so the right column is exactly `rightCols` tiles wide.
+        const leftFrac = rightCols > 0 ? fit.cols / (fit.cols + rightCols) : 1;
+        left.style.flexBasis = (leftFrac * 100) + '%';
+        const leftW = W * leftFrac;
+        const cellW = (leftW - 2 * pad - (fit.cols - 1) * gap) / fit.cols - 1; // -1: avoid sub-pixel wrap
+        const cellH = (H - 2 * pad - (fit.rows - 1) * gap) / fit.rows;
+        if (!sizeCells(cellW, cellH)) return;
+        // Right overflow rows match the tile height; the Ops board fills the rest.
+        const rowHpx = cellH + 2 * pad, rowH = rowHpx + 'px';
+        let numRows = 0;
+        [topRow, bottomRow].forEach(r => {
+          if (r && r.children.length) { r.style.flex = '0 0 ' + rowH; r.style.height = rowH; numRows++; }
+        });
+        const mainArea = right ? right.querySelector('.mixed-main-area') : null;
+        if (mainArea) mainArea.style.flex = '0 0 ' + Math.max(60, H - numRows * rowHpx) + 'px';
+        if (right) right.classList.remove('ops-custom');
+      } else {
+        // Horizontal / vertical: fill the CCTV grid within its current container
+        // (no overflow rows, divider left as the user set it).
+        const gridW = grid.clientWidth, gridH = grid.clientHeight;
+        if (gridW <= 0 || gridH <= 0) return;
+        const fit = computeSmartFit(gridW, gridH, nLeft, 0);
+        const cellW = (gridW - 2 * pad - (fit.cols - 1) * gap) / fit.cols - 1;
+        const cellH = (gridH - 2 * pad - (fit.rows - 1) * gap) / fit.rows;
+        sizeCells(cellW, cellH);
+      }
+    }
+
+    let _smartFitResizeTimer = null;
+    window.addEventListener('resize', () => {
+      if (!smartFitEnabled) return;
+      clearTimeout(_smartFitResizeTimer);
+      _smartFitResizeTimer = setTimeout(applySmartFit, 120);
+    });
+
+    // Restore persisted Smart Fit state on load.
+    (function initSmartFit() {
+      if (!smartFitEnabled) return;
+      const split = document.getElementById('mixedSplit');
+      const btn = document.getElementById('smartFitBtn');
+      if (split) split.classList.add('smart-fit');
+      if (btn) btn.classList.add('active');
+    })();
+
+    // === Draggable Ops-pane height (collage only) ===
+    // Default reduces the Ops board so the overflow channel rows get more room;
+    // the drag handle at the bottom edge of the Ops pane lets the user tune it.
+    function applyOpsHeight() {
+      const rightEl = document.getElementById('mixedRight');
+      if (!rightEl) return;
+      if (mixedLayout !== 'collage') { rightEl.classList.remove('ops-custom'); return; }
+      const pct = localStorage.getItem('opsview_mixed_ops_pct') || '58';
+      rightEl.classList.add('ops-custom');
+      rightEl.style.setProperty('--ops-pct', pct + '%');
+    }
+
+    (function initOpsResizer() {
+      const handle = document.getElementById('mixedOpsResizer');
+      const rightEl = document.getElementById('mixedRight');
+      if (!handle || !rightEl) return;
+      let dragging = false;
+      document.addEventListener('mousemove', e => {
+        if (!dragging || mixedLayout !== 'collage') return;
+        const mainArea = handle.parentElement;
+        const rightRect = rightEl.getBoundingClientRect();
+        const top = mainArea.getBoundingClientRect().top;
+        let pct = ((e.clientY - top) / rightRect.height) * 100;
+        pct = Math.max(15, Math.min(82, pct));
+        rightEl.classList.add('ops-custom');
+        rightEl.style.setProperty('--ops-pct', pct + '%');
+        localStorage.setItem('opsview_mixed_ops_pct', pct.toFixed(1));
+      });
+      handle.addEventListener('mousedown', e => {
+        e.preventDefault();
+        e.stopPropagation(); // don't start the right-column reorder sortable
+        dragging = true;
+        handle.classList.add('dragging');
+        document.body.style.cursor = 'row-resize';
+      });
+      document.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        handle.classList.remove('dragging');
+        document.body.style.cursor = '';
+        if (smartFitEnabled) requestAnimationFrame(applySmartFit);
+      });
+      applyOpsHeight();
+    })();
 
     let mixedSwapped = localStorage.getItem('opsview_mixed_swapped') === 'true';
 
     function swapMixedPanes() {
       mixedSwapped = !mixedSwapped;
       localStorage.setItem('opsview_mixed_swapped', mixedSwapped);
-      applyMixedOrder();
+      animateMixedReorder(applyMixedOrder);
       document.getElementById('swapBtn').classList.toggle('active', mixedSwapped);
+    }
+
+    // FLIP-animate a reorder of the mixed panes so Swap slides them into place
+    // instead of snapping: record positions, reorder, then play from the old
+    // position back to identity.
+    function animateMixedReorder(doReorder) {
+      const els = ['mixedLeft', 'mixedDivider', 'mixedRight'].map(id => document.getElementById(id)).filter(Boolean);
+      const first = els.map(el => el.getBoundingClientRect());
+      doReorder();
+      const last = els.map(el => el.getBoundingClientRect());
+      els.forEach((el, i) => {
+        const dx = first[i].left - last[i].left;
+        const dy = first[i].top - last[i].top;
+        if (!dx && !dy) return;
+        el.style.transition = 'none';
+        el.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+      });
+      requestAnimationFrame(() => {
+        els.forEach(el => {
+          el.style.transition = 'transform 0.45s cubic-bezier(0.22, 1, 0.36, 1)';
+          el.style.transform = '';
+        });
+      });
+      clearTimeout(window._mixedReorderTimer);
+      window._mixedReorderTimer = setTimeout(() => {
+        els.forEach(el => { el.style.transition = ''; el.style.transform = ''; });
+      }, 520);
     }
 
     function applyMixedOrder() {
@@ -2897,6 +3158,9 @@
       } else if (useRelayHLS) {
         requestAnimationFrame(() => playMixedCctvVideos());
       }
+
+      // Re-fit uniform tiles after the grid is (re)populated.
+      if (smartFitEnabled) requestAnimationFrame(applySmartFit);
     }
 
     // Mixed Ops canvas (mirrors the main canvas region)
@@ -2924,9 +3188,28 @@
         }
 
         if (src) {
-          if (cropRegion) {
-            mixedCanvas.width = cropRegion.w;
-            mixedCanvas.height = cropRegion.h;
+          if (cropRegion && mixedLayout === 'collage') {
+            // Collage only: keep the selected region's height (vertical zoom) but
+            // widen the crop to the Ops pane's aspect so the left/right gaps are
+            // filled with the surrounding screen content, region centered. No
+            // letterbox, no stretching — just more of the real screen on each side.
+            const paneW = mixedCanvas.clientWidth, paneH = mixedCanvas.clientHeight;
+            const paneAspect = (paneW > 0 && paneH > 0) ? (paneW / paneH) : (cropRegion.w / cropRegion.h);
+            let ch = Math.min(cropRegion.h, srcH);
+            let cw = Math.min(ch * paneAspect, srcW);
+            const ccx = cropRegion.x + cropRegion.w / 2;
+            const ccy = cropRegion.y + cropRegion.h / 2;
+            let cx = Math.max(0, Math.min(ccx - cw / 2, srcW - cw));
+            let cy = Math.max(0, Math.min(ccy - ch / 2, srcH - ch));
+            const cwR = Math.max(1, Math.round(cw)), chR = Math.max(1, Math.round(ch));
+            if (mixedCanvas.width !== cwR) mixedCanvas.width = cwR;
+            if (mixedCanvas.height !== chR) mixedCanvas.height = chR;
+            mixedCtx.drawImage(src, cx, cy, cw, ch, 0, 0, cwR, chR);
+          } else if (cropRegion) {
+            // Horizontal / vertical: show the region at its own aspect ratio
+            // (object-fit: contain handles the letterbox) — no fill, no crop.
+            if (mixedCanvas.width !== cropRegion.w) mixedCanvas.width = cropRegion.w;
+            if (mixedCanvas.height !== cropRegion.h) mixedCanvas.height = cropRegion.h;
             mixedCtx.drawImage(src, cropRegion.x, cropRegion.y, cropRegion.w, cropRegion.h, 0, 0, cropRegion.w, cropRegion.h);
           } else {
             if (mixedCanvas.width !== srcW || mixedCanvas.height !== srcH) {
@@ -2941,6 +3224,13 @@
       mirrorLoop();
     })();
 
+    // Disable/enable the mixed-panel drag-reorder while region select is active so
+    // the region drag isn't hijacked by SortableJS.
+    function setMixedSortablesDisabled(disabled) {
+      try { if (window._mixedSortables) window._mixedSortables.forEach(s => s.option('disabled', disabled)); } catch (e) {}
+      try { if (window._mixedRightSortable) window._mixedRightSortable.option('disabled', disabled); } catch (e) {}
+    }
+
     // Region select tool
     function toggleRegionSelect() {
       regionSelectActive = !regionSelectActive;
@@ -2951,10 +3241,12 @@
         btn.classList.add('active');
         if (label) label.textContent = t('selecting');
         overlay.style.display = 'block';
+        setMixedSortablesDisabled(true);
       } else {
         btn.classList.remove('active');
         if (label) label.textContent = t('selectRegion');
         overlay.style.display = 'none';
+        setMixedSortablesDisabled(false);
       }
     }
 
@@ -2970,6 +3262,10 @@
       let startX, startY, isDragging = false;
 
       overlay.addEventListener('mousedown', e => {
+        // Region drag must not also start the SortableJS reorder drag on the
+        // enclosing .mixed-sortable-item / mixed-right.
+        e.preventDefault();
+        e.stopPropagation();
         const bounds = overlay.getBoundingClientRect();
         startX = e.clientX - bounds.left;
         startY = e.clientY - bounds.top;
@@ -3107,7 +3403,7 @@
         'screenSource': 'Screen Source', 'opsRelay': 'OpsView Relay', 'pinLabel': 'PIN Code', 'pinPlaceholder': '6-digit PIN (e.g. 482193)', 'connectRelay': 'Connect Relay', 'or': 'or', 'directStream': 'Direct Stream', 'playStream': 'Play Stream',
         'addDvr': 'Add Camera Group', 'lanScan': 'LAN Search', 'lanScanTitle': 'LAN Search', 'lanScanSubnet': 'Subnet:', 'lanScanStart': 'Start scan', 'lanScanRunning': 'Scanning…', 'lanScanFound': ' device(s) found', 'lanScanAdd': 'Add', 'lanScanAdded': 'Added', 'lanScanNoBackend': 'Backend unavailable', 'lanScanNoSubnet': 'No active subnet', 'lanScanPickSubnet': 'Select a subnet', 'lanScanCancelled': 'Scan cancelled',
         'name': 'Name:', 'myDvr': 'My Camera Group', 'port': 'Port:', 'username': 'Username:', 'password': 'Password:', 'protocol': 'Protocol:', 'autoProtocol': 'Auto', 'quality': 'Quality:', 'subStream': 'Sub', 'mainStream': 'Main', 'refreshRate': 'Refresh:', 'saveAndConnect': 'Save & Connect', 'cancel': 'Cancel', 'rtspTest': 'RTSP Test',
-        'grid': 'Grid:', 'noChannelsAddDvr': 'Add a camera group to view channels', 'layout': 'Layout:', 'horizontal': 'Horizontal', 'vertical': 'Vertical', 'swap': 'Swap', 'noCctvChannels': 'No cameras', 'selectRegion': 'Select Region', 'resetRegion': 'Reset',
+        'grid': 'Grid:', 'noChannelsAddDvr': 'Add a camera group to view channels', 'layout': 'Layout:', 'horizontal': 'Horizontal', 'vertical': 'Vertical', 'swap': 'Swap', 'smartFit': 'Smart Fit', 'noCctvChannels': 'No cameras', 'selectRegion': 'Select Region', 'resetRegion': 'Reset',
         'rescanChannels': 'Rescan channels', 'editDvr': 'Edit Camera Group', 'deleteDvr': 'Delete Camera Group', 'expandHint': 'Double-click to go back (ESC)', 'noChannelsFound': 'No channels found',
         'enterIpPort': 'Please enter IP and port', 'connecting': 'Connecting...', 'connected': 'Connected', 'disconnected': 'Disconnected', 'reconnecting': 'Reconnecting', 'maxReconnect': 'Connection failed. Max reconnect attempts exceeded.', 'connError': 'Connection error', 'connFailed': 'Connection failed',
         'enterStreamUrl': 'Please enter a stream URL', 'loading': 'Loading...', 'rtspConverting': 'Starting RTSP conversion...', 'hlsWaiting': 'Waiting for HLS segments...', 'rtspError': 'RTSP error', 'streamLoadFail': 'Stream load failed', 'hlsError': 'HLS error', 'hlsLoadFail': 'HLS load failed', 'hlsNotSupported': 'HLS not supported', 'streamProxyUnavailable': 'Stream proxy unavailable',
@@ -3118,7 +3414,7 @@
         'screenSource': '화면 소스', 'opsRelay': 'OpsView 릴레이', 'pinLabel': 'PIN 번호', 'pinPlaceholder': '6자리 PIN (예: 482193)', 'connectRelay': '릴레이 연결', 'or': '또는', 'directStream': '직접 스트림', 'playStream': '스트림 재생',
         'addDvr': '카메라 그룹 추가', 'lanScan': 'LAN 검색', 'lanScanTitle': 'LAN 장비 검색', 'lanScanSubnet': '서브넷:', 'lanScanStart': '검색 시작', 'lanScanRunning': '스캔 중…', 'lanScanFound': '대 발견', 'lanScanAdd': '추가', 'lanScanAdded': '등록됨', 'lanScanNoBackend': '백엔드 없음', 'lanScanNoSubnet': '활성 서브넷 없음', 'lanScanPickSubnet': '서브넷을 선택하세요', 'lanScanCancelled': '스캔 취소됨',
         'name': '이름:', 'myDvr': '내 카메라 그룹', 'port': '포트:', 'username': '계정:', 'password': '비밀번호:', 'protocol': '프로토콜:', 'autoProtocol': 'Auto(자동)', 'quality': '화질:', 'subStream': '보조', 'mainStream': '메인', 'refreshRate': '갱신:', 'saveAndConnect': '저장 후 연결', 'cancel': '취소', 'rtspTest': 'RTSP 테스트',
-        'grid': '그리드:', 'noChannelsAddDvr': '채널을 보려면 카메라 그룹을 추가하세요', 'layout': '레이아웃:', 'horizontal': '가로', 'vertical': '세로', 'collage': '콜라쥬', 'swap': '전환', 'noCctvChannels': '카메라 채널 없음', 'selectRegion': '영역 선택', 'resetRegion': '초기화',
+        'grid': '그리드:', 'noChannelsAddDvr': '채널을 보려면 카메라 그룹을 추가하세요', 'layout': '레이아웃:', 'horizontal': '가로', 'vertical': '세로', 'collage': '콜라쥬', 'swap': '전환', 'smartFit': '스마트 핏', 'noCctvChannels': '카메라 채널 없음', 'selectRegion': '영역 선택', 'resetRegion': '초기화',
         'rescanChannels': '채널 재탐색', 'editDvr': '카메라 그룹 편집', 'deleteDvr': '카메라 그룹 삭제', 'expandHint': '더블클릭: 돌아가기 (ESC)', 'noChannelsFound': '채널을 찾을 수 없음',
         'enterIpPort': 'IP와 포트를 입력하세요', 'connecting': '연결 중...', 'connected': '연결됨', 'disconnected': '연결 끊김', 'reconnecting': '재연결 시도 중', 'maxReconnect': '연결 실패. 최대 재연결 시도 횟수 초과.', 'connError': '연결 오류', 'connFailed': '연결 실패',
         'enterStreamUrl': '스트림 URL을 입력하세요', 'loading': '로딩 중...', 'rtspConverting': 'RTSP 변환 시작 중...', 'hlsWaiting': 'HLS 세그먼트 대기 중...', 'rtspError': 'RTSP 오류', 'streamLoadFail': '스트림 로드 실패', 'hlsError': 'HLS 오류', 'hlsLoadFail': 'HLS 로드 실패', 'hlsNotSupported': 'HLS 미지원', 'streamProxyUnavailable': '스트림 프록시를 사용할 수 없음',
