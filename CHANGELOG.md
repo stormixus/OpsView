@@ -2,6 +2,21 @@
 
 All notable changes to OpsView are documented here.
 
+## [0.3.4] - 2026-06-05
+
+### Added
+
+- **ONVIF DVR support** (third protocol alongside Hikvision ISAPI and Dahua) so
+  non-Hikvision/Dahua DVRs — most Korean/Chinese white-label units — work
+  without per-brand code. The agent hand-rolls a minimal ONVIF SOAP client
+  (WS-Security UsernameToken **plus HTTP Digest** auth, which Hikvision requires
+  on its ONVIF endpoint), resolves each channel's RTSP and snapshot URI via
+  `GetProfiles`/`GetStreamUri`/`GetSnapshotUri` (falling back from `GetServices`
+  to `GetCapabilities` for the media service), and the relay streams those
+  device-provided RTSP URIs. Auto-detected in the probe chain
+  (ISAPI→Dahua→ONVIF→RTSP) and selectable in the DVR settings. Snapshot fetches
+  are SSRF-guarded. Verified live against a Hikvision iDS-7204HUHI.
+
 ## [0.3.3] - 2026-06-04
 
 ### Performance
