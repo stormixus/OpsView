@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"crypto/md5"
 	"crypto/rand"
 	"crypto/sha1"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -69,14 +71,34 @@ func (c *onvifClient) call(url, action, innerBody string) ([]byte, error) {
 		`<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">` +
 		`<s:Header>` + header + `</s:Header>` +
 		`<s:Body>` + innerBody + `</s:Body></s:Envelope>`
-	req, err := http.NewRequest("POST", url, bytes.NewBufferString(env))
+	ctype := fmt.Sprintf(`application/soap+xml; charset=utf-8; action="%s"`, action)
+	doReq := func(authHeader string) (*http.Response, error) {
+		req, err := http.NewRequest("POST", url, bytes.NewBufferString(env))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", ctype)
+		if authHeader != "" {
+			req.Header.Set("Authorization", authHeader)
+		}
+		return c.http.Do(req)
+	}
+
+	resp, err := doReq("")
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", fmt.Sprintf(`application/soap+xml; charset=utf-8; action="%s"`, action))
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
+	// Many DVRs (e.g. Hikvision) gate the ONVIF endpoint with HTTP Digest auth on
+	// top of the WS-Security UsernameToken. Answer the challenge and retry once.
+	if resp.StatusCode == http.StatusUnauthorized {
+		chal := resp.Header.Get("WWW-Authenticate")
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if dh := c.digestAuth("POST", url, chal); dh != "" {
+			if resp, err = doReq(dh); err != nil {
+				return nil, err
+			}
+		}
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
@@ -87,6 +109,117 @@ func (c *onvifClient) call(url, action, innerBody string) ([]byte, error) {
 		return body, fmt.Errorf("onvif %s: HTTP %d", action, resp.StatusCode)
 	}
 	return body, nil
+}
+
+var digestParamRe = regexp.MustCompile(`(\w+)=(?:"([^"]*)"|([^,\s]+))`)
+
+func parseDigestChallenge(challenge string) map[string]string {
+	out := map[string]string{}
+	challenge = strings.TrimSpace(challenge)
+	if i := strings.IndexAny(challenge, " \t"); i >= 0 {
+		challenge = challenge[i+1:] // drop the "Digest" scheme word
+	}
+	for _, m := range digestParamRe.FindAllStringSubmatch(challenge, -1) {
+		v := m[2]
+		if v == "" {
+			v = m[3]
+		}
+		out[strings.ToLower(m[1])] = v
+	}
+	return out
+}
+
+func md5hex(s string) string {
+	sum := md5.Sum([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+func randomHex(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// onvifHTTPGet GETs rawURL, answering an HTTP Digest challenge if the device
+// demands one (Hikvision ONVIF snapshot endpoints require Digest), falling back
+// to Basic auth otherwise.
+func onvifHTTPGet(httpc *http.Client, rawURL, user, pass string) ([]byte, error) {
+	c := &onvifClient{http: httpc, user: user, pass: pass}
+	do := func(auth string, basic bool) (*http.Response, error) {
+		req, err := http.NewRequest("GET", rawURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		} else if basic {
+			req.SetBasicAuth(user, pass)
+		}
+		return httpc.Do(req)
+	}
+	resp, err := do("", false)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		chal := resp.Header.Get("WWW-Authenticate")
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if dh := c.digestAuth("GET", rawURL, chal); dh != "" {
+			resp, err = do(dh, false)
+		} else {
+			resp, err = do("", true) // Basic fallback
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("onvif snapshot: HTTP %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+}
+
+// digestAuth builds an HTTP Digest Authorization header answering a
+// WWW-Authenticate challenge, or "" if it is not a Digest challenge.
+func (c *onvifClient) digestAuth(method, endpoint, challenge string) string {
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(challenge)), "digest") {
+		return ""
+	}
+	p := parseDigestChallenge(challenge)
+	realm, nonce := p["realm"], p["nonce"]
+	if realm == "" || nonce == "" {
+		return ""
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return ""
+	}
+	uri := u.RequestURI()
+	ha1 := md5hex(c.user + ":" + realm + ":" + c.pass)
+	ha2 := md5hex(method + ":" + uri)
+	cnonce := randomHex(8)
+	nc := "00000001"
+	qop := p["qop"]
+	var response string
+	if qop == "auth" {
+		response = md5hex(ha1 + ":" + nonce + ":" + nc + ":" + cnonce + ":" + qop + ":" + ha2)
+	} else {
+		response = md5hex(ha1 + ":" + nonce + ":" + ha2)
+	}
+	h := fmt.Sprintf(`Digest username="%s", realm="%s", nonce="%s", uri="%s", response="%s"`,
+		c.user, realm, nonce, uri, response)
+	if qop != "" {
+		h += fmt.Sprintf(`, qop=%s, nc=%s, cnonce="%s"`, qop, nc, cnonce)
+	}
+	if p["opaque"] != "" {
+		h += fmt.Sprintf(`, opaque="%s"`, p["opaque"])
+	}
+	if p["algorithm"] != "" {
+		h += fmt.Sprintf(`, algorithm=%s`, p["algorithm"])
+	}
+	return h
 }
 
 func xmlEscape(s string) string {
@@ -221,33 +354,48 @@ func (c *onvifClient) probeWith(httpc *http.Client, deviceURL string) bool {
 // to the host we actually dialed (devices often advertise their LAN IP, which
 // can differ from how we reach them).
 func (c *onvifClient) mediaXAddr(deviceURL string) (string, error) {
-	resp, err := c.call(deviceURL, onvifNSDevice+"/GetServices",
-		`<tds:GetServices xmlns:tds="`+onvifNSDevice+`"><tds:IncludeCapability>false</tds:IncludeCapability></tds:GetServices>`)
-	if err != nil {
-		return "", err
-	}
-	var env struct {
-		Services []struct {
-			Namespace string `xml:"Namespace"`
-			XAddr     string `xml:"XAddr"`
-		} `xml:"Body>GetServicesResponse>Service"`
-	}
-	if err := xml.Unmarshal(resp, &env); err != nil {
-		return "", err
-	}
 	dialed, _ := url.Parse(deviceURL)
-	for _, s := range env.Services {
-		if strings.Contains(s.Namespace, "/media/") && s.XAddr != "" {
-			if u, err := url.Parse(s.XAddr); err == nil && dialed != nil {
-				u.Host = dialed.Host
-				return u.String(), nil
+	rewrite := func(xaddr string) string {
+		if u, err := url.Parse(xaddr); err == nil && dialed != nil {
+			u.Host = dialed.Host // devices advertise their own IP; use the one we dialed
+			return u.String()
+		}
+		return xaddr
+	}
+
+	// 1) GetServices (ONVIF 2.x). Some devices (e.g. some Hikvision firmwares)
+	//    return a SOAP fault here, so treat any failure as "try the next method".
+	if resp, err := c.call(deviceURL, onvifNSDevice+"/GetServices",
+		`<tds:GetServices xmlns:tds="`+onvifNSDevice+`"><tds:IncludeCapability>false</tds:IncludeCapability></tds:GetServices>`); err == nil {
+		var env struct {
+			Services []struct {
+				Namespace string `xml:"Namespace"`
+				XAddr     string `xml:"XAddr"`
+			} `xml:"Body>GetServicesResponse>Service"`
+		}
+		if xml.Unmarshal(resp, &env) == nil {
+			for _, s := range env.Services {
+				if strings.Contains(s.Namespace, "/media") && s.XAddr != "" {
+					return rewrite(s.XAddr), nil
+				}
 			}
-			return s.XAddr, nil
 		}
 	}
-	// Fallback to the conventional Hikvision media path.
+
+	// 2) GetCapabilities (ONVIF 1.x; widely supported on Hikvision DVRs).
+	if resp, err := c.call(deviceURL, onvifNSDevice+"/GetCapabilities",
+		`<tds:GetCapabilities xmlns:tds="`+onvifNSDevice+`"><tds:Category>All</tds:Category></tds:GetCapabilities>`); err == nil {
+		var env struct {
+			XAddr string `xml:"Body>GetCapabilitiesResponse>Capabilities>Media>XAddr"`
+		}
+		if xml.Unmarshal(resp, &env) == nil && env.XAddr != "" {
+			return rewrite(env.XAddr), nil
+		}
+	}
+
+	// 3) Fallback to the conventional media-service path.
 	if dialed != nil {
-		return "http://" + dialed.Host + "/onvif/Media", nil
+		return "http://" + dialed.Host + "/onvif/media_service", nil
 	}
 	return "", fmt.Errorf("onvif: media service not found")
 }

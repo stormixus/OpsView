@@ -436,17 +436,8 @@ func (m *SurveillanceManager) fetchSnapshotOnvif(dvr DVRConfig, chNum int) ([]by
 	if !onvifFetchURLAllowed(snapURI) {
 		return nil, fmt.Errorf("onvif: snapshot URI host not allowed (ch %d)", chNum)
 	}
-	req, _ := http.NewRequest("GET", snapURI, nil)
-	req.SetBasicAuth(dvr.Username, dvr.Password)
-	resp, err := m.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("onvif snapshot returned %d", resp.StatusCode)
-	}
-	return io.ReadAll(resp.Body)
+	// ONVIF snapshot endpoints (e.g. Hikvision) require HTTP Digest auth.
+	return onvifHTTPGet(m.client, snapURI, dvr.Username, dvr.Password)
 }
 
 func (m *SurveillanceManager) fetchSnapshotRTSP(dvr DVRConfig, chNum int) ([]byte, error) {

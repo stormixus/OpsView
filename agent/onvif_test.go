@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -218,5 +219,68 @@ func TestOnvifFetchURLAllowed(t *testing.T) {
 		if got := onvifFetchURLAllowed(c.url); got != c.want {
 			t.Errorf("onvifFetchURLAllowed(%q) = %v, want %v", c.url, got, c.want)
 		}
+	}
+}
+
+func TestOnvifDigestRetry(t *testing.T) {
+	var sawAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "" {
+			w.Header().Set("WWW-Authenticate", `Digest realm="test", qop="auth", nonce="abc123", opaque="op1", algorithm="MD5"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		sawAuth = r.Header.Get("Authorization")
+		w.Write([]byte(`<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><ok/></s:Body></s:Envelope>`))
+	}))
+	defer srv.Close()
+	c := newOnvifClient("admin", "test123", 5*time.Second)
+	c.http = srv.Client()
+	resp, err := c.call(srv.URL+"/onvif/device_service", "act", `<x/>`)
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if !strings.Contains(string(resp), "<ok/>") {
+		t.Fatalf("resp: %s", resp)
+	}
+	for _, want := range []string{"Digest ", `username="admin"`, `realm="test"`, `nonce="abc123"`, "response=", "qop=auth", "cnonce=", `opaque="op1"`} {
+		if !strings.Contains(sawAuth, want) {
+			t.Fatalf("Authorization missing %q: %s", want, sawAuth)
+		}
+	}
+}
+
+// TestOnvifLive probes a real ONVIF device. Opt-in:
+// ONVIF_ADDR=192.168.0.46 ONVIF_USER=x ONVIF_PASS=y go test ./ -run TestOnvifLive -v
+func TestOnvifLive(t *testing.T) {
+	addr := os.Getenv("ONVIF_ADDR")
+	if addr == "" {
+		t.Skip("set ONVIF_ADDR/ONVIF_USER/ONVIF_PASS (and optional ONVIF_PORT) to run")
+	}
+	port := 80
+	if p := os.Getenv("ONVIF_PORT"); p != "" {
+		fmt.Sscanf(p, "%d", &port)
+	}
+	c := newOnvifClient(os.Getenv("ONVIF_USER"), os.Getenv("ONVIF_PASS"), 8*time.Second)
+	chans, err := c.discover(addr, port)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(chans) == 0 {
+		t.Fatal("no channels discovered")
+	}
+	for _, ch := range chans {
+		t.Logf("ch%d name=%q %dx%d rtsp=%s snap=%s", ch.ChNum, ch.Name, ch.Width, ch.Height, ch.RTSPURI, ch.SnapshotURI)
+	}
+	// Verify a snapshot fetch (Digest auth) returns a JPEG.
+	if su := chans[0].SnapshotURI; su != "" {
+		img, err := onvifHTTPGet(c.http, su, os.Getenv("ONVIF_USER"), os.Getenv("ONVIF_PASS"))
+		if err != nil {
+			t.Fatalf("snapshot: %v", err)
+		}
+		if len(img) < 3 || img[0] != 0xFF || img[1] != 0xD8 {
+			t.Fatalf("snapshot not JPEG (%d bytes)", len(img))
+		}
+		t.Logf("snapshot ch1: %d bytes JPEG OK", len(img))
 	}
 }
