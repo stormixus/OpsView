@@ -3,7 +3,10 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"log"
 	"sync"
 	"syscall"
@@ -13,6 +16,34 @@ import (
 	"github.com/opsview/opsview/proto"
 	"golang.org/x/sys/windows"
 )
+
+// jpegQuality balances image fidelity against bytes/latency for screen tiles.
+const jpegQuality = 85
+
+// encodeTileJPEG converts a tightly-packed BGRA tile (as mapped from DXGI) to a
+// baseline JPEG. Browsers decode JPEG natively and asynchronously
+// (createImageBitmap) — far cheaper than zstd-decompressing raw BGRA on the main
+// thread — and JPEG is ~5-10x smaller for screen content. Together that removes
+// the viewer-side backlog that drove 1080p latency.
+func encodeTileJPEG(bgra []byte, w, h int) ([]byte, error) {
+	img := image.NewRGBA(image.Rect(0, 0, w, h)) // stride = 4*w, matches the packed tile
+	dst := img.Pix
+	n := w * h * 4
+	if n > len(bgra) {
+		n = len(bgra)
+	}
+	for i := 0; i+3 < n; i += 4 {
+		dst[i+0] = bgra[i+2] // R <- B-position (DXGI is BGRA)
+		dst[i+1] = bgra[i+1] // G
+		dst[i+2] = bgra[i+0] // B <- R-position
+		dst[i+3] = 0xFF      // opaque (JPEG ignores alpha)
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: jpegQuality}); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
 
 // --- Direct3D 11 / DXGI COM interfaces via syscall ---
 
@@ -393,13 +424,17 @@ func (c *DXGICapturer) extractTiles(resource uintptr) []proto.Tile {
 			copy(dst, unsafe.Slice((*byte)(unsafe.Pointer(src)), tileW*4))
 		}
 
-		compressed := c.encoder.EncodeAll(raw, nil)
+		jpegData, err := encodeTileJPEG(raw, tileW, tileH)
+		if err != nil {
+			log.Printf("[capturer] jpeg encode tile (%d,%d): %v", tx, ty, err)
+			continue
+		}
 		tiles = append(tiles, proto.Tile{
 			TX:      uint16(tx),
 			TY:      uint16(ty),
-			Codec:   proto.CodecZstdRawBGRA,
-			DataLen: uint32(len(compressed)),
-			Data:    compressed,
+			Codec:   proto.CodecJPEG,
+			DataLen: uint32(len(jpegData)),
+			Data:    jpegData,
 		})
 	}
 

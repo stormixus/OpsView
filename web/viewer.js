@@ -294,7 +294,7 @@ function connect() {
     const hello = {
       role: 'watcher',
       client: 'opsview-web',
-      client_version: '0.3.2',
+      client_version: '0.3.3',
       supports: ['zstd'],
       want_profile: null
     };
@@ -395,6 +395,10 @@ function sendOVPMessage(type, jsonStr) {
 }
 
 // --- Frame Delta ---
+// Frames are drawn through this promise chain so tiles never apply out of order
+// when JPEG decode (async, variable latency) is in flight.
+let frameChain = Promise.resolve();
+
 function handleFrameDelta(buffer, offset, payloadLen) {
   if (payloadLen < FRAME_DELTA_HEADER_SIZE) return;
 
@@ -417,6 +421,7 @@ function handleFrameDelta(buffer, offset, payloadLen) {
     fitCanvasToStage();
   }
 
+  const tiles = [];
   for (let i = 0; i < tileCount; i++) {
     if (pos + TILE_HEADER_SIZE > payloadLen) break;
 
@@ -427,20 +432,11 @@ function handleFrameDelta(buffer, offset, payloadLen) {
 
     if (pos + dataLen > payloadLen) break;
 
-    const compressedData = new Uint8Array(buffer, offset + pos, dataLen);
+    // Copy the tile bytes out: the draw runs asynchronously (createImageBitmap),
+    // so we must not retain a view into the WebSocket frame buffer.
+    const data = new Uint8Array(buffer, offset + pos, dataLen).slice();
     pos += dataLen;
     tilesReceived++;
-
-    let bgraData;
-    try {
-      if (codec === 1) {
-        bgraData = fzstd.decompress(compressedData);
-      } else {
-        continue;
-      }
-    } catch (e) {
-      continue;
-    }
 
     const pixelX = tx * tileSize;
     const pixelY = ty * tileSize;
@@ -448,17 +444,10 @@ function handleFrameDelta(buffer, offset, payloadLen) {
     const tileH = Math.min(tileSize, height - pixelY);
     if (tileW <= 0 || tileH <= 0) continue;
 
-    const rgbaData = new Uint8ClampedArray(tileW * tileH * 4);
-    for (let p = 0; p < tileW * tileH; p++) {
-      const off = p * 4;
-      rgbaData[off] = bgraData[off + 2];
-      rgbaData[off + 1] = bgraData[off + 1];
-      rgbaData[off + 2] = bgraData[off];
-      rgbaData[off + 3] = bgraData[off + 3];
-    }
-
-    ctx.putImageData(new ImageData(rgbaData, tileW, tileH), pixelX, pixelY);
+    tiles.push({ codec, data, pixelX, pixelY, tileW, tileH });
   }
+
+  frameChain = frameChain.then(() => drawTiles(tiles)).catch(() => {});
 
   frameCount++;
   const now = performance.now();
@@ -466,6 +455,44 @@ function handleFrameDelta(buffer, offset, payloadLen) {
     fps = frameCount;
     frameCount = 0;
     lastFpsTime = now;
+  }
+}
+
+// drawTiles decodes a frame's tiles (JPEG natively/async, zstd-BGRA on-thread)
+// then blits them in order onto the canvas.
+async function drawTiles(tiles) {
+  const drawables = await Promise.all(tiles.map(async (tn) => {
+    if (tn.codec === 2) { // CodecJPEG — native async decode, off the main thread
+      try {
+        const bmp = await createImageBitmap(new Blob([tn.data], { type: 'image/jpeg' }));
+        return { bitmap: bmp, x: tn.pixelX, y: tn.pixelY };
+      } catch (e) { return null; }
+    }
+    if (tn.codec === 1) { // CodecZstdRawBGRA — legacy path
+      try {
+        const bgra = fzstd.decompress(tn.data);
+        const rgba = new Uint8ClampedArray(tn.tileW * tn.tileH * 4);
+        for (let p = 0; p < tn.tileW * tn.tileH; p++) {
+          const o = p * 4;
+          rgba[o] = bgra[o + 2];
+          rgba[o + 1] = bgra[o + 1];
+          rgba[o + 2] = bgra[o];
+          rgba[o + 3] = bgra[o + 3];
+        }
+        return { image: new ImageData(rgba, tn.tileW, tn.tileH), x: tn.pixelX, y: tn.pixelY };
+      } catch (e) { return null; }
+    }
+    return null;
+  }));
+
+  for (const d of drawables) {
+    if (!d) continue;
+    if (d.bitmap) {
+      ctx.drawImage(d.bitmap, d.x, d.y);
+      if (d.bitmap.close) d.bitmap.close();
+    } else {
+      ctx.putImageData(d.image, d.x, d.y);
+    }
   }
 }
 

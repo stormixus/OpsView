@@ -11,6 +11,7 @@ type TileCodec uint16
 
 const (
 	CodecZstdRawBGRA TileCodec = 1 // zstd-compressed raw BGRA pixels
+	CodecJPEG        TileCodec = 2 // baseline JPEG (browser-native async decode)
 )
 
 // FrameDeltaHeaderSize is the fixed portion of a FRAME_DELTA payload.
