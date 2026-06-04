@@ -983,7 +983,8 @@
         ip = dvr.ext_addr.trim();
         if (dvr.ext_port > 0) port = String(dvr.ext_port);
       }
-      return { ip, port };
+      const scheme = port === '443' ? 'https' : 'http';
+      return { ip, port, scheme };
     }
 
     function dvrAddrPortKey(addr, port) {
@@ -1056,7 +1057,9 @@
         return;
       }
 
-      const url = `ws://${ip}:${port}/watch`;
+      // Port 443 means TLS (e.g. a Cloudflare Tunnel domain) -> wss/https.
+      const secure = port === '443';
+      const url = `${secure ? 'wss' : 'ws'}://${ip}:${port}/watch`;
       setStatus('connecting', t('connecting'));
 
       if (opsWs) {
@@ -2384,8 +2387,8 @@
           video.style.height = '100%';
           video.style.objectFit = 'cover';
           video.style.background = 'transparent';
-          const { ip, port } = resolveRelayHLSEndpoint(dvr);
-          const hlsUrl = 'http://' + ip + ':' + port + '/surv/dvr' + streamDvrId + '_ch' + ch.ch_num + '/index.m3u8';
+          const { ip, port, scheme } = resolveRelayHLSEndpoint(dvr);
+          const hlsUrl = scheme + '://' + ip + ':' + port + '/surv/dvr' + streamDvrId + '_ch' + ch.ch_num + '/index.m3u8';
           if (typeof Hls !== 'undefined' && Hls.isSupported()) {
             const hls = new Hls({
               enableWorker: true,
@@ -2993,8 +2996,8 @@
           video.style.height = '100%';
           video.style.objectFit = 'cover';
           video.style.background = 'transparent';
-          const { ip, port } = resolveRelayHLSEndpoint(dvr);
-          const hlsUrl = 'http://' + ip + ':' + port + '/surv/dvr' + streamDvrId + '_ch' + ch.ch_num + '/index.m3u8';
+          const { ip, port, scheme } = resolveRelayHLSEndpoint(dvr);
+          const hlsUrl = scheme + '://' + ip + ':' + port + '/surv/dvr' + streamDvrId + '_ch' + ch.ch_num + '/index.m3u8';
           if (typeof Hls !== 'undefined' && Hls.isSupported()) {
             const hls = new Hls({
               enableWorker: true,

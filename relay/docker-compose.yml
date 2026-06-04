@@ -13,3 +13,21 @@ services:
       # Optional WebSocket Origin allowlist (comma-separated); empty = allow all.
       - RELAY_ALLOWED_ORIGINS=${RELAY_ALLOWED_ORIGINS:-}
     restart: unless-stopped
+
+  # Cloudflare Tunnel: exposes the relay over TLS (wss/https) at your domain with
+  # no port-forwarding. OPT-IN via a compose profile so plain `docker compose up`
+  # is unaffected for LAN-only deployments. To enable, set in relay/.env:
+  #   COMPOSE_PROFILES=tunnel
+  #   CLOUDFLARE_TUNNEL_TOKEN=<token from Cloudflare Zero Trust>
+  # Then add a Public Hostname  ops.hotelpos.net -> http://relay:8080  in the
+  # Cloudflare dashboard (same compose network, so the name `relay` resolves).
+  cloudflared:
+    profiles: ["tunnel"]
+    container_name: OpsView-tunnel
+    image: cloudflare/cloudflared:latest
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
+    restart: unless-stopped
+    depends_on:
+      - relay
