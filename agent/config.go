@@ -9,10 +9,14 @@ import (
 
 // Config represents the JSON configuration stored at %APPDATA%/opsview-agent/config.json.
 type Config struct {
-	RelayURL  string               `json:"relay_url"`
-	Profile   int                  `json:"profile"`
-	AutoStart bool                 `json:"auto_start"`
-	SurvMgr   *SurveillanceManager `json:"-"`
+	RelayURL  string `json:"relay_url"`
+	Profile   int    `json:"profile"`
+	AutoStart bool   `json:"auto_start"`
+	// PublisherToken is the shared relay secret presented to claim the publisher
+	// slot. Configurable in-app (Settings); when empty, resolvePublisherToken
+	// falls back to the RELAY_PUBLISHER_TOKEN / AGENT_TOKEN environment variable.
+	PublisherToken string               `json:"publisher_token"`
+	SurvMgr        *SurveillanceManager `json:"-"`
 }
 
 func defaultConfig() Config {

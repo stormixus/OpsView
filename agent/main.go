@@ -63,6 +63,17 @@ func loadPublisherToken() string {
 	return os.Getenv("AGENT_TOKEN")
 }
 
+// resolvePublisherToken returns the shared relay publisher secret, preferring
+// the in-app setting (config.json, set via Settings) and falling back to the
+// RELAY_PUBLISHER_TOKEN / AGENT_TOKEN environment variable when it is unset.
+// Empty means the fail-closed relay will reject this agent.
+func resolvePublisherToken(cfg Config) string {
+	if t := strings.TrimSpace(cfg.PublisherToken); t != "" {
+		return t
+	}
+	return loadPublisherToken()
+}
+
 func loadOrCreateAgentPIN() (string, error) {
 	appData := os.Getenv("APPDATA")
 	if appData == "" {

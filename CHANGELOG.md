@@ -2,6 +2,18 @@
 
 All notable changes to OpsView are documented here.
 
+## [0.3.1] - 2026-06-04
+
+### Added
+
+- **Agent: configure the publisher token in-app.** The shared relay secret
+  (`RELAY_PUBLISHER_TOKEN`) can now be set in the agent's Settings (고급 설정 →
+  Publisher Token) and is stored in `config.json`. The agent prefers this value
+  and falls back to the `RELAY_PUBLISHER_TOKEN` / `AGENT_TOKEN` environment
+  variable when it is empty, so existing env/service-based setups keep working.
+  This removes the need to inject the token via environment variables for the
+  download-and-run deployment.
+
 ## [0.3.0] - 2026-06-04
 
 A large security + performance release: a full security audit (5 critical/high

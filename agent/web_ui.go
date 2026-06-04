@@ -20,11 +20,12 @@ var webPort int
 var webSurvMgr *SurveillanceManager
 
 type APIStatus struct {
-	PIN       string `json:"pin"`
-	IP        string `json:"ip"`
-	RelayURL  string `json:"relay_url"`
-	Profile   int    `json:"profile"`
-	AutoStart bool   `json:"autostart"`
+	PIN            string `json:"pin"`
+	IP             string `json:"ip"`
+	RelayURL       string `json:"relay_url"`
+	Profile        int    `json:"profile"`
+	AutoStart      bool   `json:"autostart"`
+	PublisherToken string `json:"publisher_token"`
 }
 
 func getPublicIP() string {
@@ -154,11 +155,12 @@ func handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 	ip := getPublicIP()
 
 	status := APIStatus{
-		PIN:       pin,
-		IP:        ip,
-		RelayURL:  cfg.RelayURL,
-		Profile:   cfg.Profile,
-		AutoStart: cfg.AutoStart,
+		PIN:            pin,
+		IP:             ip,
+		RelayURL:       cfg.RelayURL,
+		Profile:        cfg.Profile,
+		AutoStart:      cfg.AutoStart,
+		PublisherToken: cfg.PublisherToken,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
@@ -181,6 +183,7 @@ func handleAPISave(w http.ResponseWriter, r *http.Request) {
 	// Apply updates
 	cfg.RelayURL = req.RelayURL
 	cfg.Profile = req.Profile
+	cfg.PublisherToken = strings.TrimSpace(req.PublisherToken)
 
 	newAutoStart := req.AutoStart
 	if newAutoStart != cfg.AutoStart {
@@ -488,6 +491,11 @@ const htmlTemplate = `
                     <input type="text" id="relay-url" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition font-mono text-sm" placeholder="ws://127.0.0.1:8080/publish">
                     <p class="text-xs text-slate-500 mt-1">직접 URL을 입력하면 위 IP/Port 대신 이 값이 사용됩니다.</p>
                 </div>
+                <div class="mt-4">
+                    <label class="block text-sm font-medium text-slate-300 mb-2">Publisher Token (Relay 공유 시크릿)</label>
+                    <input type="text" id="publisher-token" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition font-mono text-sm" placeholder="relay의 RELAY_PUBLISHER_TOKEN과 동일한 값">
+                    <p class="text-xs text-slate-500 mt-1">Relay의 <code class="text-slate-400">RELAY_PUBLISHER_TOKEN</code>과 <strong class="text-slate-300">정확히 같은 값</strong>이어야 연결됩니다. 비워두면 환경변수(RELAY_PUBLISHER_TOKEN/AGENT_TOKEN)를 사용합니다.</p>
+                </div>
                 <div class="mt-4 pt-4 border-t border-slate-700/50">
                     <label class="block text-sm font-medium text-slate-300 mb-2">데이터베이스 초기화</label>
                     <button type="button" onclick="resetDatabase()" class="text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 px-3 py-2 rounded-lg transition font-medium">전체 DB 초기화 (DVR 및 채널 전체 삭제)</button>
@@ -704,6 +712,7 @@ const htmlTemplate = `
                 document.getElementById('ip-address').textContent = data.ip || 'Unknown';
                 document.getElementById('profile').value = data.profile.toString();
                 document.getElementById('relay-url').value = data.relay_url;
+                document.getElementById('publisher-token').value = data.publisher_token || '';
                 document.getElementById('autostart').checked = data.autostart;
 
                 // Populate IP/Port from URL
@@ -741,6 +750,7 @@ const htmlTemplate = `
             const payload = {
                 profile: parseInt(document.getElementById('profile').value),
                 relay_url: document.getElementById('relay-url').value.trim(),
+                publisher_token: document.getElementById('publisher-token').value.trim(),
                 autostart: document.getElementById('autostart').checked
             };
 
