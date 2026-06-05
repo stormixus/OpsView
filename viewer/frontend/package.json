@@ -1,7 +1,7 @@
 {
   "name": "opsview-viewer",
   "private": true,
-  "version": "0.3.4",
+  "version": "0.3.5",
   "scripts": {
     "dev": "echo 'static frontend - no build needed'",
     "build": "echo 'static frontend - no build needed'"

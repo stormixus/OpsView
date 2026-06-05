@@ -2,6 +2,28 @@
 
 All notable changes to OpsView are documented here.
 
+## [0.3.5] - 2026-06-05
+
+### Added
+
+- **Relay: fMP4-over-WebSocket CCTV endpoint** (`/surv/ws/{chID}`) alongside HLS,
+  so CCTV can ride the same `wss` path as the Ops stream (e.g. through a
+  Cloudflare Tunnel). The relay taps the existing RTSP→H264/H265 stream, builds
+  an fMP4 init segment (lazily, from in-band SPS/PPS that DVRs like Hikvision
+  omit from the SDP) plus one fragment per access unit, and fans them out per
+  channel; clients start at a keyframe with the init segment sent first
+  (MSE-ready). Verified end to end against a Hikvision iDS-7204HUHI. (Playing it
+  needs a viewer-side MSE consumer — follow-up.)
+
+### Fixed
+
+- **Relay: new viewers see the whole Ops screen immediately.** The relay caches
+  the latest tile per position and sends a synthesized full keyframe to each
+  watcher on join, instead of the screen filling in tile-by-tile. Also rebuilds
+  the frame buffer as a codec-agnostic tile cache (the old BGRA buffer silently
+  stopped working after the v0.3.3 switch to JPEG tiles), fixing the Ops PNG
+  snapshot too.
+
 ## [0.3.4] - 2026-06-05
 
 ### Added
