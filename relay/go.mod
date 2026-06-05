@@ -6,6 +6,7 @@ require (
 	github.com/NebulousLabs/go-upnp v0.0.0-20181203152547-b32978b8ccbf
 	github.com/bluenviron/gohlslib/v2 v2.2.5
 	github.com/bluenviron/gortsplib/v5 v5.3.1
+	github.com/bluenviron/mediacommon/v2 v2.7.1
 	github.com/energye/systray v1.0.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/klauspost/compress v1.18.4
@@ -18,7 +19,6 @@ require (
 	github.com/abema/go-mp4 v1.4.1 // indirect
 	github.com/asticode/go-astikit v0.30.0 // indirect
 	github.com/asticode/go-astits v1.14.0 // indirect
-	github.com/bluenviron/mediacommon/v2 v2.7.1 // indirect
 	github.com/godbus/dbus/v5 v5.0.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/pion/logging v0.2.4 // indirect

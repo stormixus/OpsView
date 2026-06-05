@@ -37,6 +37,10 @@ type streamEntry struct {
 	rtspURL string
 	proxy   *SurvProxy
 	stopped bool // true when explicitly stopped (no reconnect)
+
+	// fMP4-over-WebSocket fan-out (parallel to HLS)
+	wsHub *survWSHub
+	frag  *fragMuxer
 }
 
 // SurvProxy manages multiple RTSP→HLS streams, one per surveillance channel.
@@ -181,7 +185,7 @@ func (sp *SurvProxy) StartChannel(id, name, rawURL string) error {
 		return fmt.Errorf("RTSP describe: %w", err)
 	}
 
-	entry := &streamEntry{id: id, name: name}
+	entry := &streamEntry{id: id, name: name, wsHub: newSurvWSHub()}
 
 	track, _, err := setupSurvCodec(c, desc, entry)
 	if err != nil {
@@ -379,6 +383,11 @@ func setupSurvH264(c *gortsplib.Client, desc *description.Session, medi *descrip
 		ClockRate: 90000,
 	}
 
+	entry.frag = newFragMuxerH264(sps, pps)
+	if entry.frag.initSeg != nil {
+		entry.wsHub.setInit(entry.frag.initSeg)
+	}
+
 	c.OnPacketRTP(medi, forma, func(pkt *rtp.Packet) {
 		pts, ok := c.PacketPTS(medi, pkt)
 		if !ok {
@@ -397,6 +406,16 @@ func setupSurvH264(c *gortsplib.Client, desc *description.Session, medi *descrip
 			entry.muxer.WriteH264(track, time.Now(), pts, au)
 		}
 		entry.mu.Unlock()
+
+		if entry.frag != nil {
+			frag, kf, newInit := entry.frag.writeAU(pts, au)
+			if newInit != nil {
+				entry.wsHub.setInit(newInit)
+			}
+			if frag != nil {
+				entry.wsHub.broadcast(frag, kf)
+			}
+		}
 	})
 
 	return track, nil
@@ -428,6 +447,11 @@ func setupSurvH265(c *gortsplib.Client, desc *description.Session, medi *descrip
 		ClockRate: 90000,
 	}
 
+	entry.frag = newFragMuxerH265(vps, sps, pps)
+	if entry.frag.initSeg != nil {
+		entry.wsHub.setInit(entry.frag.initSeg)
+	}
+
 	c.OnPacketRTP(medi, forma, func(pkt *rtp.Packet) {
 		pts, ok := c.PacketPTS(medi, pkt)
 		if !ok {
@@ -446,6 +470,16 @@ func setupSurvH265(c *gortsplib.Client, desc *description.Session, medi *descrip
 			entry.muxer.WriteH265(track, time.Now(), pts, au)
 		}
 		entry.mu.Unlock()
+
+		if entry.frag != nil {
+			frag, kf, newInit := entry.frag.writeAU(pts, au)
+			if newInit != nil {
+				entry.wsHub.setInit(newInit)
+			}
+			if frag != nil {
+				entry.wsHub.broadcast(frag, kf)
+			}
+		}
 	})
 
 	return track, nil

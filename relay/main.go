@@ -40,6 +40,7 @@ func runServer() (stop func()) {
 	mux.HandleFunc("/api/surv", hub.HandleSurvConfig)
 	mux.HandleFunc("/api/surv/streams", hub.HandleSurvStreams)
 	mux.HandleFunc("/api/snapshot", hub.HandleSnapshot)
+	mux.HandleFunc("/surv/ws/", hub.survProxy.ServeWS) // fMP4-over-WebSocket (more specific than /surv/)
 	mux.HandleFunc("/surv/", hub.survProxy.ServeHLS)
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: mux}
