@@ -770,6 +770,106 @@ function renderSurvGrid() {
   channelsToRender.forEach(ch => startStream(dvr, ch));
 }
 
+function isIOSDevice() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function hex2(n) { return (n < 16 ? '0' : '') + n.toString(16); }
+
+// Pull the H264 codec string (avc1.PPCCLL) out of the fMP4 init segment's avcC box.
+// Returns null for H265 / unrecognized → caller falls back to HLS.
+function codecFromInit(data) {
+  for (let i = 0; i + 8 < data.length; i++) {
+    if (data[i] === 0x61 && data[i + 1] === 0x76 && data[i + 2] === 0x63 && data[i + 3] === 0x43) {
+      return 'avc1.' + hex2(data[i + 5]) + hex2(data[i + 6]) + hex2(data[i + 7]);
+    }
+  }
+  return null;
+}
+
+// Play CCTV over fMP4-over-WebSocket via MSE. Returns { close } on success, or
+// null (after invoking onFail) when MSE is unavailable. Any later failure also
+// calls onFail so the caller can fall back to HLS.
+function playRelayCCTVWS(video, wsUrl, onFail) {
+  if (!('MediaSource' in window) || isIOSDevice()) { if (onFail) onFail('no-mse'); return null; }
+  const ms = new MediaSource();
+  let sb = null, ws = null, gotInit = false, failed = false;
+  const queue = [];
+  const cleanup = () => {
+    try { if (ws) ws.close(); } catch (e) {}
+    try { if (ms.readyState === 'open') ms.endOfStream(); } catch (e) {}
+  };
+  const fail = (why) => {
+    if (failed) return;
+    failed = true;
+    clearTimeout(initTimer);
+    cleanup();
+    if (onFail) onFail(why);
+  };
+  const flush = () => {
+    if (!sb || sb.updating || queue.length === 0) return;
+    try {
+      sb.appendBuffer(queue.shift());
+    } catch (err) {
+      if (err && err.name === 'QuotaExceededError') {
+        try {
+          if (sb.buffered.length) {
+            const end = sb.buffered.end(sb.buffered.length - 1);
+            if (end > 8) sb.remove(0, end - 4);
+          }
+        } catch (e) {}
+      } else {
+        fail('append');
+      }
+    }
+  };
+  video.src = URL.createObjectURL(ms);
+  const initTimer = setTimeout(() => { if (!gotInit) fail('timeout'); }, 6000);
+  ms.addEventListener('sourceopen', () => {
+    try { ws = new WebSocket(wsUrl); } catch (e) { fail('ws-open'); return; }
+    ws.binaryType = 'arraybuffer';
+    ws.onmessage = (e) => {
+      if (failed) return;
+      const data = new Uint8Array(e.data);
+      if (!gotInit) {
+        gotInit = true;
+        clearTimeout(initTimer);
+        const codec = codecFromInit(data);
+        const mime = codec ? 'video/mp4; codecs="' + codec + '"' : '';
+        if (!codec || !MediaSource.isTypeSupported(mime)) { fail('codec'); return; }
+        try { sb = ms.addSourceBuffer(mime); } catch (err) { fail('addSourceBuffer'); return; }
+        sb.mode = 'segments';
+        sb.addEventListener('updateend', flush);
+        sb.addEventListener('error', () => fail('sb'));
+      }
+      queue.push(data);
+      flush();
+    };
+    ws.onerror = () => fail('ws-error');
+    ws.onclose = () => { if (!gotInit) fail('ws-close'); };
+  });
+  video.play().catch(() => {});
+  return { close: cleanup };
+}
+
+function startRelayHLS(video, hlsUrl) {
+  if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+    const hls = new Hls(SURV_HLS_CONFIG);
+    hls.loadSource(hlsUrl);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+    hls.on(Hls.Events.ERROR, (evt, data) => {
+      if (data.fatal) console.warn('[surv] HLS error:', data);
+    });
+    return { hls };
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = hlsUrl; video.play();
+    return {};
+  }
+  return {};
+}
+
 function startStream(dvr, ch) {
   const chNum = ch.ch_num || ch.ch;
   const cellId = `${dvr.id}-${chNum}`;
@@ -781,24 +881,17 @@ function startStream(dvr, ch) {
     const base = resolveHLSEndpoint(dvr);
     const streamId = `dvr${dvr.id}_ch${chNum}`;
     const hlsUrl = `${base}/surv/${streamId}/index.m3u8`;
+    const wsUrl = base.replace(/^http/, 'ws') + `/surv/ws/${streamId}`;
 
     const video = document.createElement('video');
     video.autoplay = true; video.muted = true; video.playsInline = true;
     cell.prepend(video);
 
-    if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-      const hls = new Hls(SURV_HLS_CONFIG);
-      hls.loadSource(hlsUrl);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
-      hls.on(Hls.Events.ERROR, (evt, data) => {
-        if (data.fatal) console.warn('[surv] HLS error:', data);
-      });
-      survPlayers[cellId] = { hls };
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = hlsUrl; video.play();
-      survPlayers[cellId] = {};
-    }
+    // Prefer fMP4-over-WS (rides the same wss path as Ops); fall back to HLS.
+    const wsPlayer = playRelayCCTVWS(video, wsUrl, () => {
+      survPlayers[cellId] = startRelayHLS(video, hlsUrl);
+    });
+    if (wsPlayer) survPlayers[cellId] = { wsPlayer };
   } else {
     if (ch.type === 'hls') {
       const video = document.createElement('video');
@@ -839,6 +932,7 @@ function startStream(dvr, ch) {
 function stopSurvPlayer(id) {
   const player = survPlayers[id];
   if (!player) return;
+  if (player.wsPlayer) { try { player.wsPlayer.close(); } catch (e) {} }
   if (player.hls) player.hls.destroy();
   if (player.interval) clearInterval(player.interval);
   delete survPlayers[id];

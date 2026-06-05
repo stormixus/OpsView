@@ -12,8 +12,14 @@ All notable changes to OpsView are documented here.
   an fMP4 init segment (lazily, from in-band SPS/PPS that DVRs like Hikvision
   omit from the SDP) plus one fragment per access unit, and fans them out per
   channel; clients start at a keyframe with the init segment sent first
-  (MSE-ready). Verified end to end against a Hikvision iDS-7204HUHI. (Playing it
-  needs a viewer-side MSE consumer — follow-up.)
+  (MSE-ready). Verified end to end against a Hikvision iDS-7204HUHI.
+- **Viewers auto-select the CCTV transport.** Both the desktop (Wails) and web
+  viewers now prefer fMP4-over-WS via Media Source Extensions when available and
+  fall back to HLS otherwise (iOS / no-MSE / H265 / older relays / any WS
+  failure within 6 s). The WS path rides the same `wss` endpoint as the Ops
+  stream, so CCTV works through a Cloudflare Tunnel without exposing the HLS
+  port. The codec string is parsed from the init segment's `avcC` box; an
+  unrecognized codec (e.g. H265) transparently falls back to HLS.
 
 ### Fixed
 
