@@ -2,6 +2,21 @@
 
 All notable changes to OpsView are documented here.
 
+## [0.3.6] - 2026-06-05
+
+### Fixed
+
+- **CCTV stays on HLS in Safari / WKWebView.** The v0.3.5 fMP4-over-WS path used
+  Media Source Extensions, which Chromium plays fine but Safari/WKWebView accepts
+  (`addSourceBuffer` succeeds) only to render black for the relay's raw
+  fragments. Both viewers now gate the WS+MSE transport to Chromium engines
+  (Chrome, Edge, Windows WebView2) and fall back to native/`hls.js` HLS
+  everywhere else — restoring video in the macOS desktop viewer and in Safari.
+- **Web viewer: `survMode is not defined` crash.** A leftover reference to a
+  removed `survMode` variable threw inside the WebSocket `onopen` handler,
+  aborting the OVP HELLO/AUTH handshake so the web viewer never connected. The
+  relay CCTV streams are now always fetched on connect.
+
 ## [0.3.5] - 2026-06-05
 
 ### Added

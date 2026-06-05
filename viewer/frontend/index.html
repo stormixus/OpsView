@@ -1079,7 +1079,7 @@
         clearTimeout(reconnectTimeout);
         setStatus('connected', t('connected'));
         // Send OVP HELLO + AUTH
-        const hello = { role: 'watcher', client: 'opsview-web', client_version: '0.3.5', supports: ['zstd'], want_profile: null };
+        const hello = { role: 'watcher', client: 'opsview-web', client_version: '0.3.6', supports: ['zstd'], want_profile: null };
         sendOVPMsg(1, JSON.stringify(hello));
         const auth = { token: pin };
         sendOVPMsg(2, JSON.stringify(auth));
@@ -1341,6 +1341,14 @@
       return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     }
+    // Only Chromium-based engines (Chrome, Edge, Windows WebView2) reliably play
+    // the relay's raw fMP4 over MSE. Safari/macOS WKWebView accepts addSourceBuffer
+    // but renders black for these fragments — it has solid native HLS instead, so
+    // fall back to HLS there. (UA "Chrome/" is absent on WKWebView/Safari.)
+    function wsTransportUsable() {
+      if (!('MediaSource' in window) || isIOSDevice()) return false;
+      return /Chrome\//.test(navigator.userAgent);
+    }
     function hex2(n) { return n.toString(16).padStart(2, '0'); }
     // Parse the avc1.PPCCLL codec string from an fMP4 init segment's avcC box.
     // Returns null for non-H264 (e.g. H265/hvcC) so the caller falls back to HLS.
@@ -1353,7 +1361,7 @@
       return null;
     }
     function playRelayCCTVWS(video, wsUrl, onFail) {
-      if (!('MediaSource' in window) || isIOSDevice()) { if (onFail) onFail('no-mse'); return null; }
+      if (!wsTransportUsable()) { if (onFail) onFail('no-mse'); return null; }
       const ms = new MediaSource();
       let sb = null, ws = null, gotInit = false, failed = false;
       const queue = [];
