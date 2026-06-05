@@ -286,6 +286,14 @@ func (h *Hub) HandleWatch(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[relay] sent cached surveillance config to watcher %s", ip)
 	}
 
+	// Send the cached full Ops frame so the watcher sees the whole screen
+	// immediately instead of waiting for each tile to change (the agent emits
+	// only changed tiles).
+	if frameMsg, ok := h.frameBuf.FullFrameMessage(); ok {
+		conn.WriteMessage(websocket.BinaryMessage, frameMsg)
+		log.Printf("[relay] sent cached keyframe to watcher %s (%d bytes)", ip, len(frameMsg))
+	}
+
 	log.Printf("[relay] watcher authenticated from %s (id=%d, total: %d)", ip, watcher.id, h.watcherCount.Load())
 
 	defer func() {
