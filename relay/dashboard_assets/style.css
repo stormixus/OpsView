@@ -452,3 +452,23 @@ button{font-family:inherit; cursor:pointer;}
 .cell .cell-name{background:rgba(0,0,0,.55);border:1px solid rgba(34,211,238,.5);color:#fff;border-radius:5px;padding:2px 6px;font-size:12px;font-weight:600;max-width:62%;outline:none;}
 .cell .cell-name:focus{border-color:var(--acc,#22d3ee);background:rgba(0,0,0,.8);}
 .drag-badge{position:absolute;top:6px;right:8px;color:rgba(255,255,255,.5);font-size:14px;z-index:3;pointer-events:none;}
+
+/* tenant (지점) management */
+.tenant-list{display:flex;flex-direction:column;gap:8px;margin:10px 0;}
+.tenant-row{display:flex;align-items:center;gap:10px;background:#0f1626;border:1px solid #28304a;border-radius:8px;padding:8px 10px;}
+.tn-dot{width:8px;height:8px;border-radius:50%;background:#475569;flex:none;}
+.tn-dot.on{background:#10b981;box-shadow:0 0 6px #10b981;}
+.tn-main{flex:1;min-width:0;}
+.tn-name{font-size:13px;color:#e2e8f0;}
+.tn-tok{font-size:11px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;max-width:170px;}
+.tn-tok:hover{color:#22d3ee;}
+.tn-del{background:rgba(239,68,68,.12);color:#f87171;border:0;border-radius:6px;padding:5px 9px;font-size:12px;cursor:pointer;flex:none;}
+.tenant-add{display:flex;flex-direction:column;gap:6px;margin-top:6px;}
+.tn-in{background:#0b1020;border:1px solid #28304a;color:#e2e8f0;border-radius:7px;padding:8px 10px;font-size:13px;outline:none;}
+.tn-in:focus{border-color:#22d3ee;}
+.tn-tokrow{display:flex;gap:6px;}
+.tn-tokrow .tn-in{flex:1;}
+.tn-gen{background:#1e293b;color:#94a3b8;border:1px solid #28304a;border-radius:7px;padding:0 12px;font-size:12px;cursor:pointer;}
+.tn-add-btn{background:#22d3ee;color:#06202a;border:0;border-radius:7px;padding:9px;font-size:13px;font-weight:600;cursor:pointer;}
+.tenant-msg{font-size:12px;color:#10b981;min-height:16px;margin-top:6px;}
+.tenant-msg.bad{color:#f87171;}

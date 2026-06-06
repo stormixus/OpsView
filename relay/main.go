@@ -148,6 +148,18 @@ func loadConfig() Config {
 	if err != nil {
 		log.Fatalf("[relay] invalid RELAY_AGENTS: %v", err)
 	}
+	// RELAY_DB (a path on a persistent volume) makes the named-agent registry
+	// editable from the dashboard; unset = env-only (RELAY_AGENTS, read-only).
+	if dbPath := os.Getenv("RELAY_DB"); dbPath != "" {
+		store, serr := openAgentStore(dbPath)
+		if serr != nil {
+			log.Fatalf("[relay] open RELAY_DB %s: %v", dbPath, serr)
+		}
+		if serr := reg.useStore(store); serr != nil {
+			log.Fatalf("[relay] agent store init: %v", serr)
+		}
+		log.Printf("[relay] tenant registry persisted to %s (%d named agents)", dbPath, len(reg.listNamed()))
+	}
 
 	return Config{
 		Port:            port,

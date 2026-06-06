@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -114,6 +115,73 @@ func (h *Hub) HandleDashboardChannelMeta(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// HandleDashboardAgents manages the named-agent (tenant) registry from the
+// dashboard: GET lists agents, POST upserts one, DELETE removes one. Editing
+// requires a persistent store (RELAY_DB); without it the registry is read-only.
+func (h *Hub) HandleDashboardAgents(w http.ResponseWriter, r *http.Request) {
+	if !h.authedDashboard(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	reg := h.cfg.Agents
+	switch r.Method {
+	case http.MethodGet:
+		type ag struct {
+			ID     string `json:"id"`
+			Name   string `json:"name"`
+			Token  string `json:"token"`
+			Online bool   `json:"online"`
+		}
+		named := reg.listNamed()
+		sort.Slice(named, func(i, j int) bool { return named[i].ID < named[j].ID })
+		out := make([]ag, 0, len(named))
+		for _, e := range named {
+			online := false
+			if s := h.sessionByID(e.ID); s != nil {
+				online = s.online()
+			}
+			out = append(out, ag{ID: e.ID, Name: e.Name, Token: e.Token, Online: online})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"editable": reg.editable(), "agents": out})
+
+	case http.MethodPost:
+		if !reg.editable() {
+			http.Error(w, "registry read-only: set RELAY_DB on a persistent volume", http.StatusConflict)
+			return
+		}
+		var e agentEntry
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&e); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if err := reg.upsertNamed(e); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	case http.MethodDelete:
+		if !reg.editable() {
+			http.Error(w, "registry read-only: set RELAY_DB on a persistent volume", http.StatusConflict)
+			return
+		}
+		id := r.URL.Query().Get("id")
+		if id == "" {
+			http.Error(w, "missing id", http.StatusBadRequest)
+			return
+		}
+		if err := reg.removeNamed(id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 // HandleDashboardStatic serves embedded assets under /dashboard/assets/ and the
 // SPA index.html for every other /dashboard* path (so client-side path routes
 // like /dashboard/agent/<id> deep-link and survive a refresh). The /dashboard/api/*
@@ -142,6 +210,7 @@ func (h *Hub) registerDashboard(mux *http.ServeMux) {
 	mux.HandleFunc("/dashboard/api/logout", h.HandleDashboardLogout)
 	mux.HandleFunc("/dashboard/api/state", h.HandleDashboardState)
 	mux.HandleFunc("/dashboard/api/channel-meta", h.HandleDashboardChannelMeta)
+	mux.HandleFunc("/dashboard/api/agents", h.HandleDashboardAgents)
 	mux.HandleFunc("/dashboard", h.HandleDashboardStatic)
 	mux.HandleFunc("/dashboard/", h.HandleDashboardStatic)
 }

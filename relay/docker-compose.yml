@@ -18,7 +18,14 @@ services:
       - RELAY_DASHBOARD_TOKEN=${RELAY_DASHBOARD_TOKEN:-}
       # Optional multi-tenant agent registry (JSON array of {id,name,token}).
       # Empty = single "default" agent (legacy, authed by RELAY_PUBLISHER_TOKEN).
+      # When RELAY_DB is set, this only SEEDS the DB once; manage agents in the
+      # dashboard afterward.
       - RELAY_AGENTS=${RELAY_AGENTS:-}
+      # Persistent SQLite for the tenant registry — required to add/remove
+      # 지점 from the dashboard. Stored on the relay-data volume below.
+      - RELAY_DB=${RELAY_DB:-/data/relay.db}
+    volumes:
+      - relay-data:/data
     restart: unless-stopped
 
   # Cloudflare Tunnel: exposes the relay over TLS (wss/https) at your domain with
@@ -38,3 +45,6 @@ services:
     restart: unless-stopped
     depends_on:
       - relay
+
+volumes:
+  relay-data:
