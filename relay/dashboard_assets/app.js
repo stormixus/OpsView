@@ -86,17 +86,21 @@ function adaptState(api){
     return {
       id:a.id, name:a.name, online:!!a.connected,
       dvr:(a.dvrs&&a.dvrs[0]?a.dvrs[0].name:''),
+      dvrs:(a.dvrs||[]).map(function(d){return {id:d.id, name:d.name, channels:d.channels};}),
       since_ms: a.since? Date.parse(a.since): now,
       last_publish_ms: a.last_publish_at? Date.parse(a.last_publish_at): now,
       pin_set:!!a.pin_set, publish_count:a.publish_count||0,
       bytes_in:a.bytes_in||0, bytes_out:a.bytes_out||0,
       chTotal:chTotal, tput:tp, smooth:{down:tp.down,up:tp.up},
       watchers:(a.watchers||[]).map(function(w){return {id:w.id, ip:_stripPort(w.ip), since: w.since?Date.parse(w.since):now};}),
-      streams:(a.streams||[]).map(function(s,i){return {
-        id:s.id, name:s.name||s.id, scene:('CH '+(s.name||'')), hue:(i*47)%360,
-        active:!!s.active, codec:s.codec||'h264',
-        transport:(s.codec==='h265'?['hls']:['ws','hls']),
-        ws_watchers:s.ws_watchers||0, path:s.path||s.id };}),
+      streams:(a.streams||[]).map(function(s,i){
+        var dm=String(s.id).match(/dvr(\d+)/), cm=String(s.id).match(/_ch(\d+)/);
+        return {
+          id:s.id, name:s.name||s.id, hue:(i*47)%360,
+          dvrId: dm?+dm[1]:0, ch: cm?+cm[1]:(i+1),
+          active:!!s.active, codec:s.codec||'h264',
+          transport:(s.codec==='h265'?['hls']:['ws','hls']),
+          ws_watchers:s.ws_watchers||0, path:s.path||s.id };}),
       nextWid:0, nextWEvt: now+1e12
     };
   });
@@ -123,6 +127,28 @@ function applyRealRender(){
 function agentById(id){return state.agents.filter(function(a){return a.id===id;})[0];}
 function onlineAgents(){return state.agents.filter(function(a){return a.online;});}
 function activeStreams(a){return a.streams.filter(function(s){return s.active;});}
+
+/* --- device (DVR/NVR) grouping: show one device's channels at a time --- */
+var selDvr='all'; // 'all' or a dvr id (number)
+function dvrName(a, id){ var d=(a.dvrs||[]).filter(function(x){return x.id===id;})[0]; return d? d.name : ('DVR '+id); }
+function streamsForView(a){
+  if(selDvr==='all') return a.streams;
+  return a.streams.filter(function(s){return s.dvrId===selDvr;});
+}
+function activeForView(a){ return streamsForView(a).filter(function(s){return s.active;}); }
+function renderDvrChips(a){
+  var bar=$('#dvrChips'); if(!bar) return;
+  var dvrs=a.dvrs||[];
+  // only worth showing when the agent has more than one device
+  if(dvrs.length<=1){ bar.style.display='none'; bar.innerHTML=''; selDvr='all'; return; }
+  bar.style.display='';
+  var html='<button class="dvr-chip'+(selDvr==='all'?' on':'')+'" data-dvr="all">전체 <span class="n">'+activeStreams(a).length+'</span></button>';
+  dvrs.forEach(function(d){
+    var act=a.streams.filter(function(s){return s.dvrId===d.id && s.active;}).length;
+    html+='<button class="dvr-chip'+(selDvr===d.id?' on':'')+'" data-dvr="'+d.id+'">'+d.name+' <span class="n">'+act+'</span></button>';
+  });
+  bar.innerHTML=html;
+}
 
 /* ============================================================ LOGIN */
 var fails=0, lockUntil=0, lockTimer=null;
@@ -196,6 +222,7 @@ function renderSidebar(){
 
 function navTo(target){
   selected = (target==='overview')? null : target;
+  selDvr='all'; // reset device filter when switching agent/overview
   $('#sidebar').classList.remove('open');
   stopLiveGrid(); // tear down any playing videos before switching context
   if(selected===null){
@@ -244,6 +271,15 @@ function setTab(t){
   else { stopLiveGrid(); }
 }
 $$('#agent-view .tab').forEach(function(b){ b.addEventListener('click', function(){ setTab(b.dataset.tab); }); });
+
+// device (DVR) chip selection: filter the status table + live grid to one device
+$('#dvrChips').addEventListener('click', function(e){
+  var b=e.target.closest('.dvr-chip'); if(!b || !selected) return;
+  selDvr = b.dataset.dvr==='all' ? 'all' : +b.dataset.dvr;
+  var a=agentById(selected); if(!a) return;
+  renderDvrChips(a); renderStreams(a);
+  if(curTab==='live') renderGrid(a);
+});
 
 /* ============================================================ OVERVIEW RENDER */
 function relayTotals(){
@@ -308,6 +344,7 @@ function renderAgentHeader(a){
   appEl.classList.toggle('agent-offline', !a.online);
   $('#agSince').textContent = a.online? ('연결 시작 '+fmtAgo((Date.now()-a.since_ms)/1000)+' 전 · '+a.dvr)
                                        : ('마지막 접속 '+fmtAgo((Date.now()-a.last_publish_ms)/1000)+' 전 · '+a.dvr);
+  renderDvrChips(a);
 }
 function renderAgentAll(a){ renderStatus(a); renderWatchers(a); renderStreams(a); /* grid handled by setTab */ }
 
@@ -349,18 +386,14 @@ function renderWatchers(a){
 }
 function renderStreams(a){
   var body=$('#streamBody'), panel=$('#streamPanel');
-  var list = a.online? a.streams.filter(function(s){return s.active || s._show;}) : [];
-  // show all active + 2 idle for variety
-  if(a.online){
-    var act=activeStreams(a), idle=a.streams.filter(function(s){return !s.active;}).slice(0,2);
-    list=act.concat(idle);
-  }
+  var pool = a.online? streamsForView(a) : [];
+  var list = pool.filter(function(s){return s.active;}).concat(pool.filter(function(s){return !s.active;}).slice(0,2));
   panel.classList.toggle('is-empty', list.length===0);
-  $('#streamCount').textContent=activeStreams(a).length+' / '+a.chTotal+' 활성';
+  $('#streamCount').textContent=activeForView(a).length+' / '+(selDvr==='all'? a.chTotal : pool.length)+' 활성';
   var html='';
   list.forEach(function(s){
     var trans=s.transport.map(function(t){return '<span class="tag '+t+'">'+t.toUpperCase()+'</span>';}).join(' ');
-    html+='<tr><td><b class="mono">'+s.name+'</b> <span class="id">'+s.id.replace('dvr_'+a.id+'_','')+'</span></td>'+
+    html+='<tr><td><b class="mono">'+s.name+'</b> <span class="id">CH'+s.ch+'</span></td>'+
       '<td><span class="tag '+s.codec+'">'+s.codec+'</span></td>'+
       '<td><span class="tspan">'+trans+'</span></td>'+
       '<td class="num" data-wsid="'+s.id+'">'+(s.active?s.ws_watchers:'–')+'</td>'+
@@ -378,7 +411,7 @@ function cellHTML(s){
     '<div class="scan"></div><div class="ts mono cellts"></div>'+
     '<div class="rec'+(off?'':' on')+'"><i></i>REC</div>'+
     '<span class="dot cstat '+(off?'bad':'live')+'"></span>'+
-    '<div class="clabel"><span class="ch">CH '+s.name+'</span><span class="nm">'+s.scene+'</span>'+
+    '<div class="clabel"><span class="ch">'+s.name+'</span><span class="nm">CH'+s.ch+'</span>'+
       (off?'':'<span class="wn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3"/><path d="M6 20a6 6 0 0 1 12 0"/></svg>'+s.ws_watchers+'</span>')+'</div>'+
     '<div class="noimg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 5l20 14M2 5h20v14"/></svg><span>신호 없음</span></div>'+
     '<div class="expand"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 3H3v6M21 9V3h-6M3 15v6h6M15 21h6v-6"/></svg></div></div>';
@@ -427,17 +460,17 @@ function liveCellHTML(s){
     '<div class="scan"></div><div class="ts mono cellts"></div>'+
     '<div class="rec'+(off?'':' on')+'"><i></i>REC</div>'+
     '<span class="dot cstat '+(off?'bad':'live')+'"></span>'+
-    '<div class="clabel"><span class="ch">CH '+s.name+'</span>'+
+    '<div class="clabel"><span class="ch">'+s.name+'</span><span class="nm">CH'+s.ch+'</span>'+
       (off?'':'<span class="wn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3"/><path d="M6 20a6 6 0 0 1 12 0"/></svg>'+s.ws_watchers+'</span>')+'</div>'+
     '<div class="expand"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 3H3v6M21 9V3h-6M3 15v6h6M15 21h6v-6"/></svg></div></div>';
 }
 function renderGrid(a){
   stopLiveGrid();
   var grid=$('#grid'), pane=$('#live-pane');
-  var list = a.online? activeStreams(a) : [];
+  var list = a.online? activeForView(a) : [];
   pane.classList.toggle('empty', list.length===0);
   grid.style.setProperty('--cols', niceCols(Math.max(list.length,1)));
-  $('#liveMeta').textContent = list.length? (list.length+' 채널') : '';
+  $('#liveMeta').textContent = list.length? ((selDvr==='all'?'':dvrName(a,selDvr)+' · ')+list.length+' 채널') : '';
   var html=''; list.forEach(function(s){ html+='<button class="cell" data-id="'+s.id+'">'+liveCellHTML(s)+'</button>'; });
   grid.innerHTML=html;
   grid.dataset.agent=a.id;
