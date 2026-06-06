@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -84,6 +85,9 @@ func startWebUI() {
 	mux.HandleFunc("/api/surv/dvrs", handleSurvDVRs)
 	mux.HandleFunc("/api/surv/dvrs/", handleSurvDVR)
 	mux.HandleFunc("/api/surv/reset-db", handleSurvResetDB)
+	mux.HandleFunc("/api/surv/snapshot", handleSurvSnapshot)
+	mux.HandleFunc("/api/surv/channels/reorder", handleSurvChannelReorder)
+	mux.HandleFunc("/api/surv/channels/rename", handleSurvChannelRename)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -1001,3 +1005,112 @@ const htmlTemplate = `
 </body>
 </html>
 `
+
+// --- channel metadata editing (thumbnail grid: reorder + rename) ---
+
+type snapCacheEntry struct {
+	data []byte
+	at   time.Time
+}
+
+var (
+	snapCacheMu sync.Mutex
+	snapCache   = map[string]snapCacheEntry{}
+)
+
+const snapCacheTTL = 8 * time.Second
+
+// handleSurvSnapshot serves a channel's JPEG snapshot as a thumbnail, cached
+// briefly so a 36-cell grid doesn't hammer the DVR on every render.
+func handleSurvSnapshot(w http.ResponseWriter, r *http.Request) {
+	if webSurvMgr == nil {
+		http.Error(w, "surveillance manager not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	dvrID, err := strconv.ParseInt(r.URL.Query().Get("dvr"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad dvr", http.StatusBadRequest)
+		return
+	}
+	chNum, err := strconv.Atoi(r.URL.Query().Get("ch"))
+	if err != nil {
+		http.Error(w, "bad ch", http.StatusBadRequest)
+		return
+	}
+	key := strconv.FormatInt(dvrID, 10) + ":" + strconv.Itoa(chNum)
+
+	snapCacheMu.Lock()
+	if e, ok := snapCache[key]; ok && time.Since(e.at) < snapCacheTTL {
+		data := e.data
+		snapCacheMu.Unlock()
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Write(data)
+		return
+	}
+	snapCacheMu.Unlock()
+
+	data, err := webSurvMgr.FetchSnapshot(dvrID, chNum)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	snapCacheMu.Lock()
+	snapCache[key] = snapCacheEntry{data: data, at: time.Now()}
+	snapCacheMu.Unlock()
+
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Write(data)
+}
+
+// handleSurvChannelReorder applies a new channel order for one DVR.
+func handleSurvChannelReorder(w http.ResponseWriter, r *http.Request) {
+	if webSurvMgr == nil {
+		http.Error(w, "surveillance manager not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		DVRID  int64 `json:"dvr_id"`
+		ChNums []int `json:"ch_nums"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if err := webSurvMgr.ReorderChannels(req.DVRID, req.ChNums); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleSurvChannelRename renames one channel.
+func handleSurvChannelRename(w http.ResponseWriter, r *http.Request) {
+	if webSurvMgr == nil {
+		http.Error(w, "surveillance manager not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		DVRID int64  `json:"dvr_id"`
+		ChNum int    `json:"ch_num"`
+		Name  string `json:"name"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if err := webSurvMgr.RenameChannel(req.DVRID, req.ChNum, strings.TrimSpace(req.Name)); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
