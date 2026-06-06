@@ -2,7 +2,22 @@
 
 All notable changes to OpsView are documented here.
 
-## [0.4.1] - 2026-06-06
+## [0.5.0] - 2026-06-06
+
+### Added
+
+- **Channel order/label sync.** Set channel order and names once and have them
+  flow to every viewer + the dashboard. The agent's settings screen gains a
+  channel editor (a grid of channel snapshot thumbnails — drag to reorder, click
+  the name to relabel); changes save to the agent DB and re-broadcast the config.
+  The dashboard can edit too (drag-reorder + rename per device), round-tripping
+  the edit to the agent over its publisher connection (new `MsgSurvMeta`) so both
+  surfaces stay in sync.
+- **Dashboard: group CCTV by DVR/NVR device.** A device chip selector
+  (전체 + one chip per DVR) filters the status table and live grid to one device,
+  so a 36-channel agent isn't a flat wall (and fewer live WS connections). The
+  agent-provided channel name is shown with a `CH<n>` tag instead of the raw
+  `dvrN_chM` stream id.
 
 ### Fixed
 
