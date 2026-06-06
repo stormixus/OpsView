@@ -592,7 +592,7 @@ function stopLoop(){
 
 /* ============================================================ DRAWER */
 var drawer=$('#drawer'), scrim=$('#scrim');
-function openDrawer(){ drawer.classList.add('show'); scrim.classList.add('show'); }
+function openDrawer(){ drawer.classList.add('show'); scrim.classList.add('show'); loadTenants(); }
 function closeDrawer(){ drawer.classList.remove('show'); scrim.classList.remove('show'); }
 $('#gearBtn').addEventListener('click', openDrawer);
 $('#drawerClose').addEventListener('click', closeDrawer);
@@ -623,11 +623,44 @@ $$('.seg[data-group]').forEach(function(seg){
 $$('.swatches[data-group="accent"] .sw').forEach(function(sw){ sw.addEventListener('click', function(){ PREF.accent=sw.dataset.val; savePref(); applyPref(); syncSegs(); }); });
 syncSegs();
 
-var tgRelay=$('#tg-relay');
-tgRelay.addEventListener('click', function(){
-  demo.relayDown=!demo.relayDown; tgRelay.classList.toggle('on', demo.relayDown);
-  if(demo.relayDown) relayDownAt=Date.now();
-  renderConn();
+/* ===== 지점(tenant) 관리 ===== */
+function tnMsg(t, bad){ var m=$('#tenant-msg'); if(m){ m.textContent=t||''; m.className='tenant-msg'+(bad?' bad':''); } }
+function loadTenants(){
+  fetch('/dashboard/api/agents').then(function(r){ return r.ok? r.json() : null; }).then(function(d){
+    var list=$('#tenant-list'); if(!list) return;
+    if(!d){ list.innerHTML='<div class="mut" style="font-size:12px;">불러오기 실패</div>'; return; }
+    var addUI=$('.tenant-add');
+    if(!d.editable){
+      if(addUI) addUI.style.display='none';
+      list.innerHTML='<div class="mut" style="font-size:12px;">읽기 전용 — relay에 <code>RELAY_DB</code>(영속 볼륨)를 설정하면 여기서 지점을 추가/삭제할 수 있습니다.</div>';
+      return;
+    }
+    if(addUI) addUI.style.display='';
+    if(!d.agents.length){ list.innerHTML='<div class="mut" style="font-size:12px;">등록된 지점이 없습니다. 아래에서 추가하세요.</div>'; return; }
+    list.innerHTML=d.agents.map(function(a){
+      return '<div class="tenant-row">'+
+        '<span class="tn-dot'+(a.online?' on':'')+'"></span>'+
+        '<div class="tn-main"><div class="tn-name">'+escHtml(a.name)+' <span class="mut mono">'+escHtml(a.id)+'</span></div>'+
+        '<div class="tn-tok mono" title="클릭하면 복사">'+escHtml(a.token)+'</div></div>'+
+        '<button class="tn-del" data-id="'+escAttr(a.id)+'">삭제</button></div>';
+    }).join('');
+    $$('#tenant-list .tn-tok').forEach(function(el){ el.addEventListener('click', function(){ navigator.clipboard && navigator.clipboard.writeText(el.textContent); tnMsg('토큰 복사됨'); }); });
+    $$('#tenant-list .tn-del').forEach(function(b){ b.addEventListener('click', function(){
+      if(!confirm('지점 "'+b.dataset.id+'" 삭제? (그 매장 에이전트는 더 이상 연결 못 함)')) return;
+      fetch('/dashboard/api/agents?id='+encodeURIComponent(b.dataset.id),{method:'DELETE'}).then(function(r){ tnMsg(r.ok?'삭제됨':'삭제 실패', !r.ok); loadTenants(); });
+    }); });
+  });
+}
+if($('#tn-gen')) $('#tn-gen').addEventListener('click', function(){
+  var a=new Uint8Array(16); (crypto||window.crypto).getRandomValues(a);
+  $('#tn-token').value=[].map.call(a,function(b){return ('0'+b.toString(16)).slice(-2);}).join('');
+});
+if($('#tn-add')) $('#tn-add').addEventListener('click', function(){
+  var id=$('#tn-id').value.trim(), name=$('#tn-name').value.trim(), token=$('#tn-token').value.trim();
+  if(!id || !token){ tnMsg('지점 ID와 토큰은 필수입니다.', true); return; }
+  fetch('/dashboard/api/agents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,name:name,token:token})})
+    .then(function(r){ if(r.ok){ $('#tn-id').value='';$('#tn-name').value='';$('#tn-token').value=''; tnMsg('추가됨'); loadTenants(); }
+      else r.text().then(function(t){ tnMsg('추가 실패: '+t, true); }); });
 });
 
 /* ============================================================ LIVE INLINE EDIT */
