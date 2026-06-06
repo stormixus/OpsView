@@ -296,6 +296,7 @@ $('#dvrChips').addEventListener('click', function(e){
   var a=agentById(selected); if(!a) return;
   renderDvrChips(a); renderStreams(a);
   if(curTab==='live') renderGrid(a);
+  else if(curTab==='rec') openRec();
 });
 
 /* ============================================================ OVERVIEW RENDER */
@@ -614,7 +615,8 @@ function recSegAtIn(segs, sec){ for(var i=0;i<segs.length;i++){ var s=segs[i]; i
 
 function openRec(){
   var a = selected!==null ? agentById(selected) : null; if(!a) return;
-  recCtx.streams=(a.streams||[]).slice().sort(function(x,y){return (x.ch||0)-(y.ch||0);});
+  var src = (selDvr==='all') ? (a.streams||[]) : (a.streams||[]).filter(function(s){return s.dvrId===selDvr;});
+  recCtx.streams=src.slice().sort(function(x,y){return (x.ch||0)-(y.ch||0);});
   var sel=$('#recChannel'), prev=sel.value;
   sel.innerHTML = recCtx.streams.map(function(s){ return '<option value="'+escAttr(s.path)+'">'+escHtml(s.name)+' · CH'+s.ch+'</option>'; }).join('');
   if(prev && recCtx.streams.some(function(s){return s.path===prev;})) sel.value=prev;

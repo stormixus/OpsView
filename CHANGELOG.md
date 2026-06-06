@@ -58,6 +58,17 @@ All notable changes to OpsView are documented here.
 
 ### Fixed
 
+- **녹화 timeline was shifted off-screen (timezone).** The relay container ran in
+  UTC (no `tzdata`/`TZ`), so ffmpeg named recording segments in UTC while the
+  dashboard positioned them against the operator's local (KST) midnight — pushing
+  the segment bars past the edge of the 24h track (empty timeline) and putting
+  every scrub time ~9h off. The image now ships `tzdata` and defaults `TZ` to
+  `Asia/Seoul` (override per-site), so recordings are named and positioned in the
+  venue's local time. Relay-only.
+- **녹화 tab ignored the DVR filter (전체 / DVR별).** Switching the DVR chips at the
+  top did nothing in the 녹화 tab — the channel list and grid stayed on all
+  channels. The chips now re-scope the recording view, and `openRec` filters its
+  channels by the selected DVR.
 - **Viewer: live grid auto-recovers dropped channels (이빨 빠짐).** When one or
   two channels failed to connect on a busy grid they stayed blank until a manual
   refresh. A watchdog now checks each cell every ~12s and re-attempts any whose
