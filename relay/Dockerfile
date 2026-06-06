@@ -12,7 +12,8 @@ RUN go build -ldflags="-s -w -X main.relayVersion=${VERSION}" -o /opsview-relay 
 
 # Runtime stage
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates
+# ffmpeg: used by the optional NVR recorder (copies the relay's own HLS to MP4).
+RUN apk add --no-cache ca-certificates ffmpeg
 COPY --from=builder /opsview-relay /usr/local/bin/
 EXPOSE 8080
 CMD ["opsview-relay"]

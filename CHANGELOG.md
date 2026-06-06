@@ -6,6 +6,13 @@ All notable changes to OpsView are documented here.
 
 ### Added
 
+- **Relay NVR recording (opt-in).** Set `RELAY_REC_DIR` and the relay records
+  every active stream to segmented MP4 on disk by supervising one ffmpeg per
+  channel that copies the relay's *own* HLS — so the DVR is not pulled a second
+  time and nothing is re-encoded. `RELAY_REC_MAX` (e.g. "2TB") caps disk use; a
+  janitor deletes the oldest segments past the cap. Records whatever quality the
+  relay streams (substream here). Review/timeline UI is next. Relay-only.
+
 - **Dashboard: hide unused agents (지점 관리).** Hover an agent card → 숨기기 to
   hide it from the dashboard (e.g. the leftover "default" agent after moving to
   named tenants). Hidden agents drop from the overview, cards, and totals;

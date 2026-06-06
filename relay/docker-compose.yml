@@ -24,8 +24,17 @@ services:
       # Persistent SQLite for the tenant registry — required to add/remove
       # 지점 from the dashboard. Stored on the relay-data volume below.
       - RELAY_DB=${RELAY_DB:-/data/relay.db}
+      # Optional NVR recording. Set RELAY_REC_DIR=/rec to record every active
+      # stream to MP4 segments (opt-in; empty = off). RELAY_REC_MAX caps disk use
+      # (e.g. "2TB", "500GB") — oldest segments are deleted past the cap.
+      # On Unraid, bind /rec to a big share via RELAY_REC_HOST (see volumes).
+      - RELAY_REC_DIR=${RELAY_REC_DIR:-}
+      - RELAY_REC_MAX=${RELAY_REC_MAX:-}
     volumes:
       - relay-data:/data
+      # Recordings live here. Default = a docker volume; on Unraid set
+      # RELAY_REC_HOST=/mnt/user/<share> in relay/.env to use a real disk.
+      - ${RELAY_REC_HOST:-relay-rec}:/rec
     restart: unless-stopped
 
   # Cloudflare Tunnel: exposes the relay over TLS (wss/https) at your domain with
@@ -48,3 +57,4 @@ services:
 
 volumes:
   relay-data:
+  relay-rec:
