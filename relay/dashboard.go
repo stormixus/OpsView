@@ -252,6 +252,11 @@ func (h *Hub) HandleDashboardAgents(w http.ResponseWriter, r *http.Request) {
 // routes are registered separately and take precedence in the mux.
 func (h *Hub) HandleDashboardStatic(w http.ResponseWriter, r *http.Request) {
 	sub, _ := fs.Sub(dashboardAssets, "dashboard_assets")
+	// no-cache: the browser may keep a copy but must revalidate, so a new relay
+	// build's CSS/JS/logo are picked up on the next load instead of serving a
+	// stale cached version (which silently breaks the dashboard layout until a
+	// manual hard refresh).
+	w.Header().Set("Cache-Control", "no-cache")
 	if strings.HasPrefix(r.URL.Path, "/dashboard/assets/") {
 		http.StripPrefix("/dashboard/assets/", http.FileServer(http.FS(sub))).ServeHTTP(w, r)
 		return
