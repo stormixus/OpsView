@@ -54,6 +54,18 @@ All notable changes to OpsView are documented here.
   IP everywhere afterward — so the list reads "프론트 192.168.0.50" instead of a
   bare address. Relay-only change (no agent/viewer update needed).
 
+### Fixed
+
+- **CCTV live grid went black after a few seconds (viewer watchdog loop).** The
+  new grid watchdog treated a cell whose `<video>.currentTime` hadn't advanced as
+  dead and reconnected it — but a reconnect resets `currentTime` to 0 and the
+  fresh fMP4-over-WS stream only resumes on the relay's next keyframe (a full GOP,
+  which on low-fps CCTV can exceed the 12s tick). So once it fired, the cell was
+  torn down every tick before a keyframe ever arrived → permanent black, with the
+  abandoned WebSocket also clobbering the new source via the HLS fallback. The
+  watchdog now debounces (two consecutive stalled ticks), waits out a grace period
+  after each reconnect, and cleanly tears down the prior player first. Viewer-only.
+
 ## [0.7.0] - 2026-06-06
 
 ### Fixed
