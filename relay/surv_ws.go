@@ -156,6 +156,19 @@ func (m *fragMuxer) writeAU(pts int64, au [][]byte) (frag []byte, keyframe bool,
 	return append([]byte(nil), b.Bytes()...), keyframe, newInit
 }
 
+// Codec returns "h264" | "h265" once the init segment exists, else "".
+func (m *fragMuxer) Codec() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.initSeg == nil {
+		return ""
+	}
+	if m.isH265 {
+		return "h265"
+	}
+	return "h264"
+}
+
 // annexBToAVCC concatenates NAL units as 4-byte length-prefixed (AVCC) data,
 // which is what fMP4 samples carry.
 func annexBToAVCC(au [][]byte) []byte {
@@ -221,6 +234,13 @@ func (h *survWSHub) broadcast(frag []byte, keyframe bool) {
 		default: // drop for a slow client rather than block the RTSP reader
 		}
 	}
+}
+
+// ClientCount returns the number of currently connected WS watchers.
+func (h *survWSHub) ClientCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.clients)
 }
 
 func (h *survWSHub) add() *survWSClient {

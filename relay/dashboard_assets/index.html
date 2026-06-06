@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark" data-accent="green" data-density="comfortable">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OpsView Relay</title>
+<link rel="stylesheet" href="/dashboard/assets/style.css" />
+</head>
+<body>
+
+<!-- ============================ LOGIN ============================ -->
+<div id="login">
+  <div class="login-card" id="loginCard">
+    <!-- LOGO: replace .brand-mark svg + .brand-name with your asset -->
+    <div class="brand">
+      <span class="brand-mark"><svg viewBox="0 0 32 32" fill="none"><rect x="2.5" y="6" width="27" height="17" rx="3" stroke="currentColor" stroke-width="2.2"/><circle cx="16" cy="14.5" r="4" stroke="currentColor" stroke-width="2.2"/><circle cx="16" cy="14.5" r="1.4" fill="currentColor"/><path d="M11 28h10" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span>
+      <span class="brand-name">OpsView <b>Relay</b></span>
+    </div>
+    <p class="login-sub">운영자 콘솔 · 매장 화면 & CCTV 중계</p>
+    <div class="field-wrap">
+      <label for="pw">접속 비밀번호</label>
+      <input class="input" id="pw" type="password" inputmode="numeric" placeholder="비밀번호 입력" autocomplete="current-password" />
+    </div>
+    <button class="btn-primary" id="enterBtn">입장</button>
+    <div class="login-msg" id="loginMsg"></div>
+  </div>
+</div>
+
+<!-- ============================ APP ============================ -->
+<div id="app">
+  <header class="topbar">
+    <button class="icon-btn" id="menuBtn" title="에이전트 목록" style="display:none;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+    <!-- LOGO: replace .brand-mark svg + .brand-name with your asset -->
+    <div class="brand">
+      <span class="brand-mark"><svg viewBox="0 0 32 32" fill="none"><rect x="2.5" y="6" width="27" height="17" rx="3" stroke="currentColor" stroke-width="2.2"/><circle cx="16" cy="14.5" r="4" stroke="currentColor" stroke-width="2.2"/><circle cx="16" cy="14.5" r="1.4" fill="currentColor"/><path d="M11 28h10" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span>
+      <span class="brand-name">OpsView <b>Relay</b></span>
+    </div>
+    <div class="top-right">
+      <div class="conn-pill"><span class="dot live" id="connDot"></span><span class="ctxt" id="connTxt">relay 연결됨</span></div>
+      <button class="icon-btn" id="gearBtn" title="설정"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M22 12h-3M5 12H2M19 19l-2-2M7 7L5 5M19 5l-2 2M7 17l-2 2"/></svg></button>
+      <button class="logout" id="logoutBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 17l5-5-5-5M20 12H9M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3"/></svg><span>로그아웃</span></button>
+    </div>
+  </header>
+
+  <!-- relay disconnect banner -->
+  <div class="banner" id="banner">
+    <span class="pulse"></span>
+    <span class="bmsg">relay 연결 끊김<span class="bsub" id="bannerSub">· 마지막 응답 0초 전 · 재연결 시도 중…</span></span>
+  </div>
+
+  <div class="shell">
+    <!-- agent sidebar -->
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <!-- content -->
+    <div class="content" id="content">
+      <!-- ====== OVERVIEW VIEW ====== -->
+      <section class="view active main" id="overview-view">
+        <div class="view-head">
+          <h1>전체 개요</h1>
+          <span class="sub" id="ovSub">relay 전역 요약</span>
+          <div class="relay-meta">
+            <div class="rm"><div class="k">버전</div><div class="v">0.3.8</div></div>
+            <div class="rm"><div class="k">업타임</div><div class="v" id="ovUptime">0:00:00</div></div>
+          </div>
+        </div>
+
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-head"><span class="stat-label">온라인 에이전트</span><span class="dot live"></span></div>
+            <div class="stat-num"><span id="ovAgents">0</span><span class="unit">/ <span id="ovAgentsTotal">0</span></span></div>
+            <div class="stat-sub">연결된 지점</div>
+          </div>
+          <div class="stat">
+            <div class="stat-head"><span class="stat-label">전체 Watchers</span><span class="dot live"></span></div>
+            <div class="stat-num"><span id="ovWatchers">0</span><span class="unit">명</span></div>
+            <div class="stat-sub">모든 지점 합계</div>
+          </div>
+          <div class="stat">
+            <div class="stat-head"><span class="stat-label">전체 Streams</span><span class="dot live"></span></div>
+            <div class="stat-num"><span id="ovStreams">0</span><span class="unit">활성</span></div>
+            <div class="stat-sub">모든 지점 CCTV</div>
+          </div>
+          <div class="stat">
+            <div class="stat-head"><span class="stat-label">총 Throughput</span><span class="dot live"></span></div>
+            <div class="tput">
+              <div class="arm down"><span class="k"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>수신</span><span class="v" id="ovDown">0</span></div>
+              <div class="arm up"><span class="k"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>송신</span><span class="v" id="ovUp">0</span></div>
+            </div>
+            <div class="stat-sub" style="margin-top:8px;">kbps · 실시간</div>
+          </div>
+        </div>
+
+        <div class="live-bar"><h2>에이전트 (지점)</h2><span class="meta" id="ovGridMeta"></span></div>
+        <div class="agent-grid" id="agentGrid"></div>
+        <div class="big-empty" id="noAgents">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 21h18M5 21V7l8-4v18M19 21V11l-6-3"/><path d="M9 9v.01M9 13v.01M9 17v.01"/></svg>
+          <b>연결된 에이전트 없음</b><span>지점 에이전트가 relay에 접속하면 여기 표시됩니다</span>
+        </div>
+      </section>
+
+      <!-- ====== AGENT DRILL-IN VIEW ====== -->
+      <section class="view main" id="agent-view">
+        <div class="agent-head">
+          <button class="back-btn" id="backBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>전체</button>
+          <div class="agent-title"><h1 id="agName">—</h1><span class="badge-state on" id="agBadge"><span class="dot live"></span>온라인</span></div>
+          <span class="agent-since" id="agSince"></span>
+        </div>
+
+        <nav class="tabs">
+          <button class="tab active" data-tab="status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>상태</button>
+          <button class="tab" data-tab="live"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M10 9.5l5 2.5-5 2.5z" fill="currentColor" stroke="none"/></svg>라이브</button>
+        </nav>
+
+        <!-- STATUS PANE -->
+        <section class="pane active" id="status-pane">
+          <div class="stats">
+            <div class="stat" id="statPub">
+              <div class="stat-head"><span class="stat-label">Publisher</span><span class="dot live" id="pubDot"></span></div>
+              <div class="stat-num" id="pubState">연결됨</div>
+              <div class="stat-sub"><span id="pubAgo" class="mono">0초</span> 전 프레임 · <b id="pubCount" class="mono">0</b> publish</div>
+            </div>
+            <div class="stat">
+              <div class="stat-head"><span class="stat-label">Watchers</span><span class="dot live"></span></div>
+              <div class="stat-num"><span id="watchNum">0</span><span class="unit">명</span></div>
+              <div class="stat-sub">접속 중인 시청자</div>
+            </div>
+            <div class="stat">
+              <div class="stat-head"><span class="stat-label">Streams</span><span class="dot live"></span></div>
+              <div class="stat-num"><span id="streamNum">0</span><span class="unit">/ <span id="streamTotal">0</span></span></div>
+              <div class="stat-sub">활성 CCTV 스트림</div>
+            </div>
+            <div class="stat">
+              <div class="stat-head"><span class="stat-label">Throughput</span><span class="dot live"></span></div>
+              <div class="tput">
+                <div class="arm down"><span class="k"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>수신</span><span class="v" id="tpDown">0</span></div>
+                <div class="arm up"><span class="k"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>송신</span><span class="v" id="tpUp">0</span></div>
+              </div>
+              <div class="stat-sub" style="margin-top:8px;">kbps · 실시간</div>
+            </div>
+          </div>
+
+          <div class="grid2">
+            <div class="col">
+              <div class="panel" id="pubPanel">
+                <div class="panel-head"><h3>Publisher · Ops 화면</h3><span class="count">v0.3.8</span></div>
+                <div class="panel-body">
+                  <div class="pub-snap">
+                    <!-- SNAPSHOT: replace whole .desk block with <img src="/agents/{id}/snapshot.jpg"> -->
+                    <div class="desk">
+                      <div class="wall"></div>
+                      <div class="win w1"><div class="tb"><i></i><i></i><i></i></div><div class="body"><div class="ln" style="width:80%"></div><div class="ln" style="width:55%"></div><div class="ln" style="width:70%"></div><div class="ln" style="width:40%"></div></div></div>
+                      <div class="win w2"><div class="tb"><i></i><i></i><i></i></div><div class="body"><div class="ln" style="width:90%"></div><div class="ln" style="width:62%"></div><div class="ln" style="width:75%"></div></div></div>
+                      <div class="taskbar"><span class="clk" id="deskClock">09:24</span></div>
+                      <div class="flash" id="snapFlash"></div>
+                    </div>
+                    <div class="pub-badges">
+                      <span class="badge pin" id="pinBadge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>PIN 설정됨</span>
+                      <span class="badge live"><span class="dot live"></span>LIVE</span>
+                    </div>
+                    <div class="pub-off">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+                      <b>Publisher 끊김</b><span id="pubOffAgo">마지막 프레임 0초 전</span>
+                    </div>
+                  </div>
+                  <div class="pub-meta">
+                    <div class="m"><div class="k">누적 전송</div><div class="v" id="pubBytes">0 B</div></div>
+                    <div class="m"><div class="k">업타임(지점)</div><div class="v" id="pubUptime">0:00:00</div></div>
+                    <div class="m"><div class="k">DVR</div><div class="v" id="pubDvr" style="font-size:13px;">—</div></div>
+                    <div class="m"><div class="k">Publish 수</div><div class="v" id="pubCount2">0</div></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="panel" id="watchPanel">
+                <div class="panel-head"><h3>Watchers</h3><span class="count" id="watchCount">0 접속</span></div>
+                <div class="panel-body" style="padding:8px 0 0;">
+                  <table class="tbl"><thead><tr><th>ID</th><th>IP</th><th>접속 시간</th></tr></thead><tbody id="watchBody"></tbody></table>
+                  <div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg><b>접속 중인 시청자 없음</b><span>watcher가 연결되면 여기 표시됩니다</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col">
+              <div class="panel" id="streamPanel">
+                <div class="panel-head"><h3>Streams</h3><span class="count" id="streamCount">0 / 0 활성</span></div>
+                <div class="panel-body" style="padding:8px 0 0;">
+                  <table class="tbl"><thead><tr><th>채널</th><th>코덱</th><th>전송</th><th class="num">WS</th><th>상태</th></tr></thead><tbody id="streamBody"></tbody></table>
+                  <div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 5l20 14"/></svg><b>활성 스트림 없음</b><span>DVR 채널이 게시되면 여기 표시됩니다</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- LIVE PANE -->
+        <section class="pane" id="live-pane">
+          <div class="live-bar"><h2>라이브 그리드</h2><span class="meta" id="liveMeta"></span></div>
+          <div class="grid" id="grid"></div>
+          <div class="grid-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 5l20 14"/></svg><b>표시할 채널 없음</b><span>활성 CCTV 스트림이 없습니다</span></div>
+        </section>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- fullscreen modal -->
+<div class="modal" id="modal">
+  <button class="modal-close" id="modalClose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+  <div class="modal-cell" id="modalCell"></div>
+</div>
+
+<!-- settings drawer -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer">
+  <div class="drawer-head"><h3>설정</h3><button class="icon-btn" id="drawerClose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+  <div class="drawer-body">
+    <div class="set"><div class="st">테마</div><div class="seg full" data-group="theme"><button data-val="dark">다크</button><button data-val="light">라이트</button></div></div>
+    <div class="set"><div class="st">액센트 컬러</div><div class="swatches" data-group="accent"><div class="sw green" data-val="green"></div><div class="sw amber" data-val="amber"></div><div class="sw blue" data-val="blue"></div><div class="sw purple" data-val="purple"></div></div></div>
+    <div class="set"><div class="st">정보 밀도</div><div class="sd">연령대 높은 사용자는 ‘크게’ 권장</div><div class="seg full" data-group="density"><button data-val="comfortable">크게</button><button data-val="compact">촘촘하게</button></div></div>
+    <div class="set">
+      <div class="st">미리보기 상태</div>
+      <div class="sd">실제 데이터와 무관하게 화면 상태를 테스트</div>
+      <div class="toggle danger" id="tg-relay"><div class="tlabel">relay 연결 끊김<small>붉은 경고 배너 표시</small></div><div class="sw-track"></div></div>
+    </div>
+    <div class="set">
+      <div class="st">에이전트 수 (데모)</div>
+      <div class="sd">0개·1개·여러 지점 엣지 케이스 확인</div>
+      <div class="seg full" data-group="agentcount"><button data-val="0">0개</button><button data-val="1">1개</button><button data-val="5" class="on">여러개</button></div>
+    </div>
+  </div>
+  <div class="drawer-note">설정은 이 브라우저에 저장됩니다. 운영 배포 시 로고·스냅샷·video 소스를 실제 relay 엔드포인트로 교체하세요.</div>
+</aside>
+<script src="/dashboard/assets/app.js"></script>
+</body>
+</html>

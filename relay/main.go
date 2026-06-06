@@ -42,6 +42,10 @@ func runServer() (stop func()) {
 	mux.HandleFunc("/api/snapshot", hub.HandleSnapshot)
 	mux.HandleFunc("/surv/ws/", hub.ServeSurvWS) // fMP4-over-WebSocket (more specific than /surv/)
 	mux.HandleFunc("/surv/", hub.ServeSurvHLS)
+	hub.registerDashboard(mux)
+	if cfg.DashboardToken != "" {
+		log.Printf("[relay] dashboard enabled at /dashboard")
+	}
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: mux}
 
@@ -120,6 +124,9 @@ type Config struct {
 	// Agents is the per-tenant publisher-token registry (RELAY_AGENTS JSON) plus
 	// the default agent (authenticated by PublisherToken).
 	Agents *agentRegistry
+	// DashboardToken gates the operator dashboard. Empty => dashboard disabled
+	// (routes not registered), so it is never exposed unauthenticated.
+	DashboardToken string
 }
 
 func loadConfig() Config {
@@ -148,5 +155,6 @@ func loadConfig() Config {
 		PublisherToken:  token,
 		AllowedOrigins:  origins,
 		Agents:          reg,
+		DashboardToken:  os.Getenv("RELAY_DASHBOARD_TOKEN"),
 	}
 }

@@ -41,6 +41,7 @@ type Hub struct {
 	mu       sync.RWMutex
 	sessions map[string]*agentSession // keyed by agentID ("default" included)
 
+	startedAt    time.Time
 	watcherIDSeq atomic.Uint32
 	done         chan struct{}
 	testPattern  *TestPattern
@@ -60,6 +61,7 @@ func NewHub(cfg Config) *Hub {
 	h := &Hub{
 		cfg:        cfg,
 		sessions:   make(map[string]*agentSession),
+		startedAt:  time.Now(),
 		done:       make(chan struct{}),
 		pinLimiter: newPinLimiter(),
 	}
