@@ -4,6 +4,26 @@ All notable changes to OpsView are documented here.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-06-07
+
+### Added
+
+- **Dashboard: dedicated 관리 page.** Settings split out of the cramped ⚙ drawer:
+  the quick-drawer now holds only display prefs (테마/액센트/정보밀도), while 지점·
+  알림·보안 move to a full-page **관리** view at `/dashboard/manage` (deep-linkable
+  and refresh-safe via the History API) with a left sub-tab rail. 지점 is now a
+  **card grid** joining the agent registry with live state — each card shows
+  online/last-seen, DVR·채널 (active/total), 시청자, and a masked token (reveal +
+  copy), with 이름변경 (inline), 토큰 재발급, 재접속, 숨기기, 삭제 actions, an
+  add-card, and a 숨긴 지점 section. Read-only when `RELAY_DB` is unset; the legacy
+  "default" agent renders as a limited card. Relay-only.
+
+### Fixed
+
+- **Update toast showed a doubled "v" (`vv0.8.0`).** `main.Version` is the git tag
+  verbatim (already `v`-prefixed), but the viewer's update UI prepended another
+  "v". A `vlabel()` normalizer now renders exactly one. Viewer-only.
+
 ## [0.8.0] - 2026-06-07
 
 ### Added
