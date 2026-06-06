@@ -31,6 +31,7 @@ func runServer() (stop func()) {
 
 	hub := NewHub(cfg)
 	go hub.Run()
+	go hub.alertMonitor() // fault alerts (agent offline/recovery) via telegram/webhook
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/publish", hub.HandlePublish)

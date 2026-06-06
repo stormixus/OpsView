@@ -719,6 +719,7 @@ function loadTenants(){
     var list=$('#tenant-list'); if(!list) return;
     if(!d){ list.innerHTML='<div class="mut" style="font-size:12px;">불러오기 실패</div>'; return; }
     var pwSet=$('#pw-set'); if(pwSet) pwSet.style.display = d.editable ? '' : 'none';
+    var alSet=$('#alert-set'); if(alSet){ alSet.style.display = d.editable ? '' : 'none'; if(d.editable) loadAlertCfg(); }
     var addUI=$('.tenant-add');
     if(!d.editable){
       if(addUI) addUI.style.display='none';
@@ -753,6 +754,30 @@ if($('#pw-save')) $('#pw-save').addEventListener('click', function(){
     .then(function(r){ if(r.ok){ $('#pw-new').value=''; set('비밀번호가 변경되었습니다.'); }
       else r.text().then(function(t){ set('변경 실패: '+t, true); }); });
 });
+/* --- fault alerts (telegram / webhook) --- */
+function alMsg(t,bad){ var m=$('#al-msg'); if(m){ m.textContent=t; m.className='tenant-msg'+(bad?' bad':''); } }
+function loadAlertCfg(){
+  fetch('/dashboard/api/alert-config').then(function(r){ return r.ok?r.json():null; }).then(function(c){
+    if(!c) return;
+    if($('#al-enabled')) $('#al-enabled').checked=!!c.enabled;
+    if($('#al-tg-token')) $('#al-tg-token').value=c.telegram_token||'';
+    if($('#al-tg-chat')) $('#al-tg-chat').value=c.telegram_chat||'';
+    if($('#al-webhook')) $('#al-webhook').value=c.webhook_url||'';
+  }).catch(function(){});
+}
+if($('#al-save')) $('#al-save').addEventListener('click', function(){
+  var body={ enabled:$('#al-enabled').checked, telegram_token:$('#al-tg-token').value.trim(),
+    telegram_chat:$('#al-tg-chat').value.trim(), webhook_url:$('#al-webhook').value.trim() };
+  alMsg('저장 중…');
+  fetch('/dashboard/api/alert-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){ if(r.ok) alMsg('저장됨'); else r.text().then(function(t){ alMsg('저장 실패: '+t, true); }); });
+});
+if($('#al-test')) $('#al-test').addEventListener('click', function(){
+  alMsg('테스트 전송 중… (먼저 저장돼 있어야 함)');
+  fetch('/dashboard/api/alert-test',{method:'POST'})
+    .then(function(r){ if(r.ok) alMsg('테스트 전송됨 — 텔레그램/웹훅 확인'); else alMsg(r.status===409?'채널 미설정 — 저장 먼저':'전송 실패 ('+r.status+')', true); });
+});
+
 if($('#tn-add')) $('#tn-add').addEventListener('click', function(){
   var id=$('#tn-id').value.trim(), name=$('#tn-name').value.trim(), token=$('#tn-token').value.trim();
   if(!id || !token){ tnMsg('지점 ID와 토큰은 필수입니다.', true); return; }

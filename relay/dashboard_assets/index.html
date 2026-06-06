@@ -247,6 +247,18 @@
       </div>
       <div id="pw-msg" class="tenant-msg"></div>
     </div>
+    <div class="set" id="alert-set" style="display:none;">
+      <div class="st">장애 알림</div>
+      <div class="sd">지점(에이전트)이 오프라인 되면 텔레그램·웹훅으로 알립니다. (relay DB에 저장)</div>
+      <label class="al-toggle"><input type="checkbox" id="al-enabled"><span>알림 켜기</span></label>
+      <div class="tenant-add">
+        <input id="al-tg-token" class="tn-in" placeholder="텔레그램 봇 토큰 (BotFather)" autocomplete="off">
+        <input id="al-tg-chat" class="tn-in" placeholder="텔레그램 chat_id" autocomplete="off">
+        <input id="al-webhook" class="tn-in" placeholder="웹훅 URL (Slack/Discord 등, 선택)" autocomplete="off">
+        <div class="tn-tokrow"><button id="al-save" class="tn-add-btn">저장</button><button id="al-test" class="tn-gen" title="테스트 알림 전송">테스트</button></div>
+      </div>
+      <div id="al-msg" class="tenant-msg"></div>
+    </div>
   </div>
   <div class="drawer-note">설정은 이 브라우저에 저장됩니다. 운영 배포 시 로고·스냅샷·video 소스를 실제 relay 엔드포인트로 교체하세요.</div>
 </aside>

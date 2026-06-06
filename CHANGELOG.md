@@ -6,6 +6,14 @@ All notable changes to OpsView are documented here.
 
 ### Added
 
+- **Fault alerts (Telegram + webhook).** The relay watches each agent (지점) and,
+  when one goes offline for >30s, pushes an alert — and again on recovery — to
+  Telegram and/or a webhook (Slack/Discord/etc.). Configure in the dashboard
+  settings drawer (enable + bot token/chat_id + webhook URL, with a 테스트
+  button); settings persist in the relay DB (`RELAY_DB`) or come from
+  `RELAY_TELEGRAM_TOKEN` / `RELAY_TELEGRAM_CHAT` / `RELAY_ALERT_WEBHOOK` /
+  `RELAY_ALERTS_ENABLED`. Webhook URLs to loopback/cloud-metadata are blocked
+  (SSRF). Relay-only change.
 - **Dashboard: name watchers by IP.** In the Watchers detail (click the Watchers
   stat) the operator can assign a display name to each client IP; the name is
   stored on the relay (`ip_labels`, requires `RELAY_DB`) and shown next to that

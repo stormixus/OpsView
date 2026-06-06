@@ -74,6 +74,13 @@ func (s *agentStore) setIPLabel(ip, label string) error {
 
 const settingDashboardToken = "dashboard_token"
 
+const (
+	settingAlertEnabled  = "alert_enabled"
+	settingAlertTGToken  = "alert_telegram_token"
+	settingAlertTGChat   = "alert_telegram_chat"
+	settingAlertWebhook  = "alert_webhook_url"
+)
+
 // getSetting returns a stored setting value ("" if unset).
 func (s *agentStore) getSetting(key string) (string, error) {
 	var v string

@@ -247,6 +247,59 @@ func (h *Hub) HandleDashboardIPLabel(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// HandleDashboardAlertConfig gets (GET) or saves (POST) the fault-alert delivery
+// settings (telegram/webhook). Admin-gated; saving requires RELAY_DB.
+func (h *Hub) HandleDashboardAlertConfig(w http.ResponseWriter, r *http.Request) {
+	if !h.authedDashboard(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(h.getAlertConfig())
+	case http.MethodPost:
+		var c alertConfig
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<14)).Decode(&c); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		c.TelegramToken = strings.TrimSpace(c.TelegramToken)
+		c.TelegramChat = strings.TrimSpace(c.TelegramChat)
+		c.WebhookURL = strings.TrimSpace(c.WebhookURL)
+		if c.WebhookURL != "" && !webhookURLAllowed(c.WebhookURL) {
+			http.Error(w, "webhook url not allowed (loopback/metadata blocked)", http.StatusBadRequest)
+			return
+		}
+		if err := h.setAlertConfig(c); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// HandleDashboardAlertTest sends a test alert via the saved channels. Admin-gated.
+func (h *Hub) HandleDashboardAlertTest(w http.ResponseWriter, r *http.Request) {
+	if !h.authedDashboard(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	cfg := h.getAlertConfig()
+	if !cfg.hasChannel() {
+		http.Error(w, "no alert channel configured", http.StatusConflict)
+		return
+	}
+	sendAlert(cfg, "🔔 OpsView 알림 테스트", "이 메시지가 보이면 장애 알림이 정상 작동합니다.")
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // HandleDashboardAgents manages the named-agent (tenant) registry from the
 // dashboard: GET lists agents, POST upserts one, DELETE removes one. Editing
 // requires a persistent store (RELAY_DB); without it the registry is read-only.
@@ -350,6 +403,8 @@ func (h *Hub) registerDashboard(mux *http.ServeMux) {
 	mux.HandleFunc("/dashboard/api/ops-snapshot", h.HandleDashboardOpsSnapshot)
 	mux.HandleFunc("/dashboard/api/agent-control", h.HandleDashboardAgentControl)
 	mux.HandleFunc("/dashboard/api/ip-label", h.HandleDashboardIPLabel)
+	mux.HandleFunc("/dashboard/api/alert-config", h.HandleDashboardAlertConfig)
+	mux.HandleFunc("/dashboard/api/alert-test", h.HandleDashboardAlertTest)
 	mux.HandleFunc("/dashboard/api/agents", h.HandleDashboardAgents)
 	mux.HandleFunc("/dashboard/api/password", h.HandleDashboardPassword)
 	mux.HandleFunc("/dashboard", h.HandleDashboardStatic)

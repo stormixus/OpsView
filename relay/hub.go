@@ -52,6 +52,9 @@ type Hub struct {
 
 	ipLabelMu sync.RWMutex
 	ipLabels  map[string]string // operator-assigned watcher IP -> display name
+
+	alertMu  sync.RWMutex
+	alertCfg alertConfig // fault-alert delivery settings (telegram/webhook)
 }
 
 // effectiveDashToken returns the active dashboard password: the DB-stored value
@@ -111,8 +114,42 @@ func NewHub(cfg Config) *Hub {
 	if h.ipLabels == nil {
 		h.ipLabels = make(map[string]string)
 	}
+	h.alertCfg = loadAlertConfig(cfg.Store)
 	h.testPattern = NewTestPattern(h)
 	return h
+}
+
+// getAlertConfig returns the current fault-alert settings (thread-safe copy).
+func (h *Hub) getAlertConfig() alertConfig {
+	h.alertMu.RLock()
+	defer h.alertMu.RUnlock()
+	return h.alertCfg
+}
+
+// setAlertConfig persists and applies new fault-alert settings. Requires a store.
+func (h *Hub) setAlertConfig(c alertConfig) error {
+	if h.cfg.Store == nil {
+		return fmt.Errorf("alerts are read-only (no RELAY_DB configured)")
+	}
+	en := "0"
+	if c.Enabled {
+		en = "1"
+	}
+	vals := map[string]string{
+		settingAlertEnabled: en,
+		settingAlertTGToken: c.TelegramToken,
+		settingAlertTGChat:  c.TelegramChat,
+		settingAlertWebhook: c.WebhookURL,
+	}
+	for k, v := range vals {
+		if err := h.cfg.Store.setSetting(k, v); err != nil {
+			return err
+		}
+	}
+	h.alertMu.Lock()
+	h.alertCfg = c
+	h.alertMu.Unlock()
+	return nil
 }
 
 // getIPLabel returns the operator-assigned name for a watcher IP ("" if none).
