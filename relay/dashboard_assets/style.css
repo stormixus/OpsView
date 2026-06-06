@@ -492,3 +492,8 @@ button{font-family:inherit; cursor:pointer;}
 .brand-home{cursor:pointer; border-radius:10px; padding:3px 7px; margin:-3px -7px; transition:background .15s ease;}
 .brand-home:hover{background:rgba(255,255,255,.05);}
 .brand-home:focus-visible{outline:2px solid var(--accent-2); outline-offset:2px;}
+
+/* ---- agent reconnect button (relay -> agent DVR re-discover) ---- */
+.ag-reconnect{margin-left:auto; padding:7px 14px; border-radius:9px; border:1px solid var(--border-strong); background:rgba(255,255,255,.04); color:var(--text-muted); font-size:12.5px; font-weight:700; cursor:pointer; transition:background .15s ease, color .15s ease, border-color .15s ease;}
+.ag-reconnect:hover:not(:disabled){background:rgba(34,211,238,.12); color:var(--accent-2); border-color:var(--accent-2);}
+.ag-reconnect:disabled{opacity:.55; cursor:default;}

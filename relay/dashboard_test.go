@@ -186,3 +186,19 @@ func TestOpsSnapshotAuthAndOffline(t *testing.T) {
 		t.Fatalf("offline: want 204, got %d", rec2.Code)
 	}
 }
+
+func TestAgentControlAuthAndOffline(t *testing.T) {
+	h := NewHub(cfgWithDash("dash-secret"))
+	rec := httptest.NewRecorder()
+	h.HandleDashboardAgentControl(rec, httptest.NewRequest("POST", "/dashboard/api/agent-control", strings.NewReader(`{"action":"reconnect"}`)))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no cookie: want 401, got %d", rec.Code)
+	}
+	req := httptest.NewRequest("POST", "/dashboard/api/agent-control", strings.NewReader(`{"action":"reconnect"}`))
+	req.AddCookie(&http.Cookie{Name: dashboardCookieName, Value: signSession(h.effectiveDashToken(), time.Now().Add(time.Hour))})
+	rec2 := httptest.NewRecorder()
+	h.HandleDashboardAgentControl(rec2, req)
+	if rec2.Code != http.StatusConflict { // authed but no online agent
+		t.Fatalf("offline: want 409, got %d", rec2.Code)
+	}
+}

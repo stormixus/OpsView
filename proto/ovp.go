@@ -30,6 +30,7 @@ const (
 	MsgSurvConfig   MessageType = 9  // Surveillance config (publisher→relay→watcher)
 	MsgSurvSnapshot MessageType = 10 // Snapshot request/response
 	MsgSurvMeta     MessageType = 11 // Channel meta edit (relay→publisher): reorder/rename
+	MsgAgentControl MessageType = 12 // Agent control (relay→publisher): e.g. reconnect/rediscover DVRs
 )
 
 func (m MessageType) String() string {
@@ -56,6 +57,8 @@ func (m MessageType) String() string {
 		return "SURV_SNAPSHOT"
 	case MsgSurvMeta:
 		return "SURV_META"
+	case MsgAgentControl:
+		return "AGENT_CONTROL"
 	default:
 		return fmt.Sprintf("UNKNOWN(%d)", m)
 	}

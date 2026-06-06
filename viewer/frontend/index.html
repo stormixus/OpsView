@@ -2478,11 +2478,48 @@
     // --- Grid rendering with SortableJS + preload (no flicker) ---
     let sortableInstance = null;
 
+    /* --- grid watchdog: re-attempt channels whose video stalls (이빨 빠짐 자동복구).
+       A live cell's <video> currentTime keeps advancing; if it hasn't moved for a
+       full tick (~12s) the channel is dead/never-connected, so re-run the same
+       path (relay HLS or local RTSP) for just that cell. ISAPI snapshot cells have
+       no <video> and are skipped. --- */
+    let gridWatchdog = null;
+    let gridCtx = null;
+    function stopGridWatchdog() { if (gridWatchdog) { clearInterval(gridWatchdog); gridWatchdog = null; } }
+    function startGridWatchdog() {
+      stopGridWatchdog();
+      if (!gridCtx) return;
+      gridWatchdog = setInterval(() => {
+        if (!gridCtx || document.hidden) return;
+        const grid = document.getElementById('cctvGrid');
+        if (!grid || !grid.offsetParent) return; // gone or on another tab (CSS-hidden)
+        const ctx = gridCtx;
+        grid.querySelectorAll('.cctv-cell').forEach(cell => {
+          const video = cell.querySelector('video');
+          if (!video) return; // ISAPI snapshot (<img>) — nothing to reconnect
+          const chNum = parseInt(cell.dataset.chnum);
+          const tcur = video.currentTime || 0;
+          if (tcur > (video._wdLast || 0) + 0.05) { video._wdLast = tcur; return; } // advancing — healthy
+          video._wdLast = tcur;
+          const key = streamKey(ctx.dvr.id, chNum);
+          if (channelConnecting && channelConnecting.has(key)) return; // mid-connect, give it time
+          console.log('[cctv] watchdog: ch' + chNum + ' stalled — reconnecting');
+          if (ctx.useRelayHLS && ctx.streamDvrId != null) {
+            playRelayCCTV(video, ctx.scheme, ctx.ip, ctx.port, ctx.streamDvrId, chNum);
+          } else if (ctx.isRTSP) {
+            startRTSPChannel(ctx.dvr.id, chNum, video, channelPeerConns);
+          }
+        });
+      }, 12000);
+    }
+
     function renderCCTVGrid(dvr) {
       const grid = document.getElementById('cctvGrid');
       cctvRenderedDvrId = dvr ? dvr.id : null;
       cctvTimers.forEach(t => clearInterval(t));
       cctvTimers = [];
+      stopGridWatchdog();
+      gridCtx = null;
       collapseCell(true);
       cleanupAllStreams(true);
       if (sortableInstance) { sortableInstance.destroy(); sortableInstance = null; }
@@ -2601,6 +2638,13 @@
           channelPeerConns
         );
       }
+
+      // Arm the watchdog so any cell that fails to start (이빨 빠짐) auto-recovers.
+      let _wdEp = { scheme: 'http', ip: '', port: '' };
+      if (useRelayHLS) { _wdEp = resolveRelayHLSEndpoint(dvr); }
+      gridCtx = { dvr: dvr, isRTSP: isRTSP, useRelayHLS: useRelayHLS, streamDvrId: streamDvrId,
+        scheme: _wdEp.scheme, ip: _wdEp.ip, port: _wdEp.port };
+      startGridWatchdog();
 
       // Initialize SortableJS on the grid
       sortableInstance = new Sortable(grid, {

@@ -20,3 +20,14 @@ func TestHelloAgentID(t *testing.T) {
 		t.Fatalf("missing agent_id => %q want empty", h2.AgentID)
 	}
 }
+
+func TestAgentControlRoundTrip(t *testing.T) {
+	b, _ := json.Marshal(AgentControl{Action: "reconnect"})
+	var out AgentControl
+	if err := json.Unmarshal(b, &out); err != nil || out.Action != "reconnect" {
+		t.Fatalf("roundtrip: %v %+v", err, out)
+	}
+	if MsgAgentControl.String() != "AGENT_CONTROL" {
+		t.Fatalf("String: %s", MsgAgentControl.String())
+	}
+}

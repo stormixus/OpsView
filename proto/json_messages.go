@@ -81,6 +81,14 @@ type ChannelRename struct {
 	Name  string `json:"name"`
 }
 
+// AgentControl is the MsgAgentControl payload (relay→publisher): an operator
+// command relayed from the dashboard. Action "reconnect" makes the agent
+// re-discover every DVR and re-publish its surveillance config, recovering
+// streams that dropped (e.g. after a DVR reboot).
+type AgentControl struct {
+	Action string `json:"action"` // "reconnect"
+}
+
 // SnapshotRequest is sent by watcher to request a snapshot via agent proxy.
 type SnapshotRequest struct {
 	ReqID string `json:"req_id"`

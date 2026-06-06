@@ -260,6 +260,17 @@ window.addEventListener('popstate', routeFromPath);
 
 $('#sidebar').addEventListener('click', function(e){ var b=e.target.closest('.agent-item'); if(b) go(b.dataset.nav); });
 $('#backBtn').addEventListener('click', function(){ go('overview'); });
+(function(){ var rb=$('#agentReconnect'); if(!rb) return;
+  rb.addEventListener('click', function(){
+    if(selected===null) return;
+    var btn=rb, orig=btn.textContent; btn.disabled=true; btn.textContent='요청 중…';
+    fetch(BASE+'/api/agent-control',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({agent_id:selected, action:'reconnect'})})
+      .then(function(r){ btn.textContent = r.ok ? '재연결 요청됨 ✓' : (r.status===409?'에이전트 오프라인':'실패'); })
+      .catch(function(){ btn.textContent='실패'; })
+      .finally(function(){ setTimeout(function(){ btn.disabled=false; btn.textContent=orig; }, 3000); });
+  });
+})();
 (function(){ var bh=$('#brandHome'); if(!bh) return;
   bh.addEventListener('click', function(){ go('overview'); });
   bh.addEventListener('keydown', function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); go('overview'); } });

@@ -59,6 +59,7 @@ func NewAgent(cfg AgentConfig) *Agent {
 }
 
 func (a *Agent) Run() {
+	go a.selfHealLoop() // lifetime DVR self-recovery (independent of the connect loop)
 	for {
 		select {
 		case <-a.stopped:
@@ -209,6 +210,8 @@ func (a *Agent) readPump(conn *websocket.Conn) {
 			}
 		} else if hdr.Type == proto.MsgSurvMeta {
 			a.applySurvMeta(data[proto.HeaderSize:])
+		} else if hdr.Type == proto.MsgAgentControl {
+			a.handleAgentControl(data[proto.HeaderSize:])
 		} else if hdr.Type == proto.MsgSurvSnapshot {
 			// Bound concurrent snapshot handlers; drop when saturated so a flood
 			// of requests cannot exhaust goroutines/connections.
@@ -310,6 +313,96 @@ func (a *Agent) sendSurvConfig() {
 			log.Printf("[agent] sent surveillance config: %d DVRs, %d channels", len(cfg.DVRs), len(cfg.Channels))
 		}
 	}
+}
+
+// handleAgentControl processes a relay-originated operator command (MsgAgentControl),
+// relayed from the dashboard.
+func (a *Agent) handleAgentControl(payload []byte) {
+	var ctrl proto.AgentControl
+	if json.Unmarshal(payload, &ctrl) != nil {
+		return
+	}
+	switch ctrl.Action {
+	case "reconnect", "rediscover":
+		log.Printf("[agent] agent-control: %s — re-discovering all DVRs", ctrl.Action)
+		go a.reconnectAllDVRs()
+	default:
+		log.Printf("[agent] agent-control: unknown action %q", ctrl.Action)
+	}
+}
+
+// reconnectAllDVRs forces a fresh channel discovery for every DVR and re-publishes
+// the surveillance config, recovering streams the relay dropped (each
+// DiscoverChannels fires onChange -> sendSurvConfig; the final send is a backstop).
+func (a *Agent) reconnectAllDVRs() {
+	if a.survMgr == nil {
+		return
+	}
+	dvrs, err := a.survMgr.ListDVRs()
+	if err != nil {
+		log.Printf("[agent] reconnect: list DVRs: %v", err)
+		return
+	}
+	for _, d := range dvrs {
+		if _, err := a.survMgr.DiscoverChannels(d.ID); err != nil {
+			log.Printf("[agent] reconnect: rediscover DVR %d (%s): %v", d.ID, d.Name, err)
+		}
+	}
+	a.sendSurvConfig()
+	log.Printf("[agent] reconnect: re-discovered %d DVRs and re-published config", len(dvrs))
+}
+
+// selfHealLoop runs for the agent's lifetime, periodically recovering DVRs that
+// are reachable but have lost their channels (e.g. a DVR rebooted and the relay
+// stopped its streams) — so dropped streams come back without a manual restart.
+func (a *Agent) selfHealLoop() {
+	ticker := time.NewTicker(90 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-a.stopped:
+			return
+		case <-ticker.C:
+			a.healDVRs()
+		}
+	}
+}
+
+// healDVRs re-discovers any DVR that is reachable yet has zero channels in the DB.
+func (a *Agent) healDVRs() {
+	if a.survMgr == nil {
+		return
+	}
+	dvrs, err := a.survMgr.ListDVRs()
+	if err != nil {
+		return
+	}
+	for _, d := range dvrs {
+		chs, err := a.survMgr.ListChannels(d.ID)
+		if err != nil || len(chs) > 0 {
+			continue // healthy (has channels) or transient DB error
+		}
+		if !dvrReachable(d) {
+			continue // DVR genuinely down — nothing to recover yet
+		}
+		log.Printf("[agent] self-heal: DVR %d (%s) reachable but 0 channels — re-discovering", d.ID, d.Name)
+		if _, err := a.survMgr.DiscoverChannels(d.ID); err != nil {
+			log.Printf("[agent] self-heal: rediscover DVR %d: %v", d.ID, err)
+		}
+	}
+}
+
+// dvrReachable reports whether the DVR's configured port accepts a TCP connection.
+func dvrReachable(d DVRConfig) bool {
+	if d.Addr == "" || d.Port <= 0 {
+		return false
+	}
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", d.Addr, d.Port), 3*time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 // applySurvMeta applies a relay-originated channel metadata edit (reorder/rename)

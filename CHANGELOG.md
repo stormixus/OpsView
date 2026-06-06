@@ -2,6 +2,27 @@
 
 All notable changes to OpsView are documented here.
 
+## [Unreleased]
+
+### Fixed
+
+- **Viewer: live grid auto-recovers dropped channels (이빨 빠짐).** When one or
+  two channels failed to connect on a busy grid they stayed blank until a manual
+  refresh. A watchdog now checks each cell every ~12s and re-attempts any whose
+  video has stalled (no playback progress), using the same path the grid used
+  (relay HLS or local RTSP). ISAPI snapshot cells are skipped.
+
+### Added
+
+- **Agent self-heals dropped DVRs + dashboard "재연결" button.** When a DVR
+  reboots (or otherwise drops), its streams used to disappear from the relay
+  until the agent was manually restarted. Now a background loop on the agent
+  re-discovers any DVR that is reachable but has lost its channels (every 90s),
+  and the dashboard's agent view gains a **재연결** button that sends a
+  `MsgAgentControl{reconnect}` down to the agent (via `POST
+  /dashboard/api/agent-control`, admin-gated) to force a full DVR
+  re-discovery + config re-publish on demand. (Requires updating the agent.)
+
 ## [0.6.1] - 2026-06-06
 
 ### Fixed

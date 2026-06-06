@@ -179,6 +179,42 @@ func (h *Hub) HandleDashboardOpsSnapshot(w http.ResponseWriter, r *http.Request)
 	w.Write(png)
 }
 
+// HandleDashboardAgentControl relays an operator command (e.g. "reconnect" — make
+// the agent re-discover all DVRs and re-publish its config to recover dropped
+// streams) from the dashboard to a specific agent's publisher. Admin-gated.
+func (h *Hub) HandleDashboardAgentControl(w http.ResponseWriter, r *http.Request) {
+	if !h.authedDashboard(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		AgentID string `json:"agent_id"`
+		Action  string `json:"action"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if body.Action == "" {
+		body.Action = "reconnect"
+	}
+	s := h.sessionByID(body.AgentID)
+	if s == nil {
+		s = h.defaultSession()
+	}
+	if s == nil || !s.online() {
+		http.Error(w, "agent offline", http.StatusConflict)
+		return
+	}
+	payload, _ := json.Marshal(proto.AgentControl{Action: body.Action})
+	s.sendToPublisher(proto.MarshalMessage(proto.MsgAgentControl, payload))
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // HandleDashboardAgents manages the named-agent (tenant) registry from the
 // dashboard: GET lists agents, POST upserts one, DELETE removes one. Editing
 // requires a persistent store (RELAY_DB); without it the registry is read-only.
@@ -280,6 +316,7 @@ func (h *Hub) registerDashboard(mux *http.ServeMux) {
 	mux.HandleFunc("/dashboard/api/state", h.HandleDashboardState)
 	mux.HandleFunc("/dashboard/api/channel-meta", h.HandleDashboardChannelMeta)
 	mux.HandleFunc("/dashboard/api/ops-snapshot", h.HandleDashboardOpsSnapshot)
+	mux.HandleFunc("/dashboard/api/agent-control", h.HandleDashboardAgentControl)
 	mux.HandleFunc("/dashboard/api/agents", h.HandleDashboardAgents)
 	mux.HandleFunc("/dashboard/api/password", h.HandleDashboardPassword)
 	mux.HandleFunc("/dashboard", h.HandleDashboardStatic)
