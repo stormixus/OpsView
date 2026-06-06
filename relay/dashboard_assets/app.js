@@ -309,7 +309,8 @@ function renderOverview(){
   $('#ovWatchers').textContent=t.watchers; $('#ovStreams').textContent=t.streams;
   $('#ovDown').textContent=fmtKbps(t.down); $('#ovUp').textContent=fmtKbps(t.up);
   $('#ovUptime').textContent=fmtUptime(state.relay.uptime_sec);
-  $('#ovSub').textContent='relay v'+state.relay.version+' · '+t.agentsTotal+'개 지점 연결';
+  if($('#ovVersion')) $('#ovVersion').textContent=state.relay.version||'—';
+  $('#ovSub').textContent='relay '+state.relay.version+' · '+t.agentsTotal+'개 지점 연결';
   // agent grid
   var grid=$('#agentGrid');
   $('#noAgents').style.display = state.agents.length===0? 'flex':'none';
