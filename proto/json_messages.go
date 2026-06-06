@@ -2,8 +2,9 @@ package proto
 
 // Hello is the HELLO message payload (JSON-encoded).
 type Hello struct {
-	Role          string   `json:"role"`           // "publisher" or "watcher"
-	Client        string   `json:"client"`         // "opsview-agent", "opsview-viewer", "opsview-web"
+	Role          string   `json:"role"`               // "publisher" or "watcher"
+	AgentID       string   `json:"agent_id,omitempty"` // publisher only: tenant/agent id; empty = default agent
+	Client        string   `json:"client"`             // "opsview-agent", "opsview-viewer", "opsview-web"
 	ClientVersion string   `json:"client_version"` // e.g. "0.1.0"
 	Supports      []string `json:"supports"`       // e.g. ["zstd"]
 	WantProfile   *string  `json:"want_profile"`   // "1080", "720", or null
