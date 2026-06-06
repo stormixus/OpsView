@@ -102,6 +102,53 @@ func (r *Recorder) segments(stream, day string) []recSegment {
 	return segs
 }
 
+// segmentsForExport returns the segments (time-ordered, with durations) for a
+// stream that overlap [start,end] unix seconds, scanning across day boundaries
+// so a clip can span midnight.
+func (r *Recorder) segmentsForExport(stream string, start, end int64) []recSegment {
+	dir, ok := r.safeStreamDir(stream)
+	if !ok || end <= start {
+		return nil
+	}
+	var segs []recSegment
+	for _, e := range readDirSafe(dir) {
+		n := e.Name()
+		if e.IsDir() || !strings.HasSuffix(n, ".mp4") {
+			continue
+		}
+		t, err := time.ParseInLocation(recNameLayout, strings.TrimSuffix(n, ".mp4"), time.Local)
+		if err != nil {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		segs = append(segs, recSegment{Name: n, Start: t.Unix(), Size: info.Size()})
+	}
+	sort.Slice(segs, func(i, j int) bool { return segs[i].Start < segs[j].Start })
+	nominal := r.segSecs
+	if nominal <= 0 {
+		nominal = recSegSeconds
+	}
+	for i := range segs {
+		dur := nominal
+		if i+1 < len(segs) {
+			if gap := int(segs[i+1].Start - segs[i].Start); gap > 0 && gap < nominal {
+				dur = gap
+			}
+		}
+		segs[i].Dur = dur
+	}
+	out := segs[:0]
+	for _, s := range segs {
+		if s.Start < end && s.Start+int64(s.Dur) > start {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // segmentFile resolves + validates one segment file path for serving.
 func (r *Recorder) segmentFile(stream, name string) (string, bool) {
 	dir, ok := r.safeStreamDir(stream)

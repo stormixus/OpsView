@@ -23,6 +23,17 @@ All notable changes to OpsView are documented here.
   back in lockstep off a shared master clock, so scrubbing the timeline seeks
   every channel to the same wall-clock instant. A 1s drift corrector keeps the
   tiles aligned and advances each across segment boundaries independently.
+- **Dashboard: hover-scrub thumbnail.** Hovering the 녹화 timeline now shows a
+  live preview of that moment (a muted `<video>` seeked to the hovered time)
+  floating above the cursor, alongside the time readout — so you can find the
+  right moment before clicking. No extra disk: it reads the same Range-served
+  segments. Relay-only.
+- **Dashboard: clip range export.** Drag across the 녹화 timeline to select a
+  start–end window (up to 1h), then 구간 내보내기 downloads just that window as
+  a single MP4. The relay concats the overlapping segments and copies the
+  window with no re-encode (fragmented-MP4 streamed straight to the download),
+  spanning segment and midnight boundaries. Backed by
+  `/dashboard/api/rec-export`, admin-gated with the same path-traversal guards.
 
 - **Dashboard: hide unused agents (지점 관리).** Hover an agent card → 숨기기 to
   hide it from the dashboard (e.g. the leftover "default" agent after moving to

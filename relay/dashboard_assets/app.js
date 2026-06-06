@@ -603,7 +603,7 @@ modalCell.addEventListener('change', function(e){ if(e.target.classList.contains
 modalCell.addEventListener('keydown', function(e){ if(e.target.classList.contains('ipname-in') && e.key==='Enter'){ e.preventDefault(); e.target.blur(); } });
 
 /* ============================================================ RECORDINGS (녹화) */
-var recCtx = { mode:1, streams:[], stream:null, day:null, dayStart:0, segs:[], cur:null, cells:[], master:0, playing:false };
+var recCtx = { mode:1, streams:[], stream:null, day:null, dayStart:0, segs:[], cur:null, cells:[], master:0, playing:false, range:null };
 var recVideo = $('#recVideo');
 function pad2(n){ return (n<10?'0':'')+n; }
 function recDayStr(d){ return ''+d.getFullYear()+pad2(d.getMonth()+1)+pad2(d.getDate()); }
@@ -648,7 +648,7 @@ function recLoadDays(){
 }
 function recLoadDay(){
   var day=recDateInputVal(); if(!day) return;
-  recCtx.day=day; recCtx.dayStart=recDayStartSec(day);
+  recCtx.day=day; recCtx.dayStart=recDayStartSec(day); recClearRange();
   if(recCtx.mode>1){ recLoadDayGrid(); return; }
   fetch(BASE+'/api/rec?stream='+encodeURIComponent(recCtx.stream)+'&day='+day).then(function(r){return r.ok?r.json():null;}).then(function(d){
     recCtx.segs=(d&&d.segments)||[]; recRenderTimeline(recCtx.segs);
@@ -710,16 +710,70 @@ $('#recLayout').addEventListener('click', function(e){
   $$('#recLayout button').forEach(function(x){ x.classList.toggle('active', x===b); });
   recPlayAll(false); recStop(); recCtx.mode=+b.dataset.cols; openRec();
 });
-$('#recTimeline').addEventListener('click', function(e){
-  var rect=this.getBoundingClientRect(), t=recCtx.dayStart + Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width))*86400;
+// ----- drag a range to export, or click to play -----
+function recClearRange(){ recCtx.range=null; var b=$('#recRange'); if(b) b.style.display='none'; var x=$('#recExport'); if(x) x.style.display='none'; }
+function recPlayClick(frac){
+  var t=recCtx.dayStart + frac*86400;
   if(recCtx.mode>1){ recPlayAll(true); recSeekAll(t); } else { if(recCtx.segs.length) recPlayAt(t); }
+}
+var recDrag=null;
+$('#recTimeline').addEventListener('mousedown', function(e){
+  if(e.button!==0) return;
+  recDrag={ x0:e.clientX, rect:this.getBoundingClientRect(), moved:false };
+  e.preventDefault();
 });
+document.addEventListener('mousemove', function(e){
+  if(!recDrag) return;
+  if(Math.abs(e.clientX-recDrag.x0)>4) recDrag.moved=true;
+  if(!recDrag.moved) return;
+  var rect=recDrag.rect;
+  var f0=Math.max(0,Math.min(1,(recDrag.x0-rect.left)/rect.width));
+  var f1=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
+  var a=Math.min(f0,f1), b=Math.max(f0,f1), band=$('#recRange');
+  band.style.display='block'; band.style.left=(a*100)+'%'; band.style.width=((b-a)*100)+'%';
+});
+document.addEventListener('mouseup', function(e){
+  if(!recDrag) return; var rect=recDrag.rect, dr=recDrag; recDrag=null;
+  var frac=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
+  if(!dr.moved){ recClearRange(); recPlayClick(frac); return; }
+  var f0=Math.max(0,Math.min(1,(dr.x0-rect.left)/rect.width));
+  var a=Math.min(f0,frac), b=Math.max(f0,frac);
+  var s=Math.round(recCtx.dayStart+a*86400), en=Math.round(recCtx.dayStart+b*86400);
+  if(en-s < 3){ recClearRange(); return; }
+  if(en-s > 3600){ en=s+3600; var band=$('#recRange'); band.style.width=((3600/86400)*100)+'%'; }
+  recCtx.range={start:s, end:en};
+  var d0=new Date(s*1000), d1=new Date(en*1000), ex=$('#recExport');
+  ex.style.display=''; ex.textContent='구간 내보내기 '+pad2(d0.getHours())+':'+pad2(d0.getMinutes())+'~'+pad2(d1.getHours())+':'+pad2(d1.getMinutes());
+});
+$('#recExport').addEventListener('click', function(){
+  if(!recCtx.range) return;
+  var st = recCtx.mode>1 ? (recCtx.cells[0]&&recCtx.cells[0].stream) : recCtx.stream;
+  if(!st) return;
+  window.open(BASE+'/api/rec-export?stream='+encodeURIComponent(st)+'&start='+recCtx.range.start+'&end='+recCtx.range.end,'_blank');
+});
+// ----- hover scrub preview -----
+var recPrevVid=$('#recPrevVid');
+function recPreviewAt(frac, sec){
+  var segs = recCtx.mode>1 ? ((recCtx.cells[0]&&recCtx.cells[0].segs)||[]) : recCtx.segs;
+  var st = recCtx.mode>1 ? (recCtx.cells[0]&&recCtx.cells[0].stream) : recCtx.stream;
+  var s = (st && segs.length) ? recSegAtIn(segs, sec) : null;
+  var pv=$('#recPreview');
+  if(!s){ pv.style.display='none'; return; }
+  pv.style.display='block'; pv.style.left=(frac*100)+'%';
+  var off=Math.max(0, sec-s.start), url=BASE+'/api/rec-file?stream='+encodeURIComponent(st)+'&name='+encodeURIComponent(s.name);
+  if(recPrevVid.getAttribute('src')!==url){ recPrevVid._want=off; recPrevVid.src=url; recPrevVid.load(); recPrevVid.onloadedmetadata=function(){ try{recPrevVid.currentTime=recPrevVid._want;}catch(e){} }; }
+  else if(!recPrevVid._busy && Math.abs(recPrevVid.currentTime-off)>1){ recPrevVid._busy=true; recPrevVid._want=off; try{recPrevVid.currentTime=off;}catch(e){} }
+  else { recPrevVid._want=off; }
+  var d=new Date(sec*1000); $('#recPrevTime').textContent=pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds());
+}
+if(recPrevVid) recPrevVid.addEventListener('seeked', function(){ recPrevVid._busy=false; if(Math.abs(recPrevVid.currentTime-recPrevVid._want)>1){ recPrevVid._busy=true; try{recPrevVid.currentTime=recPrevVid._want;}catch(e){} } });
 $('#recTimeline').addEventListener('mousemove', function(e){
   var rect=this.getBoundingClientRect(), frac=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
-  var d=new Date((recCtx.dayStart+frac*86400)*1000), cur=$('#recCursor');
+  var sec=recCtx.dayStart+frac*86400, d=new Date(sec*1000), cur=$('#recCursor');
   cur.style.display='block'; cur.style.left=(frac*100)+'%'; cur.textContent=pad2(d.getHours())+':'+pad2(d.getMinutes());
+  recPreviewAt(frac, sec);
 });
-$('#recTimeline').addEventListener('mouseleave', function(){ $('#recCursor').style.display='none'; });
+$('#recTimeline').addEventListener('mouseleave', function(){ $('#recCursor').style.display='none'; $('#recPreview').style.display='none'; });
 recVideo.addEventListener('timeupdate', function(){ if(recCtx.mode>1 || !recCtx.cur) return; recUpdatePlayhead(recCtx.cur.start+recVideo.currentTime); });
 recVideo.addEventListener('ended', function(){
   if(recCtx.mode>1 || !recCtx.cur) return; var next=null;

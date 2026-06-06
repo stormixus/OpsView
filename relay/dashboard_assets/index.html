@@ -221,7 +221,8 @@
             <button class="rec-nav" id="recNextDay" title="다음 날">›</button>
             <button class="rec-nav" id="recPlayBtn" title="재생/일시정지" style="display:none;">▶</button>
             <span class="rec-meta" id="recMeta"></span>
-            <button id="recDownload" class="rec-dl" style="margin-left:auto;" disabled>구간 다운로드</button>
+            <button id="recExport" class="rec-dl rec-dl-go" style="margin-left:auto; display:none;">구간 내보내기</button>
+            <button id="recDownload" class="rec-dl" disabled>세그먼트 저장</button>
           </div>
           <div class="rec-stage" id="recStage">
             <video id="recVideo" class="rec-video" controls playsinline></video>
@@ -232,9 +233,11 @@
             <div class="rec-hours" id="recHours"></div>
             <div class="rec-timeline" id="recTimeline">
               <div class="rec-track" id="recTrack"></div>
+              <div class="rec-range" id="recRange"></div>
               <div class="rec-playhead" id="recPlayhead"></div>
             </div>
             <div class="rec-cursor" id="recCursor"></div>
+            <div class="rec-preview" id="recPreview"><video id="recPrevVid" muted playsinline preload="auto"></video><span id="recPrevTime"></span></div>
           </div>
         </section>
       </section>

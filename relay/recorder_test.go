@@ -79,3 +79,34 @@ func TestRecordingsListing(t *testing.T) {
 		t.Fatal("valid segment rejected")
 	}
 }
+
+func TestSegmentsForExport(t *testing.T) {
+	dir := t.TempDir()
+	r := &Recorder{dir: dir, segSecs: 300}
+	stream := "dvr4_ch1"
+	sd := filepath.Join(dir, stream)
+	os.MkdirAll(sd, 0o755)
+	// three back-to-back 5-minute segments at 12:00, 12:05, 12:10 local time.
+	for _, name := range []string{"20260607_120000.mp4", "20260607_120500.mp4", "20260607_121000.mp4"} {
+		os.WriteFile(filepath.Join(sd, name), []byte("x"), 0o644)
+	}
+	base, err := time.ParseInLocation(recNameLayout, "20260607_120000", time.Local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := base.Unix()
+
+	// a window from 12:03 to 12:07 overlaps the first two segments only.
+	got := r.segmentsForExport(stream, start+180, start+420)
+	if len(got) != 2 || got[0].Name != "20260607_120000.mp4" || got[1].Name != "20260607_120500.mp4" {
+		t.Fatalf("range overlap: %+v", got)
+	}
+	// a window entirely before any recording returns nothing.
+	if got := r.segmentsForExport(stream, start-7200, start-3600); len(got) != 0 {
+		t.Fatalf("expected empty, got %+v", got)
+	}
+	// invalid (end<=start) returns nothing.
+	if got := r.segmentsForExport(stream, start+100, start+100); got != nil {
+		t.Fatalf("expected nil for empty range, got %+v", got)
+	}
+}
