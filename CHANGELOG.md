@@ -4,6 +4,8 @@ All notable changes to OpsView are documented here.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-07
+
 ### Added
 
 - **Relay NVR recording (opt-in).** Set `RELAY_REC_DIR` and the relay records
