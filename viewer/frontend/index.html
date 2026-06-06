@@ -3686,7 +3686,7 @@
         document.getElementById('settingsUpdateAvailable').style.display = 'block';
       }
       const verEl = document.getElementById('settingsVersion');
-      if (pendingUpdate) verEl.textContent = 'v' + pendingUpdate.current_ver;
+      if (pendingUpdate) verEl.textContent = vlabel(pendingUpdate.current_ver);
       overlay.style.display = 'flex';
       applyI18n();
       lucide.createIcons();
@@ -3714,22 +3714,26 @@
     // ── Update ──
     let pendingUpdate = null;
 
+    // Version strings already carry their own "v" prefix (the git tag, e.g.
+    // "v0.8.0"). Normalize to exactly one leading "v" so we never render "vv0.8.0".
+    function vlabel(s) { return 'v' + String(s == null ? '' : s).replace(/^v+/i, ''); }
+
     async function checkUpdate() {
       if (!UPD()) return;
       try {
         const info = await UPD().CheckForUpdate();
         if (info && info.available) {
           pendingUpdate = info;
-          const msg = t('newVersion').replace('{ver}', info.latest_ver).replace('{cur}', info.current_ver);
+          const msg = t('newVersion').replace('{ver}', vlabel(info.latest_ver)).replace('{cur}', vlabel(info.current_ver));
           document.getElementById('settingsNewVer').textContent = msg;
           document.getElementById('settingsUpdateStatus').style.display = 'none';
           document.getElementById('settingsUpdateAvailable').style.display = 'block';
-          document.getElementById('settingsVersion').textContent = 'v' + info.current_ver;
+          document.getElementById('settingsVersion').textContent = vlabel(info.current_ver);
           
           // Show the premium left-bottom auto-update toast
           showUpdateToast(info);
         } else if (info) {
-          document.getElementById('settingsVersion').textContent = 'v' + info.current_ver;
+          document.getElementById('settingsVersion').textContent = vlabel(info.current_ver);
         }
       } catch(e) { console.log('update check:', e); }
     }
@@ -3748,7 +3752,7 @@
       else if (currentLang === 'es') updateMsg = "Una nueva versión está disponible. ¿Desea actualizar ahora?";
       
       if (msgInfo) msgInfo.textContent = updateMsg;
-      if (verInfo) verInfo.textContent = `v${info.current_ver} ➔ v${info.latest_ver}`;
+      if (verInfo) verInfo.textContent = vlabel(info.current_ver) + ' ➔ ' + vlabel(info.latest_ver);
       
       // Reset Toast States
       document.getElementById('toastActionArea').style.display = 'flex';
