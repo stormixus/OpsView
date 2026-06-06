@@ -42,6 +42,10 @@ func runServer() (stop func()) {
 	mux.HandleFunc("/api/snapshot", hub.HandleSnapshot)
 	mux.HandleFunc("/surv/ws/", hub.ServeSurvWS) // fMP4-over-WebSocket (more specific than /surv/)
 	mux.HandleFunc("/surv/", hub.ServeSurvHLS)
+	hub.registerDashboard(mux)
+	if cfg.DashboardToken != "" {
+		log.Printf("[relay] dashboard enabled at /dashboard")
+	}
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: mux}
 

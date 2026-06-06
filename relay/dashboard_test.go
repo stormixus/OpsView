@@ -1,9 +1,71 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestStateRequiresAuth(t *testing.T) {
+	h := NewHub(cfgWithDash("dash-secret"))
+	req := httptest.NewRequest("GET", "/dashboard/api/state", nil)
+	rec := httptest.NewRecorder()
+	h.HandleDashboardState(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no cookie => %d want 401", rec.Code)
+	}
+}
+
+func TestLoginThenState(t *testing.T) {
+	h := NewHub(cfgWithDash("dash-secret"))
+
+	bad := httptest.NewRequest("POST", "/dashboard/api/login", strings.NewReader(`{"password":"nope"}`))
+	badRec := httptest.NewRecorder()
+	h.HandleDashboardLogin(badRec, bad)
+	if badRec.Code != http.StatusUnauthorized {
+		t.Fatalf("bad login => %d want 401", badRec.Code)
+	}
+
+	ok := httptest.NewRequest("POST", "/dashboard/api/login", strings.NewReader(`{"password":"dash-secret"}`))
+	okRec := httptest.NewRecorder()
+	h.HandleDashboardLogin(okRec, ok)
+	if okRec.Code != http.StatusOK {
+		t.Fatalf("good login => %d want 200", okRec.Code)
+	}
+	cookies := okRec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("login must set a cookie")
+	}
+
+	req := httptest.NewRequest("GET", "/dashboard/api/state", nil)
+	req.AddCookie(cookies[0])
+	rec := httptest.NewRecorder()
+	h.HandleDashboardState(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("state with cookie => %d want 200", rec.Code)
+	}
+}
+
+func TestDashboardDisabledWhenNoToken(t *testing.T) {
+	h := NewHub(testConfig()) // no DashboardToken
+	mux := http.NewServeMux()
+	h.registerDashboard(mux)
+	req := httptest.NewRequest("GET", "/dashboard", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("disabled dashboard => %d want 404", rec.Code)
+	}
+}
+
+// cfgWithDash returns a Config with a default registry and a dashboard token.
+func cfgWithDash(dashToken string) Config {
+	c := cfgWithToken("tok")
+	c.DashboardToken = dashToken
+	return c
+}
 
 func TestSessionRoundTrip(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
