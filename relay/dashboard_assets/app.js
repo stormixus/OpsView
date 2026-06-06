@@ -223,7 +223,7 @@ function renderSidebar(){
 
 function navTo(target){
   selected = (target==='overview')? null : target;
-  selDvr='all'; // reset device filter when switching agent/overview
+  selDvr='all'; liveEditing=false; var _eb=$('#liveEditBtn'); if(_eb){ _eb.textContent='편집'; _eb.classList.remove('on'); } // reset device filter + edit mode on switch
   $('#sidebar').classList.remove('open');
   stopLiveGrid(); // tear down any playing videos before switching context
   if(selected===null){
@@ -412,7 +412,7 @@ function cellHTML(s){
     '<div class="scan"></div><div class="ts mono cellts"></div>'+
     '<div class="rec'+(off?'':' on')+'"><i></i>REC</div>'+
     '<span class="dot cstat '+(off?'bad':'live')+'"></span>'+
-    '<div class="clabel"><span class="ch">'+s.name+'</span><span class="nm">CH'+s.ch+'</span>'+
+    '<div class="clabel">'+(liveEditing?'<input class="cell-name" data-ch="'+s.ch+'" data-dvr="'+s.dvrId+'" value="'+escAttr(s.name)+'">':'<span class="ch">'+escHtml(s.name)+'</span>')+'<span class="nm">CH'+s.ch+'</span>'+
       (off?'':'<span class="wn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3"/><path d="M6 20a6 6 0 0 1 12 0"/></svg>'+s.ws_watchers+'</span>')+'</div>'+
     '<div class="noimg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 5l20 14M2 5h20v14"/></svg><span>신호 없음</span></div>'+
     '<div class="expand"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 3H3v6M21 9V3h-6M3 15v6h6M15 21h6v-6"/></svg></div></div>';
@@ -461,7 +461,7 @@ function liveCellHTML(s){
     '<div class="scan"></div><div class="ts mono cellts"></div>'+
     '<div class="rec'+(off?'':' on')+'"><i></i>REC</div>'+
     '<span class="dot cstat '+(off?'bad':'live')+'"></span>'+
-    '<div class="clabel"><span class="ch">'+s.name+'</span><span class="nm">CH'+s.ch+'</span>'+
+    '<div class="clabel">'+(liveEditing?'<input class="cell-name" data-ch="'+s.ch+'" data-dvr="'+s.dvrId+'" value="'+escAttr(s.name)+'">':'<span class="ch">'+escHtml(s.name)+'</span>')+'<span class="nm">CH'+s.ch+'</span>'+
       (off?'':'<span class="wn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3"/><path d="M6 20a6 6 0 0 1 12 0"/></svg>'+s.ws_watchers+'</span>')+'</div>'+
     '<div class="expand"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 3H3v6M21 9V3h-6M3 15v6h6M15 21h6v-6"/></svg></div></div>';
 }
@@ -472,8 +472,9 @@ function renderGrid(a){
   pane.classList.toggle('empty', list.length===0);
   grid.style.setProperty('--cols', niceCols(Math.max(list.length,1)));
   $('#liveMeta').textContent = list.length? ((selDvr==='all'?'':dvrName(a,selDvr)+' · ')+list.length+' 채널') : '';
-  var html=''; list.forEach(function(s){ html+='<button class="cell" data-id="'+s.id+'">'+liveCellHTML(s)+'</button>'; });
+  var html=''; list.forEach(function(s){ html+='<button class="cell" data-id="'+s.id+'" data-ch="'+s.ch+'" data-dvr="'+s.dvrId+'"'+(liveEditing?' draggable="true"':'')+'>'+liveCellHTML(s)+'</button>'; });
   grid.innerHTML=html;
+  grid.classList.toggle('editing', liveEditing);
   grid.dataset.agent=a.id;
   var cells=$$('#grid .cell');
   list.forEach(function(s, i){
@@ -483,9 +484,10 @@ function renderGrid(a){
     var p=playWS(video, wsUrl, function(){ playHLS(video, hlsUrl); });
     if(p) livePlayers.push(p);
   });
+  if(liveEditing) wireLiveEdit(a);
   updateCellClocks();
 }
-$('#grid').addEventListener('click', function(e){ var c=e.target.closest('.cell'); if(c) openModal(c.dataset.id); });
+$('#grid').addEventListener('click', function(e){ if(liveEditing) return; var c=e.target.closest('.cell'); if(c) openModal(c.dataset.id); });
 function updateCellClocks(){ var ts=fmtTs(new Date()); $$('.cellts').forEach(function(e){ e.textContent=ts; }); }
 
 /* modal */
@@ -628,61 +630,49 @@ tgRelay.addEventListener('click', function(){
   renderConn();
 });
 
-/* ============================================================ CHANNEL EDITOR */
-var editEl = $('#edit-modal');
-if ($('#editBtn')) $('#editBtn').addEventListener('click', function(){ if (selected) openEditor(selected); });
-if ($('#editClose')) $('#editClose').addEventListener('click', closeEditor);
-if (editEl) editEl.addEventListener('click', function(e){ if (e.target === editEl) closeEditor(); });
+/* ============================================================ LIVE INLINE EDIT */
 function escHtml(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function escAttr(s){ return escHtml(s).replace(/"/g,'&quot;'); }
-function openEditor(agentId){
-  var a = agentById(agentId); if (!a) return;
-  $('#edit-agname').textContent = a.name;
-  var byDvr = {};
-  (a.chans||[]).forEach(function(c){ (byDvr[c.dvr_id] = byDvr[c.dvr_id]||[]).push(c); });
-  Object.keys(byDvr).forEach(function(k){ byDvr[k].sort(function(x,y){ return (x.order||0)-(y.order||0); }); });
-  var dvrs = (a.dvrs && a.dvrs.length) ? a.dvrs : Object.keys(byDvr).map(function(id){ return {id:+id, name:'DVR '+id}; });
-  var html = '';
-  dvrs.forEach(function(d){
-    var list = byDvr[d.id] || []; if (!list.length) return;
-    html += '<div class="edit-dvr"><div class="edit-dvr-name">'+escHtml(d.name)+' <span class="mut">'+list.length+'ch</span></div><ul class="edit-list" data-dvr="'+d.id+'">';
-    list.forEach(function(c){
-      html += '<li class="edit-row" draggable="true" data-ch="'+c.ch_num+'">'+
-        '<span class="grip">⋮</span><span class="edit-chno mono">CH'+c.ch_num+'</span>'+
-        '<input class="edit-name" data-ch="'+c.ch_num+'" value="'+escAttr(c.name||'')+'">'+
-        (c.active?'<span class="edit-live">live</span>':'')+'</li>';
-    });
-    html += '</ul></div>';
-  });
-  $('#edit-body').innerHTML = html || '<p class="mut" style="padding:16px;">채널이 없습니다. 먼저 에이전트에서 채널 탐색을 해주세요.</p>';
-  wireEditor(agentId);
-  editEl.classList.add('show');
-}
-function closeEditor(){ if (editEl) editEl.classList.remove('show'); }
-function wireEditor(agentId){
-  $$('#edit-body .edit-name').forEach(function(inp){
-    inp.addEventListener('change', function(){
-      var ul = inp.closest('.edit-list');
-      postMeta(agentId, +ul.dataset.dvr, null, [{ ch_num:+inp.dataset.ch, name: inp.value }]);
-    });
+
+var liveEditing = false;
+if ($('#liveEditBtn')) $('#liveEditBtn').addEventListener('click', function(){
+  if (!selected) return;
+  var a = agentById(selected); if (!a) return;
+  liveEditing = !liveEditing;
+  var b = $('#liveEditBtn'); b.textContent = liveEditing ? '완료' : '편집'; b.classList.toggle('on', liveEditing);
+  renderGrid(a);
+});
+// wired by renderGrid after cells are built (only when liveEditing)
+function wireLiveEdit(a){
+  var grid = $('#grid');
+  grid.classList.add('editing');
+  $$('#grid .cell-name').forEach(function(inp){
+    inp.addEventListener('change', function(){ postMeta(selected, parseInt(inp.dataset.dvr), null, [{ ch_num: parseInt(inp.dataset.ch), name: inp.value }]); });
     inp.addEventListener('keydown', function(e){ if (e.key==='Enter') inp.blur(); });
+    inp.addEventListener('pointerdown', function(e){ e.stopPropagation(); });
   });
-  $$('#edit-body .edit-list').forEach(function(ul){
-    var dragging = null;
-    ul.addEventListener('dragstart', function(e){ var li=e.target.closest('.edit-row'); if (li && ul.contains(li)){ dragging=li; li.classList.add('drag'); } });
-    ul.addEventListener('dragend', function(){ if (dragging){ dragging.classList.remove('drag'); var d=dragging; dragging=null; saveOrder(agentId, ul); } });
-    ul.addEventListener('dragover', function(e){ e.preventDefault(); if (!dragging) return; var after=rowAfter(ul, e.clientY); if (after==null) ul.appendChild(dragging); else ul.insertBefore(dragging, after); });
-  });
+  var dragging = null;
+  grid.addEventListener('dragstart', function(e){ var c=e.target.closest('.cell'); if(c){ dragging=c; c.classList.add('drag'); } });
+  grid.addEventListener('dragend', function(){ if(dragging){ dragging.classList.remove('drag'); dragging=null; saveLiveOrder(a); } });
+  grid.addEventListener('dragover', function(e){ e.preventDefault(); if(!dragging) return; var after=cellAfter(grid, e.clientX, e.clientY); if(after==null) grid.appendChild(dragging); else grid.insertBefore(dragging, after); });
 }
-function rowAfter(ul, y){
-  var rows = [].slice.call(ul.querySelectorAll('.edit-row:not(.drag)'));
-  for (var i=0;i<rows.length;i++){ var r=rows[i].getBoundingClientRect(); if (y < r.top + r.height/2) return rows[i]; }
+function cellAfter(grid, x, y){
+  var cells=[].slice.call(grid.querySelectorAll('.cell:not(.drag)'));
+  for(var i=0;i<cells.length;i++){ var r=cells[i].getBoundingClientRect(); var cy=r.top+r.height/2; if(y<cy) return cells[i]; if(Math.abs(y-cy)<=r.height/2 && x<r.left+r.width/2) return cells[i]; }
   return null;
 }
-function saveOrder(agentId, ul){
-  var nums = [].slice.call(ul.querySelectorAll('.edit-row')).map(function(li){ return +li.dataset.ch; });
-  postMeta(agentId, +ul.dataset.dvr, nums, null);
+function saveLiveOrder(a){
+  var cells=[].slice.call($('#grid').querySelectorAll('.cell'));
+  var byDvr={};
+  cells.forEach(function(c){ var d=parseInt(c.dataset.dvr); (byDvr[d]=byDvr[d]||[]).push(parseInt(c.dataset.ch)); });
+  Object.keys(byDvr).forEach(function(dk){
+    var dvrId=parseInt(dk), active=byDvr[dvrId];
+    var inactive=(a.chans||[]).filter(function(ch){return ch.dvr_id===dvrId && active.indexOf(ch.ch_num)<0;})
+      .sort(function(x,y){return (x.order||0)-(y.order||0);}).map(function(ch){return ch.ch_num;});
+    postMeta(selected, dvrId, active.concat(inactive), null);
+  });
 }
+
 function postMeta(agentId, dvrId, order, renames){
   var body = { agent_id: agentId, dvr_id: dvrId };
   if (order) body.order = order;

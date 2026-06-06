@@ -441,3 +441,14 @@ button{font-family:inherit; cursor:pointer;}
 .edit-name{flex:1;background:#0b1020;border:1px solid #28304a;color:#e2e8f0;border-radius:6px;padding:6px 8px;font-size:13px;outline:none;}
 .edit-name:focus{border-color:var(--acc,#22d3ee);}
 .edit-live{font-size:10px;color:#10b981;font-weight:600;}
+
+/* live inline channel editing */
+.live-edit-toggle{background:var(--panel,#111830);border:1px solid var(--line,#28304a);color:#94a3b8;font-size:12px;font-weight:600;padding:6px 12px;border-radius:999px;cursor:pointer;}
+.live-edit-toggle:hover{color:#e2e8f0;border-color:#3b4a6a;}
+.live-edit-toggle.on{background:var(--acc,#22d3ee);border-color:var(--acc,#22d3ee);color:#06202a;}
+.grid.editing .cell{cursor:grab;outline:1px dashed rgba(34,211,238,.4);outline-offset:-2px;}
+.grid.editing .cell.drag{opacity:.35;outline:2px solid var(--acc,#22d3ee);}
+.grid.editing .cell .expand{display:none;}
+.cell .cell-name{background:rgba(0,0,0,.55);border:1px solid rgba(34,211,238,.5);color:#fff;border-radius:5px;padding:2px 6px;font-size:12px;font-weight:600;max-width:62%;outline:none;}
+.cell .cell-name:focus{border-color:var(--acc,#22d3ee);background:rgba(0,0,0,.8);}
+.drag-badge{position:absolute;top:6px;right:8px;color:rgba(255,255,255,.5);font-size:14px;z-index:3;pointer-events:none;}

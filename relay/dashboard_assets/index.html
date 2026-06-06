@@ -107,7 +107,6 @@
           <button class="back-btn" id="backBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>전체</button>
           <div class="agent-title"><h1 id="agName">—</h1><span class="badge-state on" id="agBadge"><span class="dot live"></span>온라인</span></div>
           <span class="agent-since" id="agSince"></span>
-          <button class="edit-btn" id="editBtn" style="margin-left:auto;">채널 편집</button>
         </div>
 
         <nav class="tabs">
@@ -201,7 +200,7 @@
 
         <!-- LIVE PANE -->
         <section class="pane" id="live-pane">
-          <div class="live-bar"><h2>라이브 그리드</h2><span class="meta" id="liveMeta"></span></div>
+          <div class="live-bar"><h2>라이브 그리드</h2><span class="meta" id="liveMeta"></span><button class="live-edit-toggle" id="liveEditBtn" style="margin-left:auto;">편집</button></div>
           <div class="grid" id="grid"></div>
           <div class="grid-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 5l20 14"/></svg><b>표시할 채널 없음</b><span>활성 CCTV 스트림이 없습니다</span></div>
         </section>
@@ -237,17 +236,6 @@
   </div>
   <div class="drawer-note">설정은 이 브라우저에 저장됩니다. 운영 배포 시 로고·스냅샷·video 소스를 실제 relay 엔드포인트로 교체하세요.</div>
 </aside>
-<!-- Channel meta editor (reorder via drag, rename inline) -->
-<div class="edit-modal" id="edit-modal">
-  <div class="edit-card">
-    <div class="edit-head">
-      <h3>채널 편집 <span id="edit-agname" class="mut"></span></h3>
-      <button id="editClose" class="edit-x">닫기</button>
-    </div>
-    <p class="edit-hint">드래그해서 순서 변경 · 이름 칸을 눌러 라벨 편집. 변경은 에이전트에 저장되어 전 뷰어에 반영됩니다.</p>
-    <div class="edit-body" id="edit-body"></div>
-  </div>
-</div>
 <script src="/dashboard/assets/app.js"></script>
 </body>
 </html>
