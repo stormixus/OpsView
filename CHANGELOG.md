@@ -6,6 +6,10 @@ All notable changes to OpsView are documented here.
 
 ### Added
 
+- **Dashboard: change the password from settings.** The login password is now
+  stored in the relay DB when set (editable in the settings drawer, requires
+  `RELAY_DB`) and falls back to the docker env `RELAY_DASHBOARD_TOKEN` when the
+  DB has none. Changing it persists on the relay and logs out other sessions.
 - **Dashboard: 지점(tenant) 관리.** The settings drawer gains an agent manager —
   list locations (online dot + copyable token), add one (with a token
   generator), and delete one — backed by a SQLite registry on the relay. Set
