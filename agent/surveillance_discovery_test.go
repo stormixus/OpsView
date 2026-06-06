@@ -72,6 +72,27 @@ func TestListChannelsReturnsInsertedRows(t *testing.T) {
 	}
 }
 
+// Hybrid DVRs (analog + IP) exceed 16 channels. normalizeChannelDiscovery must
+// not chop them to 16 (which dropped real cameras and, via the old discovery
+// cleanup, destroyed their operator names/order). Keep up to 32; only cap beyond.
+func TestNormalizeChannelDiscoveryKeepsHybridChannels(t *testing.T) {
+	in := make([]ChannelConfig, 18)
+	for i := range in {
+		in[i] = ChannelConfig{ChNum: i + 1, Name: "ch"}
+	}
+	if got := normalizeChannelDiscovery(in); len(got) != 18 {
+		t.Fatalf("18-channel hybrid DVR capped to %d, want 18", len(got))
+	}
+
+	big := make([]ChannelConfig, 40)
+	for i := range big {
+		big[i] = ChannelConfig{ChNum: i + 1, Name: "ch"}
+	}
+	if got := normalizeChannelDiscovery(big); len(got) != 32 {
+		t.Fatalf("over-cap kept %d, want 32 ceiling", len(got))
+	}
+}
+
 func mustExec(t *testing.T, m *SurveillanceManager, q string, args ...any) {
 	t.Helper()
 	if _, err := m.db.Exec(q, args...); err != nil {

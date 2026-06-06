@@ -1090,6 +1090,15 @@
         reconnectAttempts = 0;
         clearTimeout(reconnectTimeout);
         setStatus('connected', t('connected'));
+        // Reveal the stream on ANY successful connect (initial, auto-reconnect, or
+        // restore-on-launch). Previously the source panel was only hidden by the
+        // opsConnect() button's polling loop, so a connection that came up via the
+        // reconnect path left the 화면 소스 panel stuck over the live frames.
+        if (!streamMode) {
+          const _st = document.getElementById('opsRelayStatus'); if (_st) _st.textContent = '';
+          const _setup = document.getElementById('opsSetup'); if (_setup) _setup.style.display = 'none';
+          const _tb = document.getElementById('opsToolbar'); if (_tb) _tb.classList.add('visible');
+        }
         // Send OVP HELLO + AUTH
         const hello = { role: 'watcher', client: 'opsview-web', client_version: '0.5.0', supports: ['zstd'], want_profile: null };
         sendOVPMsg(1, JSON.stringify(hello));

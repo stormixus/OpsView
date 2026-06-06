@@ -65,6 +65,21 @@ All notable changes to OpsView are documented here.
   abandoned WebSocket also clobbering the new source via the HLS fallback. The
   watchdog now debounces (two consecutive stalled ticks), waits out a grace period
   after each reconnect, and cleanly tears down the prior player first. Viewer-only.
+- **화면 소스 panel stayed over the live stream after reconnect.** The relay setup
+  panel was only dismissed by the connect button's polling loop, so a connection
+  that came up via the auto-reconnect path (`onclose` → retry) left the panel
+  stuck over the frames. The panel now hides on the actual `onopen` event, so any
+  successful connect — initial, auto-reconnect, or restore-on-launch — reveals the
+  stream. Viewer-only.
+- **Custom CCTV channel names/order vanished on hybrid DVRs.** Channel discovery
+  capped to 16 channels and then deleted any DB channel not in that capped set. On
+  a hybrid DVR (analog + IP) with more than 16 channels — or whose analog probe
+  transiently returned a smaller set — this dropped real cameras and destroyed the
+  operator's custom names and display order, which were recreated as bare defaults
+  when the channels reappeared (the 16↔18 flap). Discovery now keeps up to 32
+  channels (what the probe scans) and is additive: it upserts what it finds but
+  never deletes a channel merely absent from one round, so operator labels/order
+  survive. Agent update required.
 
 ## [0.7.0] - 2026-06-06
 

@@ -340,15 +340,12 @@ func (m *SurveillanceManager) DiscoverChannels(dvrID int64) ([]ChannelConfig, er
 		}
 	}
 
-	// Clean up any channels that are no longer in the discovered list (e.g. capped to 16)
-	if len(discovered) > 0 {
-		var activeChs []string
-		for _, ch := range discovered {
-			activeChs = append(activeChs, fmt.Sprintf("%d", ch.ChNum))
-		}
-		query := fmt.Sprintf(`DELETE FROM channels WHERE dvr_id=? AND ch_num NOT IN (%s)`, strings.Join(activeChs, ","))
-		m.db.Exec(query, dvrID)
-	}
+	// Discovery is ADDITIVE: we upsert what we found but never delete a channel that
+	// is merely absent from this round. A hybrid DVR's analog probe can transiently
+	// miss a channel (so the discovered set flaps 16↔18), and deleting it here would
+	// destroy the operator's custom name + display order — recreated as bare defaults
+	// when the channel reappears. Removing a genuinely-gone camera is an explicit
+	// operator action, not a side effect of rediscovery.
 
 	if m.onChange != nil {
 		m.onChange()
@@ -1003,9 +1000,12 @@ func normalizeChannelDiscovery(channels []ChannelConfig) []ChannelConfig {
 	sort.SliceStable(channels, func(i, j int) bool {
 		return channels[i].ChNum < channels[j].ChNum
 	})
-	// Cap to 16 channels max
-	if len(channels) > 16 {
-		channels = channels[:16]
+	// Safety ceiling matching the probe's scan range. Hybrid DVRs (analog + IP)
+	// routinely exceed 16 channels, so the old 16-cap silently dropped real cameras
+	// — and the discovery cleanup then deleted them, destroying their operator
+	// names/order. Keep up to 32 (what the probe scans).
+	if len(channels) > 32 {
+		channels = channels[:32]
 	}
 	for i := range channels {
 		channels[i].Order = i
