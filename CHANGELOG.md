@@ -2,6 +2,21 @@
 
 All notable changes to OpsView are documented here.
 
+## [0.6.0] - 2026-06-06
+
+### Added
+
+- **Dashboard: 지점(tenant) 관리.** The settings drawer gains an agent manager —
+  list locations (online dot + copyable token), add one (with a token
+  generator), and delete one — backed by a SQLite registry on the relay. Set
+  `RELAY_DB` (a path on the new `relay-data` volume) to enable editing; it is
+  seeded once from `RELAY_AGENTS` and managed live afterward. Without `RELAY_DB`
+  the registry stays env-only (read-only in the dashboard).
+- **Dashboard: inline channel editing in the live view.** A 편집 toggle on the
+  live tab turns the camera tiles into draggable, inline-renamable cells — drag
+  to reorder, edit the name in place — replacing the separate modal editor. Each
+  change round-trips to the agent per device.
+
 ## [0.5.0] - 2026-06-06
 
 ### Added
