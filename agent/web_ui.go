@@ -392,6 +392,7 @@ const htmlTemplate = `
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OpsView Agent Configuration</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
     <script>tailwind.config={theme:{fontFamily:{sans:['"Segoe UI"','"Malgun Gothic"','-apple-system','BlinkMacSystemFont','Roboto','Helvetica','Arial','sans-serif']}}}</script>
     <style>
         body {
@@ -691,6 +692,18 @@ const htmlTemplate = `
         </div>
     </div>
 
+    <!-- Channel editor (thumbnail grid: drag to reorder, click name to edit) -->
+    <div id="ch-modal" class="fixed inset-0 bg-black/70 z-50 hidden items-center justify-center p-4">
+      <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-5xl flex flex-col" style="max-height:88vh;">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+          <h3 class="font-semibold text-white" id="ch-modal-title">채널 편집</h3>
+          <button onclick="closeChEditor()" class="text-sm text-slate-400 hover:text-white">닫기</button>
+        </div>
+        <p class="px-5 pt-3 text-xs text-slate-400">썸네일을 드래그해 순서 변경 · 이름 칸을 눌러 라벨 편집. 변경 즉시 저장되어 모든 뷰어에 반영됩니다.</p>
+        <div id="ch-grid" class="p-5 grid gap-3 overflow-auto" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));"></div>
+      </div>
+    </div>
+
     <script>
         // Parse relay URL into {ip, port}
         function parseRelayURL(url) {
@@ -798,6 +811,47 @@ const htmlTemplate = `
             setTimeout(() => el.classList.add('hidden'), 5000);
         }
 
+        // --- Channel editor: thumbnail grid, drag-reorder + inline rename ---
+        var chSortable = null;
+        async function editChannels(dvrId) {
+            var res = await fetch('/api/surv/dvrs/' + dvrId + '/channels');
+            var chs = res.ok ? await res.json() : [];
+            if (!chs || !chs.length) { showMsg('먼저 채널 탐색을 해주세요.', 'error'); return; }
+            document.getElementById('ch-modal-title').textContent = '채널 편집 (' + chs.length + '개)';
+            var grid = document.getElementById('ch-grid');
+            grid.innerHTML = chs.map(function(c) {
+                var nm = String(c.name || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+                return '<div class="ch-card bg-slate-800 rounded-lg overflow-hidden border border-slate-700" data-ch="' + c.ch_num + '">' +
+                    '<div class="relative bg-black cursor-grab" style="aspect-ratio:16/9;">' +
+                        '<img src="/api/surv/snapshot?dvr=' + dvrId + '&ch=' + c.ch_num + '" class="w-full h-full object-cover" onerror="this.style.opacity=0.12">' +
+                        '<span class="absolute top-1 left-1 text-[10px] bg-black/60 px-1.5 py-0.5 rounded text-slate-200">CH' + c.ch_num + '</span>' +
+                    '</div>' +
+                    '<input class="ch-name w-full bg-slate-900 text-white text-sm px-2 py-1.5 outline-none focus:bg-slate-700" value="' + nm + '" data-ch="' + c.ch_num + '">' +
+                '</div>';
+            }).join('');
+            grid.querySelectorAll('.ch-name').forEach(function(inp) {
+                inp.addEventListener('change', function() { renameChannel(dvrId, parseInt(inp.dataset.ch), inp.value); });
+                inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') inp.blur(); });
+            });
+            if (chSortable) chSortable.destroy();
+            chSortable = Sortable.create(grid, { animation: 150, handle: '.cursor-grab', draggable: '.ch-card',
+                onEnd: function() { saveChannelOrder(dvrId); } });
+            var m = document.getElementById('ch-modal'); m.classList.remove('hidden'); m.classList.add('flex');
+        }
+        function closeChEditor() {
+            var m = document.getElementById('ch-modal'); m.classList.add('hidden'); m.classList.remove('flex');
+            if (chSortable) { chSortable.destroy(); chSortable = null; }
+        }
+        async function saveChannelOrder(dvrId) {
+            var nums = [].slice.call(document.querySelectorAll('#ch-grid .ch-card')).map(function(el) { return parseInt(el.dataset.ch); });
+            var res = await fetch('/api/surv/channels/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dvr_id: dvrId, ch_nums: nums }) });
+            showMsg(res.ok ? '순서 저장됨' : '순서 저장 실패', res.ok ? 'success' : 'error');
+        }
+        async function renameChannel(dvrId, chNum, name) {
+            var res = await fetch('/api/surv/channels/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dvr_id: dvrId, ch_num: chNum, name: name }) });
+            showMsg(res.ok ? '이름 저장됨' : '이름 저장 실패', res.ok ? 'success' : 'error');
+        }
+
         // --- Surveillance DVR Management ---
         async function loadDVRs() {
             try {
@@ -818,6 +872,7 @@ const htmlTemplate = `
                         '<div class="flex gap-2">' +
                             '<button onclick="editDVR(\'' + dj + '\')" class="text-xs bg-slate-600/30 text-slate-300 hover:bg-slate-600/50 px-3 py-1.5 rounded-lg transition">\uc218\uc815</button>' +
                             '<button onclick="discoverChannels(' + d.id + ')" class="text-xs bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600/30 px-3 py-1.5 rounded-lg transition">\ucc44\ub110 \ud0d0\uc0c9</button>' +
+                            '<button onclick="editChannels(' + d.id + ')" class="text-xs bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 px-3 py-1.5 rounded-lg transition">\ucc44\ub110 \ud3b8\uc9d1</button>' +
                             '<button onclick="clearChannels(' + d.id + ')" class="text-xs bg-amber-600/20 text-amber-400 hover:bg-amber-600/30 px-3 py-1.5 rounded-lg transition">\ucc44\ub110 \ucd08\uae30\ud654</button>' +
                             '<button onclick="deleteDVR(' + d.id + ')" class="text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 px-3 py-1.5 rounded-lg transition">\uc0ad\uc81c</button>' +
                         '</div>' +
