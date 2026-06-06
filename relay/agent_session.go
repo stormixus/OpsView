@@ -4,6 +4,7 @@ import (
 	"log"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -94,6 +95,28 @@ func (s *agentSession) removeWatcher(w *Watcher) {
 	}
 	s.mu.Unlock()
 	w.conn.Close()
+}
+
+// WatcherInfo is one watcher's public state for the dashboard.
+type WatcherInfo struct {
+	ID    uint32 `json:"id"`
+	IP    string `json:"ip"`
+	Since string `json:"since"` // RFC3339; empty if connectedAt is zero
+}
+
+// watcherList snapshots this session's connected watchers.
+func (s *agentSession) watcherList() []WatcherInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]WatcherInfo, 0, len(s.watchers))
+	for w := range s.watchers {
+		since := ""
+		if !w.connectedAt.IsZero() {
+			since = w.connectedAt.UTC().Format(time.RFC3339)
+		}
+		out = append(out, WatcherInfo{ID: w.id, IP: w.ip, Since: since})
+	}
+	return out
 }
 
 // sendToPublisher writes a message to this session's publisher (if connected).

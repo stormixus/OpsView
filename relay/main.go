@@ -120,6 +120,9 @@ type Config struct {
 	// Agents is the per-tenant publisher-token registry (RELAY_AGENTS JSON) plus
 	// the default agent (authenticated by PublisherToken).
 	Agents *agentRegistry
+	// DashboardToken gates the operator dashboard. Empty => dashboard disabled
+	// (routes not registered), so it is never exposed unauthenticated.
+	DashboardToken string
 }
 
 func loadConfig() Config {
@@ -148,5 +151,6 @@ func loadConfig() Config {
 		PublisherToken:  token,
 		AllowedOrigins:  origins,
 		Agents:          reg,
+		DashboardToken:  os.Getenv("RELAY_DASHBOARD_TOKEN"),
 	}
 }

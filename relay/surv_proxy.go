@@ -291,6 +291,34 @@ func (sp *SurvProxy) ListStreams() []StreamInfo {
 	return out
 }
 
+// StreamStat is per-stream detail for the dashboard.
+type StreamStat struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Active     bool   `json:"active"`
+	Codec      string `json:"codec"`
+	WSWatchers int    `json:"ws_watchers"`
+}
+
+// StreamStats snapshots active streams with codec and WS-watcher counts.
+func (sp *SurvProxy) StreamStats() []StreamStat {
+	sp.mu.RLock()
+	defer sp.mu.RUnlock()
+	out := make([]StreamStat, 0, len(sp.streams))
+	for id, e := range sp.streams {
+		codec := ""
+		if e.frag != nil {
+			codec = e.frag.Codec()
+		}
+		ws := 0
+		if e.wsHub != nil {
+			ws = e.wsHub.ClientCount()
+		}
+		out = append(out, StreamStat{ID: id, Name: e.name, Active: true, Codec: codec, WSWatchers: ws})
+	}
+	return out
+}
+
 // ServeHLS handles /surv/{chID}/... requests by delegating to the appropriate muxer.
 func (sp *SurvProxy) ServeHLS(w http.ResponseWriter, r *http.Request) {
 	// CORS headers for all responses (including errors)
