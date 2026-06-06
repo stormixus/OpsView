@@ -12,7 +12,7 @@ import (
 // After maxFails wrong PINs from one IP, the relay must refuse further watcher
 // handshakes (HTTP 429) — even one presenting the correct PIN.
 func TestWatcherAuthRateLimited(t *testing.T) {
-	hub := NewHub(Config{MaxWatcherQueue: 4, PublisherToken: "secret-token"})
+	hub := NewHub(cfgWithToken("secret-token"))
 	hub.pinLimiter.maxFails = 3 // small threshold for a fast test
 	go hub.Run()
 	defer hub.Stop()

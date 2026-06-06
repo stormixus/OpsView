@@ -146,5 +146,5 @@ func (tp *TestPattern) generateFrame() {
 	payload := proto.EncodeFrameDelta(fd)
 	msg := proto.MarshalMessage(proto.MsgFrameDelta, payload)
 
-	tp.hub.broadcast <- msg
+	tp.hub.defaultSession().broadcast <- msg
 }
