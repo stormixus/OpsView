@@ -117,6 +117,9 @@ type Config struct {
 	// AllowedOrigins is the WebSocket Origin allowlist (RELAY_ALLOWED_ORIGINS,
 	// comma-separated). Empty = accept any Origin.
 	AllowedOrigins []string
+	// Agents is the per-tenant publisher-token registry (RELAY_AGENTS JSON) plus
+	// the default agent (authenticated by PublisherToken).
+	Agents *agentRegistry
 }
 
 func loadConfig() Config {
@@ -134,10 +137,16 @@ func loadConfig() Config {
 		}
 	}
 
+	reg, err := parseAgentRegistry(os.Getenv("RELAY_AGENTS"), token)
+	if err != nil {
+		log.Fatalf("[relay] invalid RELAY_AGENTS: %v", err)
+	}
+
 	return Config{
 		Port:            port,
 		MaxWatcherQueue: 4,
 		PublisherToken:  token,
 		AllowedOrigins:  origins,
+		Agents:          reg,
 	}
 }
