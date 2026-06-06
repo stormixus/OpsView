@@ -202,3 +202,28 @@ func TestAgentControlAuthAndOffline(t *testing.T) {
 		t.Fatalf("offline: want 409, got %d", rec2.Code)
 	}
 }
+
+func TestIPLabelHandler(t *testing.T) {
+	store, _ := openAgentStore(t.TempDir() + "/relay.db")
+	t.Cleanup(func() { store.close() })
+	cfg := cfgWithDash("dash-secret")
+	cfg.Store = store
+	h := NewHub(cfg)
+	// unauthorized
+	rec := httptest.NewRecorder()
+	h.HandleDashboardIPLabel(rec, httptest.NewRequest("POST", "/dashboard/api/ip-label", strings.NewReader(`{"ip":"1.2.3.4","label":"x"}`)))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no cookie: want 401, got %d", rec.Code)
+	}
+	// authed -> stores
+	req := httptest.NewRequest("POST", "/dashboard/api/ip-label", strings.NewReader(`{"ip":"1.2.3.4","label":"프론트"}`))
+	req.AddCookie(&http.Cookie{Name: dashboardCookieName, Value: signSession(h.effectiveDashToken(), time.Now().Add(time.Hour))})
+	rec2 := httptest.NewRecorder()
+	h.HandleDashboardIPLabel(rec2, req)
+	if rec2.Code != http.StatusNoContent {
+		t.Fatalf("authed: want 204, got %d", rec2.Code)
+	}
+	if h.getIPLabel("1.2.3.4") != "프론트" {
+		t.Fatalf("label not stored: %q", h.getIPLabel("1.2.3.4"))
+	}
+}

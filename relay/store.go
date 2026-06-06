@@ -33,7 +33,43 @@ func openAgentStore(path string) (*agentStore, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS ip_labels (
+		ip    TEXT PRIMARY KEY,
+		label TEXT NOT NULL
+	)`); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &agentStore{db: db}, nil
+}
+
+// ipLabels loads the operator-assigned IP -> name map.
+func (s *agentStore) ipLabels() (map[string]string, error) {
+	rows, err := s.db.Query(`SELECT ip, label FROM ip_labels`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := make(map[string]string)
+	for rows.Next() {
+		var ip, label string
+		if err := rows.Scan(&ip, &label); err != nil {
+			return nil, err
+		}
+		m[ip] = label
+	}
+	return m, rows.Err()
+}
+
+// setIPLabel upserts a name for an IP; an empty label removes it.
+func (s *agentStore) setIPLabel(ip, label string) error {
+	if label == "" {
+		_, err := s.db.Exec(`DELETE FROM ip_labels WHERE ip=?`, ip)
+		return err
+	}
+	_, err := s.db.Exec(`INSERT INTO ip_labels (ip, label) VALUES (?,?)
+		ON CONFLICT(ip) DO UPDATE SET label=excluded.label`, ip, label)
+	return err
 }
 
 const settingDashboardToken = "dashboard_token"

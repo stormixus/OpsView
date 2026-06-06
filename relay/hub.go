@@ -49,6 +49,9 @@ type Hub struct {
 
 	dashTokMu sync.RWMutex
 	dashTokDB string // dashboard password stored in the DB ("" = use env)
+
+	ipLabelMu sync.RWMutex
+	ipLabels  map[string]string // operator-assigned watcher IP -> display name
 }
 
 // effectiveDashToken returns the active dashboard password: the DB-stored value
@@ -101,9 +104,41 @@ func NewHub(cfg Config) *Hub {
 		if v, err := cfg.Store.getSetting(settingDashboardToken); err == nil {
 			h.dashTokDB = v
 		}
+		if m, err := cfg.Store.ipLabels(); err == nil {
+			h.ipLabels = m
+		}
+	}
+	if h.ipLabels == nil {
+		h.ipLabels = make(map[string]string)
 	}
 	h.testPattern = NewTestPattern(h)
 	return h
+}
+
+// getIPLabel returns the operator-assigned name for a watcher IP ("" if none).
+func (h *Hub) getIPLabel(ip string) string {
+	h.ipLabelMu.RLock()
+	defer h.ipLabelMu.RUnlock()
+	return h.ipLabels[ip]
+}
+
+// setIPLabel assigns (or clears, when label=="") a name for a watcher IP and
+// persists it. Requires a configured store (RELAY_DB).
+func (h *Hub) setIPLabel(ip, label string) error {
+	if h.cfg.Store == nil {
+		return fmt.Errorf("ip labels are read-only (no RELAY_DB configured)")
+	}
+	if err := h.cfg.Store.setIPLabel(ip, label); err != nil {
+		return err
+	}
+	h.ipLabelMu.Lock()
+	if label == "" {
+		delete(h.ipLabels, ip)
+	} else {
+		h.ipLabels[ip] = label
+	}
+	h.ipLabelMu.Unlock()
+	return nil
 }
 
 // getOrCreateSession returns the session for agentID, creating + starting it if absent.

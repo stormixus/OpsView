@@ -93,7 +93,7 @@ function adaptState(api){
       pin_set:!!a.pin_set, publish_count:a.publish_count||0,
       bytes_in:a.bytes_in||0, bytes_out:a.bytes_out||0,
       chTotal:chTotal, tput:tp, smooth:{down:tp.down,up:tp.up},
-      watchers:(a.watchers||[]).map(function(w){return {id:w.id, ip:_stripPort(w.ip), since: w.since?Date.parse(w.since):now};}),
+      watchers:(a.watchers||[]).map(function(w){return {id:w.id, ip:_stripPort(w.ip), label:w.label||'', since: w.since?Date.parse(w.since):now};}),
       streams:(a.streams||[]).map(function(s,i){
         var dm=String(s.id).match(/dvr(\d+)/), cm=String(s.id).match(/_ch(\d+)/);
         return {
@@ -394,8 +394,9 @@ function renderWatchers(a){
   var html='';
   list.forEach(function(w){
     var ago=Math.floor((Date.now()-w.since)/1000);
+    var who = w.label ? '<b>'+escHtml(w.label)+'</b> <span class="mono" style="opacity:.5">'+escHtml(w.ip)+'</span>' : '<span class="mono">'+escHtml(w.ip)+'</span>';
     html+='<tr data-id="'+w.id+'" class="'+(existing[w.id]?'':'row-in')+'">'+
-      '<td><span class="id">#'+w.id+'</span></td><td class="num">'+w.ip+'</td>'+
+      '<td><span class="id">#'+w.id+'</span></td><td>'+who+'</td>'+
       '<td class="num agocell" data-since="'+w.since+'">'+fmtAgo(ago)+' 전</td></tr>';
   });
   body.innerHTML=html;
@@ -558,20 +559,36 @@ function openOpsModal(){
 $('#pubSnap').addEventListener('click', openOpsModal);
 
 /* ============================================================ WATCHERS DETAIL */
-// Click the Watchers stat to pop the full watcher list (id, real client IP, age).
+// Click the Watchers stat to pop the full watcher list. The operator names each
+// IP here (이름 지정) — the name is keyed by IP and persists for that address.
 function openWatchersModal(){
   var a = selected!==null ? agentById(selected) : null; if(!a) return;
   var list=a.watchers||[];
   var rows = list.length ? list.map(function(w){
     var ago=Math.floor((Date.now()-w.since)/1000);
-    return '<tr><td><span class="id">#'+w.id+'</span></td><td class="mono">'+escHtml(w.ip)+'</td><td class="num">'+fmtAgo(ago)+' 전</td></tr>';
-  }).join('') : '<tr><td colspan="3" style="text-align:center;opacity:.55;padding:22px;">접속 중인 시청자 없음</td></tr>';
+    return '<tr><td><span class="id">#'+w.id+'</span></td>'+
+      '<td><input class="ipname-in" data-ip="'+escAttr(w.ip)+'" value="'+escAttr(w.label||'')+'" placeholder="이름 지정" autocomplete="off"></td>'+
+      '<td class="mono">'+escHtml(w.ip)+'</td>'+
+      '<td class="num">'+fmtAgo(ago)+' 전</td></tr>';
+  }).join('') : '<tr><td colspan="4" style="text-align:center;opacity:.55;padding:22px;">접속 중인 시청자 없음</td></tr>';
   modalCell.classList.add('bare');
   modalCell.innerHTML='<div class="watchers-detail"><h3>Watchers · '+list.length+'명</h3>'+
-    '<table class="tbl"><thead><tr><th>ID</th><th>IP</th><th>접속 시간</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    '<p class="wd-hint">IP별로 이름을 지정하면 다음에도 그 IP는 이 이름으로 표시됩니다.</p>'+
+    '<table class="tbl"><thead><tr><th>ID</th><th>이름</th><th>IP</th><th>접속 시간</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
   modal.classList.add('show');
 }
 $('#statWatch').addEventListener('click', openWatchersModal);
+// Save an IP -> name mapping when its input loses focus or Enter is pressed.
+function saveIPName(inp){
+  var ip=inp.dataset.ip, label=inp.value.trim();
+  if(inp._saved===label) return; inp._saved=label;
+  inp.classList.add('saving');
+  fetch(BASE+'/api/ip-label',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ip:ip,label:label})})
+    .then(function(r){ inp.classList.remove('saving'); inp.classList.add(r.ok?'saved':'savefail'); setTimeout(function(){inp.classList.remove('saved','savefail');},1200); if(r.ok) pollState(); })
+    .catch(function(){ inp.classList.remove('saving'); inp.classList.add('savefail'); });
+}
+modalCell.addEventListener('change', function(e){ if(e.target.classList.contains('ipname-in')) saveIPName(e.target); });
+modalCell.addEventListener('keydown', function(e){ if(e.target.classList.contains('ipname-in') && e.key==='Enter'){ e.preventDefault(); e.target.blur(); } });
 
 /* ============================================================ RELAY / CONN */
 var relayDownAt=Date.now();

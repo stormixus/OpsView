@@ -101,7 +101,8 @@ func (s *agentSession) removeWatcher(w *Watcher) {
 type WatcherInfo struct {
 	ID    uint32 `json:"id"`
 	IP    string `json:"ip"`
-	Since string `json:"since"` // RFC3339; empty if connectedAt is zero
+	Label string `json:"label,omitempty"` // operator-assigned name for this IP (dashboard)
+	Since string `json:"since"`            // RFC3339; empty if connectedAt is zero
 }
 
 // watcherList snapshots this session's connected watchers.

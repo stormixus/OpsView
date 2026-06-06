@@ -215,6 +215,38 @@ func (h *Hub) HandleDashboardAgentControl(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// HandleDashboardIPLabel assigns (or clears, when label is empty) an operator-chosen
+// display name for a watcher IP. Admin-gated; persisted in the DB (requires RELAY_DB).
+func (h *Hub) HandleDashboardIPLabel(w http.ResponseWriter, r *http.Request) {
+	if !h.authedDashboard(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		IP    string `json:"ip"`
+		Label string `json:"label"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	body.IP = strings.TrimSpace(body.IP)
+	body.Label = strings.TrimSpace(body.Label)
+	if body.IP == "" {
+		http.Error(w, "ip required", http.StatusBadRequest)
+		return
+	}
+	if err := h.setIPLabel(body.IP, body.Label); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict) // e.g. no RELAY_DB
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // HandleDashboardAgents manages the named-agent (tenant) registry from the
 // dashboard: GET lists agents, POST upserts one, DELETE removes one. Editing
 // requires a persistent store (RELAY_DB); without it the registry is read-only.
@@ -317,6 +349,7 @@ func (h *Hub) registerDashboard(mux *http.ServeMux) {
 	mux.HandleFunc("/dashboard/api/channel-meta", h.HandleDashboardChannelMeta)
 	mux.HandleFunc("/dashboard/api/ops-snapshot", h.HandleDashboardOpsSnapshot)
 	mux.HandleFunc("/dashboard/api/agent-control", h.HandleDashboardAgentControl)
+	mux.HandleFunc("/dashboard/api/ip-label", h.HandleDashboardIPLabel)
 	mux.HandleFunc("/dashboard/api/agents", h.HandleDashboardAgents)
 	mux.HandleFunc("/dashboard/api/password", h.HandleDashboardPassword)
 	mux.HandleFunc("/dashboard", h.HandleDashboardStatic)

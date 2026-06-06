@@ -136,6 +136,9 @@ func (h *Hub) buildDashboardState() dashboardState {
 		}
 
 		watchers := s.watcherList()
+		for i := range watchers {
+			watchers[i].Label = h.getIPLabel(watchers[i].IP)
+		}
 		sbin := s.bytesIn.Load()
 		sbout := s.bytesOut.Load()
 

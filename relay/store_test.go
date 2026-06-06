@@ -110,3 +110,25 @@ func TestRegistryReadOnlyWithoutStore(t *testing.T) {
 		t.Fatal("upsert must fail without a store")
 	}
 }
+
+func TestIPLabels(t *testing.T) {
+	store, err := openAgentStore(filepath.Join(t.TempDir(), "relay.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.close() })
+	if err := store.setIPLabel("1.2.3.4", "프론트"); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := store.ipLabels(); m["1.2.3.4"] != "프론트" {
+		t.Fatalf("set: %v", m)
+	}
+	store.setIPLabel("1.2.3.4", "사장님") // update
+	if m, _ := store.ipLabels(); m["1.2.3.4"] != "사장님" {
+		t.Fatal("update failed")
+	}
+	store.setIPLabel("1.2.3.4", "") // empty removes
+	if m, _ := store.ipLabels(); len(m) != 0 {
+		t.Fatalf("remove failed: %v", m)
+	}
+}

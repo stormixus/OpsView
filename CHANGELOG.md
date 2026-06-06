@@ -2,6 +2,16 @@
 
 All notable changes to OpsView are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **Dashboard: name watchers by IP.** In the Watchers detail (click the Watchers
+  stat) the operator can assign a display name to each client IP; the name is
+  stored on the relay (`ip_labels`, requires `RELAY_DB`) and shown next to that
+  IP everywhere afterward — so the list reads "프론트 192.168.0.50" instead of a
+  bare address. Relay-only change (no agent/viewer update needed).
+
 ## [0.7.0] - 2026-06-06
 
 ### Fixed
