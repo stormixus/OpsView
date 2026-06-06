@@ -2,7 +2,76 @@ package main
 
 import (
 	"testing"
+	"time"
 )
+
+func TestSessionRoundTrip(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	tok := "dash-secret"
+	v := signSession(tok, now.Add(time.Hour))
+	if !verifySession(tok, v, now) {
+		t.Fatal("freshly signed session should verify")
+	}
+}
+
+func TestSessionExpired(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	v := signSession("dash-secret", now.Add(-time.Second))
+	if verifySession("dash-secret", v, now) {
+		t.Fatal("expired session must not verify")
+	}
+}
+
+func TestSessionTampered(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	v := signSession("dash-secret", now.Add(time.Hour))
+	if verifySession("dash-secret", v+"x", now) {
+		t.Fatal("tampered signature must not verify")
+	}
+	if verifySession("other-token", v, now) {
+		t.Fatal("wrong token must not verify")
+	}
+}
+
+func TestBuildDashboardState(t *testing.T) {
+	h := NewHub(testConfig())
+	st := h.buildDashboardState()
+	if st.Relay.Version != relayVersion {
+		t.Fatalf("version=%q want %q", st.Relay.Version, relayVersion)
+	}
+	// default session exists but is offline
+	if st.Relay.AgentsOnline != 0 {
+		t.Fatalf("agents_online=%d want 0", st.Relay.AgentsOnline)
+	}
+	if st.Agents == nil {
+		t.Fatal("agents must be non-nil (JSON [])")
+	}
+	// default session is included
+	var hasDefault bool
+	for _, a := range st.Agents {
+		if a.ID == "default" {
+			hasDefault = true
+			if a.Connected {
+				t.Fatal("default agent should be offline")
+			}
+			if a.Streams == nil || a.Watchers == nil {
+				t.Fatal("agent streams/watchers must be non-nil slices")
+			}
+		}
+	}
+	if !hasDefault {
+		t.Fatal("default agent missing from state")
+	}
+}
+
+func TestStreamPathNamespacing(t *testing.T) {
+	if got := streamPath("default", "dvr1_ch1"); got != "dvr1_ch1" {
+		t.Fatalf("default path=%q want dvr1_ch1", got)
+	}
+	if got := streamPath("gangnam", "dvr1_ch1"); got != "gangnam/dvr1_ch1" {
+		t.Fatalf("named path=%q want gangnam/dvr1_ch1", got)
+	}
+}
 
 func TestSurvWSClientCount(t *testing.T) {
 	h := newSurvWSHub()
