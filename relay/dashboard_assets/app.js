@@ -222,6 +222,16 @@ function renderSidebar(){
 }
 
 function navTo(target){
+  if(target==='manage'){
+    $('#sidebar').classList.remove('open');
+    stopLiveGrid(); recStop();
+    $('#overview-view').classList.remove('active'); $('#agent-view').classList.remove('active');
+    $('#manage-view').classList.add('active');
+    loadManage();
+    $('#content').scrollTop=0; syncSidebarActive();
+    return;
+  }
+  $('#manage-view').classList.remove('active');
   selected = (target==='overview')? null : target;
   selDvr='all'; liveEditing=false; var _eb=$('#liveEditBtn'); if(_eb){ _eb.textContent='편집'; _eb.classList.remove('on'); } // reset device filter + edit mode on switch
   $('#sidebar').classList.remove('open');
@@ -246,13 +256,14 @@ function syncSidebarActive(){
    (/dashboard or /dashboard/agent/<id>) so back/forward and deep links work.
    The relay serves index.html for any /dashboard/* non-asset path. --- */
 var BASE='/dashboard';
-function pathFor(target){ return target==='overview' ? BASE : BASE+'/agent/'+encodeURIComponent(target); }
+function pathFor(target){ if(target==='manage') return BASE+'/manage'; return target==='overview' ? BASE : BASE+'/agent/'+encodeURIComponent(target); }
 function go(target){
   var path=pathFor(target);
   if(location.pathname.replace(/\/+$/,'')!==path.replace(/\/+$/,'')){ history.pushState({}, '', path); }
   navTo(target);
 }
 function routeFromPath(){
+  if(/\/dashboard\/manage\/?$/.test(location.pathname)){ navTo('manage'); return; }
   var m=location.pathname.match(/\/dashboard\/agent\/(.+?)\/?$/);
   navTo(m ? decodeURIComponent(m[1]) : 'overview');
 }
@@ -346,7 +357,7 @@ $('#agentGrid').addEventListener('click', function(e){
 // Hide/unhide an agent (e.g. the unused default) from the dashboard.
 function hideAgent(id, hidden){
   fetch('/dashboard/api/agent-hide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,hidden:hidden})})
-    .then(function(r){ if(r.ok){ pollState().then(function(){ if(selected!==null && !agentById(selected) && hidden) go('overview'); }); loadHiddenAgents(); } });
+    .then(function(r){ if(r.ok){ pollState().then(function(){ if(selected!==null && !agentById(selected) && hidden) go('overview'); }); loadHiddenAgents(); if($('#manage-view').classList.contains('active')) loadBranches(); } });
 }
 
 function updateOverviewLive(){
@@ -896,9 +907,24 @@ function stopLoop(){
 
 /* ============================================================ DRAWER */
 var drawer=$('#drawer'), scrim=$('#scrim');
-function openDrawer(){ drawer.classList.add('show'); scrim.classList.add('show'); loadTenants(); loadHiddenAgents(); }
+function openDrawer(){ drawer.classList.add('show'); scrim.classList.add('show'); }
 function closeDrawer(){ drawer.classList.remove('show'); scrim.classList.remove('show'); }
 $('#gearBtn').addEventListener('click', openDrawer);
+
+/* ===== 관리 페이지 (지점 / 알림 / 보안) ===== */
+if($('#manageBtn')) $('#manageBtn').addEventListener('click', function(){ go('manage'); });
+function setManageTab(name){
+  if(['branches','alerts','security'].indexOf(name)<0) name='branches';
+  LS.setItem('opsview.mgtab', name);
+  $$('#manageNav .mg-tab').forEach(function(b){ b.classList.toggle('active', b.dataset.mgtab===name); });
+  $$('#manage-view .mg-pane').forEach(function(p){ p.classList.toggle('active', p.id==='mg-'+name); });
+}
+if($('#manageNav')) $('#manageNav').addEventListener('click', function(e){ var b=e.target.closest('.mg-tab'); if(b) setManageTab(b.dataset.mgtab); });
+function loadManage(){
+  setManageTab(LS.getItem('opsview.mgtab')||'branches');
+  loadBranches();
+  loadHiddenAgents();
+}
 $('#drawerClose').addEventListener('click', closeDrawer);
 scrim.addEventListener('click', closeDrawer);
 
@@ -929,38 +955,88 @@ syncSegs();
 
 /* ===== 지점(tenant) 관리 ===== */
 function tnMsg(t, bad){ var m=$('#tenant-msg'); if(m){ m.textContent=t||''; m.className='tenant-msg'+(bad?' bad':''); } }
-function loadTenants(){
+function loadBranches(){
   fetch('/dashboard/api/agents').then(function(r){ return r.ok? r.json() : null; }).then(function(d){
     var list=$('#tenant-list'); if(!list) return;
-    if(!d){ list.innerHTML='<div class="mut" style="font-size:12px;">불러오기 실패</div>'; return; }
-    var pwSet=$('#pw-set'); if(pwSet) pwSet.style.display = d.editable ? '' : 'none';
-    var alSet=$('#alert-set'); if(alSet){ alSet.style.display = d.editable ? '' : 'none'; if(d.editable) loadAlertCfg(); }
-    var addUI=$('.tenant-add');
-    if(!d.editable){
-      if(addUI) addUI.style.display='none';
-      list.innerHTML='<div class="mut" style="font-size:12px;">읽기 전용 — relay에 <code>RELAY_DB</code>(영속 볼륨)를 설정하면 여기서 지점을 추가/삭제할 수 있습니다.</div>';
-      return;
-    }
-    if(addUI) addUI.style.display='';
-    if(!d.agents.length){ list.innerHTML='<div class="mut" style="font-size:12px;">등록된 지점이 없습니다. 아래에서 추가하세요.</div>'; return; }
-    list.innerHTML=d.agents.map(function(a){
-      return '<div class="tenant-row">'+
-        '<span class="tn-dot'+(a.online?' on':'')+'"></span>'+
-        '<div class="tn-main"><div class="tn-name">'+escHtml(a.name)+' <span class="mut mono">'+escHtml(a.id)+'</span></div>'+
-        '<div class="tn-tok mono" title="클릭하면 복사">'+escHtml(a.token)+'</div></div>'+
-        '<button class="tn-del" data-id="'+escAttr(a.id)+'">삭제</button></div>';
-    }).join('');
-    $$('#tenant-list .tn-tok').forEach(function(el){ el.addEventListener('click', function(){ navigator.clipboard && navigator.clipboard.writeText(el.textContent); tnMsg('토큰 복사됨'); }); });
-    $$('#tenant-list .tn-del').forEach(function(b){ b.addEventListener('click', function(){
-      if(!confirm('지점 "'+b.dataset.id+'" 삭제? (그 매장 에이전트는 더 이상 연결 못 함)')) return;
-      fetch('/dashboard/api/agents?id='+encodeURIComponent(b.dataset.id),{method:'DELETE'}).then(function(r){ tnMsg(r.ok?'삭제됨':'삭제 실패', !r.ok); loadTenants(); });
-    }); });
+    if(!d){ list.innerHTML='<div class="mg-empty">불러오기 실패</div>'; return; }
+    var editable=!!d.editable;
+    var ro=$('#manage-ro'); if(ro) ro.style.display = editable ? 'none' : '';
+    var pwSet=$('#pw-set'); if(pwSet) pwSet.style.display = editable ? '' : 'none';
+    var alSet=$('#alert-set'); if(alSet){ alSet.style.display = editable ? '' : 'none'; if(editable) loadAlertCfg(); }
+    var addUI=$('#tenant-add'); if(addUI) addUI.style.display = editable ? '' : 'none';
+    // registry agents (id,name,token,online) joined with any live-only agents (e.g. the
+    // legacy "default", which has no registry row) — the latter render as limited cards.
+    var reg={}; (d.agents||[]).forEach(function(a){ reg[a.id]=true; });
+    var extra=(state.agents||[]).filter(function(a){ return !reg[a.id]; })
+      .map(function(a){ return {id:a.id, name:a.name, token:'', online:a.online, legacy:true}; });
+    var all=(d.agents||[]).concat(extra);
+    if(!all.length){ list.innerHTML='<div class="mg-empty">등록된 지점이 없습니다.'+(editable?' 아래에서 추가하세요.':'')+'</div>'; return; }
+    list.innerHTML=all.map(function(a){ return branchCardHTML(a, editable); }).join('');
+    wireBranchCards();
   });
 }
-if($('#tn-gen')) $('#tn-gen').addEventListener('click', function(){
-  var a=new Uint8Array(16); (crypto||window.crypto).getRandomValues(a);
-  $('#tn-token').value=[].map.call(a,function(b){return ('0'+b.toString(16)).slice(-2);}).join('');
-});
+function branchCardHTML(a, editable){
+  var live=agentById(a.id);
+  var online=!!(a.online || (live&&live.online));
+  var dvrs=(live&&live.dvrs)||[];
+  var chTotal=dvrs.reduce(function(n,x){return n+(x.channels||0);},0) || (live?(live.streams||[]).length:0);
+  var chAct=live?activeStreams(live).length:0;
+  var watchers=live?(live.watchers||[]).length:0;
+  var statusTxt = online ? '실시간' : (live ? '마지막 접속 '+fmtAgo((Date.now()-live.last_publish_ms)/1000)+' 전' : '접속 기록 없음');
+  var canEdit = editable && !a.legacy && !!a.token;
+  return '<div class="mg-card'+(online?'':' off')+'" data-id="'+escAttr(a.id)+'">'+
+    '<div class="mgc-head"><span class="mgc-dot'+(online?' on':'')+'"></span>'+
+      '<div class="mgc-id"><span class="mgc-name">'+escHtml(a.name||a.id)+'</span><span class="mgc-code mono">'+escHtml(a.id)+(a.legacy?' · 기본':'')+'</span></div>'+
+      '<span class="mgc-badge'+(online?' on':'')+'">'+(online?'온라인':'오프라인')+'</span></div>'+
+    '<div class="mgc-stats">'+
+      '<div class="mgc-stat"><span class="mgc-k">DVR·채널</span><span class="mgc-v">'+dvrs.length+'·'+chAct+'/'+chTotal+'</span></div>'+
+      '<div class="mgc-stat"><span class="mgc-k">시청자</span><span class="mgc-v">'+watchers+'</span></div>'+
+      '<div class="mgc-stat"><span class="mgc-k">상태</span><span class="mgc-v">'+statusTxt+'</span></div>'+
+    '</div>'+
+    (a.token?('<div class="mgc-token"><span class="mgc-tok mono" data-tok="'+escAttr(a.token)+'">••••••••••••</span>'+
+      '<button class="mgc-ic" data-act="reveal" title="토큰 보기">보기</button>'+
+      '<button class="mgc-ic" data-act="copy" title="토큰 복사">복사</button></div>'):'')+
+    '<div class="mgc-actions">'+
+      (canEdit?'<button data-act="rename">이름변경</button><button data-act="regen">토큰 재발급</button>':'')+
+      '<button data-act="reconnect"'+(online?'':' disabled')+'>재접속</button>'+
+      '<button data-act="hide">숨기기</button>'+
+      (canEdit?'<button class="danger" data-act="delete">삭제</button>':'')+
+    '</div></div>';
+}
+function genTokenStr(){ var a=new Uint8Array(16); (crypto||window.crypto).getRandomValues(a); return [].map.call(a,function(b){return ('0'+b.toString(16)).slice(-2);}).join(''); }
+function upsertTenant(id,name,token){
+  fetch('/dashboard/api/agents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,name:name,token:token})})
+    .then(function(r){ if(r.ok){ tnMsg('저장됨'); } else { r.text().then(function(t){ tnMsg('실패: '+t,true); }); } loadBranches(); });
+}
+function startRename(card,id,token,curName){
+  var nameEl=card.querySelector('.mgc-name'); if(!nameEl) return;
+  var inp=document.createElement('input'); inp.className='mgc-rename'; inp.value=curName;
+  nameEl.replaceWith(inp); inp.focus(); inp.select();
+  inp.addEventListener('keydown',function(e){ if(e.key==='Enter') inp.blur(); else if(e.key==='Escape'){ inp.value=curName; inp.blur(); } });
+  inp.addEventListener('blur',function(){ var nn=inp.value.trim(); if(nn && nn!==curName) upsertTenant(id,nn,token); else loadBranches(); },{once:true});
+}
+function wireBranchCards(){
+  var list=$('#tenant-list'); if(!list) return;
+  list.onclick=function(e){
+    var btn=e.target.closest('[data-act]'); if(!btn) return;
+    var card=e.target.closest('.mg-card'); if(!card) return;
+    var id=card.dataset.id, act=btn.dataset.act;
+    var tokEl=card.querySelector('.mgc-tok'); var token=tokEl?tokEl.getAttribute('data-tok'):'';
+    var nameEl=card.querySelector('.mgc-name'); var name=nameEl?nameEl.textContent:id;
+    if(act==='reveal'){ var shown=tokEl.dataset.shown==='1'; tokEl.textContent=shown?'••••••••••••':token; tokEl.dataset.shown=shown?'':'1'; btn.textContent=shown?'보기':'숨김'; }
+    else if(act==='copy'){ if(navigator.clipboard) navigator.clipboard.writeText(token); tnMsg('토큰 복사됨'); }
+    else if(act==='reconnect'){ btn.disabled=true; var o=btn.textContent; btn.textContent='요청 중…';
+      fetch('/dashboard/api/agent-control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agent_id:id,action:'reconnect'})})
+        .then(function(r){ btn.textContent=r.ok?'요청됨 ✓':(r.status===409?'오프라인':'실패'); })
+        .catch(function(){ btn.textContent='실패'; })
+        .finally(function(){ setTimeout(function(){ btn.disabled=false; btn.textContent=o; }, 3000); }); }
+    else if(act==='hide'){ hideAgent(id,true); }
+    else if(act==='rename'){ startRename(card,id,token,name); }
+    else if(act==='regen'){ if(confirm('토큰을 새로 발급하면 이 지점 에이전트 설정의 토큰도 새 값으로 바꿔야 다시 연결됩니다. 계속할까요?')) upsertTenant(id,name,genTokenStr()); }
+    else if(act==='delete'){ if(confirm('지점 "'+id+'" 삭제? (그 매장 에이전트는 더 이상 연결 못 함)')) fetch('/dashboard/api/agents?id='+encodeURIComponent(id),{method:'DELETE'}).then(function(r){ tnMsg(r.ok?'삭제됨':'삭제 실패',!r.ok); loadBranches(); }); }
+  };
+}
+if($('#tn-gen')) $('#tn-gen').addEventListener('click', function(){ $('#tn-token').value=genTokenStr(); });
 if($('#pw-save')) $('#pw-save').addEventListener('click', function(){
   var pw=$('#pw-new').value;
   var m=$('#pw-msg'); var set=function(t,bad){ m.textContent=t; m.className='tenant-msg'+(bad?' bad':''); };
@@ -1015,7 +1091,7 @@ if($('#tn-add')) $('#tn-add').addEventListener('click', function(){
   var id=$('#tn-id').value.trim(), name=$('#tn-name').value.trim(), token=$('#tn-token').value.trim();
   if(!id || !token){ tnMsg('지점 ID와 토큰은 필수입니다.', true); return; }
   fetch('/dashboard/api/agents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,name:name,token:token})})
-    .then(function(r){ if(r.ok){ $('#tn-id').value='';$('#tn-name').value='';$('#tn-token').value=''; tnMsg('추가됨'); loadTenants(); }
+    .then(function(r){ if(r.ok){ $('#tn-id').value='';$('#tn-name').value='';$('#tn-token').value=''; tnMsg('추가됨'); loadBranches(); }
       else r.text().then(function(t){ tnMsg('추가 실패: '+t, true); }); });
 });
 

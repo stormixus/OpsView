@@ -40,7 +40,8 @@
     </div>
     <div class="top-right">
       <div class="conn-pill"><span class="dot live" id="connDot"></span><span class="ctxt" id="connTxt">relay 연결됨</span></div>
-      <button class="icon-btn" id="gearBtn" title="설정"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M22 12h-3M5 12H2M19 19l-2-2M7 7L5 5M19 5l-2 2M7 17l-2 2"/></svg></button>
+      <button class="mng-btn" id="manageBtn" title="지점·알림·보안 관리"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V8l7-4 7 4v13"/><path d="M9 21v-5h6v5M9 11h.01M15 11h.01M12 11h.01"/></svg><span>관리</span></button>
+      <button class="icon-btn" id="gearBtn" title="화면 설정"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M22 12h-3M5 12H2M19 19l-2-2M7 7L5 5M19 5l-2 2M7 17l-2 2"/></svg></button>
       <button class="logout" id="logoutBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 17l5-5-5-5M20 12H9M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3"/></svg><span>로그아웃</span></button>
     </div>
   </header>
@@ -248,6 +249,66 @@
           <div class="rec-hint"><b>클릭</b> 해당 시각 재생 · <b>드래그</b> 구간 선택 후 내보내기 · <b>호버</b> 미리보기</div>
         </section>
       </section>
+
+      <!-- ====== MANAGE VIEW (지점 / 알림 / 보안) ====== -->
+      <section class="view main" id="manage-view">
+        <div class="manage-head">
+          <h1>관리</h1>
+          <div class="manage-ro" id="manage-ro" style="display:none;">읽기 전용 — relay에 <code>RELAY_DB</code>(영속 볼륨)를 설정하면 지점 추가·이름변경·삭제, 알림·비밀번호 변경이 가능합니다.</div>
+        </div>
+        <div class="manage-body">
+          <nav class="manage-nav" id="manageNav">
+            <button class="mg-tab active" data-mgtab="branches"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V8l7-4 7 4v13"/><path d="M9 21v-5h6v5"/></svg><span>지점</span></button>
+            <button class="mg-tab" data-mgtab="alerts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span>알림</span></button>
+            <button class="mg-tab" data-mgtab="security"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>보안</span></button>
+          </nav>
+          <div class="manage-panes">
+            <!-- 지점 -->
+            <section class="mg-pane active" id="mg-branches">
+              <div class="mg-pane-head"><h2>지점 목록</h2><div class="mg-pane-sub">여러 매장을 하나의 relay에 연결합니다. 각 지점 ID·토큰을 해당 매장 에이전트 설정에 그대로 입력하세요.</div></div>
+              <div class="mg-cards" id="tenant-list"></div>
+              <div class="tenant-add mg-addcard" id="tenant-add">
+                <div class="mg-add-title">+ 지점 추가</div>
+                <input id="tn-id" class="tn-in" placeholder="지점 ID (예: gangnam)" autocomplete="off">
+                <input id="tn-name" class="tn-in" placeholder="이름 (예: 강남점)" autocomplete="off">
+                <div class="tn-tokrow"><input id="tn-token" class="tn-in" placeholder="토큰" autocomplete="off"><button id="tn-gen" class="tn-gen" title="토큰 생성">생성</button></div>
+                <button id="tn-add" class="tn-add-btn">지점 추가</button>
+              </div>
+              <div id="tenant-msg" class="tenant-msg"></div>
+              <div id="hidden-block" style="display:none;">
+                <div class="mg-subhead">숨긴 지점</div>
+                <div class="mg-pane-sub">대시보드에서 숨긴 지점입니다. 복원하면 다시 표시됩니다.</div>
+                <div id="hidden-list" class="hidden-list"></div>
+              </div>
+            </section>
+            <!-- 알림 -->
+            <section class="mg-pane" id="mg-alerts">
+              <div class="mg-pane-head"><h2>장애 알림</h2><div class="mg-pane-sub">지점(에이전트)이 오프라인 되면 텔레그램·웹훅으로 알립니다. (relay DB에 저장)</div></div>
+              <div id="alert-set" class="mg-form">
+                <label class="al-toggle"><input type="checkbox" id="al-enabled"><span>알림 켜기</span></label>
+                <div class="tenant-add">
+                  <input id="al-tg-token" class="tn-in" placeholder="텔레그램 봇 토큰 (BotFather)" autocomplete="off">
+                  <input id="al-tg-chat" class="tn-in" placeholder="텔레그램 chat_id" autocomplete="off">
+                  <input id="al-webhook" class="tn-in" placeholder="웹훅 URL (Slack/Discord 등, 선택)" autocomplete="off">
+                  <div class="tn-tokrow"><button id="al-save" class="tn-add-btn">저장</button><button id="al-test" class="tn-gen" title="테스트 알림 전송">테스트</button></div>
+                </div>
+                <div id="al-msg" class="tenant-msg"></div>
+              </div>
+            </section>
+            <!-- 보안 -->
+            <section class="mg-pane" id="mg-security">
+              <div class="mg-pane-head"><h2>대시보드 비밀번호</h2><div class="mg-pane-sub">변경하면 이 relay(DB)에 저장됩니다. 저장된 게 없으면 docker 환경변수(RELAY_DASHBOARD_TOKEN) 비번으로 로그인합니다.</div></div>
+              <div id="pw-set" class="mg-form">
+                <div class="tenant-add">
+                  <input id="pw-new" class="tn-in" type="password" placeholder="새 비밀번호 (4자 이상)" autocomplete="new-password">
+                  <button id="pw-save" class="tn-add-btn">비밀번호 변경</button>
+                </div>
+                <div id="pw-msg" class="tenant-msg"></div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
     </div>
   </div>
 </div>
@@ -261,51 +322,13 @@
 <!-- settings drawer -->
 <div class="scrim" id="scrim"></div>
 <aside class="drawer" id="drawer">
-  <div class="drawer-head"><h3>설정</h3><button class="icon-btn" id="drawerClose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+  <div class="drawer-head"><h3>화면 설정</h3><button class="icon-btn" id="drawerClose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
   <div class="drawer-body">
     <div class="set"><div class="st">테마</div><div class="seg full" data-group="theme"><button data-val="dark">다크</button><button data-val="light">라이트</button></div></div>
     <div class="set"><div class="st">액센트 컬러</div><div class="swatches" data-group="accent"><div class="sw green" data-val="green"></div><div class="sw amber" data-val="amber"></div><div class="sw blue" data-val="blue"></div><div class="sw purple" data-val="purple"></div></div></div>
     <div class="set"><div class="st">정보 밀도</div><div class="sd">연령대 높은 사용자는 ‘크게’ 권장</div><div class="seg full" data-group="density"><button data-val="comfortable">크게</button><button data-val="compact">촘촘하게</button></div></div>
-    <div class="set" id="tenant-set">
-      <div class="st">지점 관리</div>
-      <div class="sd">여러 매장을 하나의 relay에 연결합니다. 추가한 지점 ID·토큰을 각 매장 에이전트 설정에 그대로 입력하세요.</div>
-      <div id="tenant-list" class="tenant-list"></div>
-      <div class="tenant-add">
-        <input id="tn-id" class="tn-in" placeholder="지점 ID (예: gangnam)" autocomplete="off">
-        <input id="tn-name" class="tn-in" placeholder="이름 (예: 강남점)" autocomplete="off">
-        <div class="tn-tokrow"><input id="tn-token" class="tn-in" placeholder="토큰" autocomplete="off"><button id="tn-gen" class="tn-gen" title="토큰 생성">생성</button></div>
-        <button id="tn-add" class="tn-add-btn">지점 추가</button>
-      </div>
-      <div id="tenant-msg" class="tenant-msg"></div>
-      <div id="hidden-block" style="display:none;">
-        <div class="st" style="font-size:12px; margin-top:16px;">숨긴 지점</div>
-        <div class="sd">대시보드에서 숨긴 지점입니다. 복원하면 다시 표시됩니다.</div>
-        <div id="hidden-list" class="hidden-list"></div>
-      </div>
-    </div>
-    <div class="set" id="pw-set" style="display:none;">
-      <div class="st">대시보드 비밀번호</div>
-      <div class="sd">변경하면 이 relay(DB)에 저장됩니다. 저장된 게 없으면 docker 환경변수(RELAY_DASHBOARD_TOKEN) 비번으로 로그인합니다.</div>
-      <div class="tenant-add">
-        <input id="pw-new" class="tn-in" type="password" placeholder="새 비밀번호 (4자 이상)" autocomplete="new-password">
-        <button id="pw-save" class="tn-add-btn">비밀번호 변경</button>
-      </div>
-      <div id="pw-msg" class="tenant-msg"></div>
-    </div>
-    <div class="set" id="alert-set" style="display:none;">
-      <div class="st">장애 알림</div>
-      <div class="sd">지점(에이전트)이 오프라인 되면 텔레그램·웹훅으로 알립니다. (relay DB에 저장)</div>
-      <label class="al-toggle"><input type="checkbox" id="al-enabled"><span>알림 켜기</span></label>
-      <div class="tenant-add">
-        <input id="al-tg-token" class="tn-in" placeholder="텔레그램 봇 토큰 (BotFather)" autocomplete="off">
-        <input id="al-tg-chat" class="tn-in" placeholder="텔레그램 chat_id" autocomplete="off">
-        <input id="al-webhook" class="tn-in" placeholder="웹훅 URL (Slack/Discord 등, 선택)" autocomplete="off">
-        <div class="tn-tokrow"><button id="al-save" class="tn-add-btn">저장</button><button id="al-test" class="tn-gen" title="테스트 알림 전송">테스트</button></div>
-      </div>
-      <div id="al-msg" class="tenant-msg"></div>
-    </div>
   </div>
-  <div class="drawer-note">설정은 이 브라우저에 저장됩니다. 운영 배포 시 로고·스냅샷·video 소스를 실제 relay 엔드포인트로 교체하세요.</div>
+  <div class="drawer-note">화면 설정은 이 브라우저에 저장됩니다. 지점·알림·보안은 상단 <b>관리</b>에서 설정하세요.</div>
 </aside>
 <script src="/dashboard/assets/app.js"></script>
 </body>
