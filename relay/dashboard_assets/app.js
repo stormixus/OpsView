@@ -603,21 +603,39 @@ modalCell.addEventListener('change', function(e){ if(e.target.classList.contains
 modalCell.addEventListener('keydown', function(e){ if(e.target.classList.contains('ipname-in') && e.key==='Enter'){ e.preventDefault(); e.target.blur(); } });
 
 /* ============================================================ RECORDINGS (녹화) */
-var recCtx = { stream:null, day:null, dayStart:0, segs:[], cur:null };
+var recCtx = { mode:1, streams:[], stream:null, day:null, dayStart:0, segs:[], cur:null, cells:[], master:0, playing:false };
 var recVideo = $('#recVideo');
 function pad2(n){ return (n<10?'0':'')+n; }
 function recDayStr(d){ return ''+d.getFullYear()+pad2(d.getMonth()+1)+pad2(d.getDate()); }
 function recSetDateInput(ymd){ $('#recDate').value=ymd.slice(0,4)+'-'+ymd.slice(4,6)+'-'+ymd.slice(6,8); }
 function recDateInputVal(){ var v=$('#recDate').value; return v? v.replace(/-/g,'') : ''; }
 function recDayStartSec(ymd){ return Math.floor(new Date(+ymd.slice(0,4),+ymd.slice(4,6)-1,+ymd.slice(6,8),0,0,0).getTime()/1000); }
+function recSegAtIn(segs, sec){ for(var i=0;i<segs.length;i++){ var s=segs[i]; if(sec>=s.start && sec<s.start+s.dur+2) return s; } for(var j=0;j<segs.length;j++){ if(segs[j].start>=sec) return segs[j]; } return null; }
 
 function openRec(){
   var a = selected!==null ? agentById(selected) : null; if(!a) return;
+  recCtx.streams=(a.streams||[]).slice().sort(function(x,y){return (x.ch||0)-(y.ch||0);});
   var sel=$('#recChannel'), prev=sel.value;
-  var streams=(a.streams||[]).slice().sort(function(x,y){return (x.ch||0)-(y.ch||0);});
-  sel.innerHTML = streams.map(function(s){ return '<option value="'+escAttr(s.path)+'">'+escHtml(s.name)+' · CH'+s.ch+'</option>'; }).join('');
-  if(prev && streams.some(function(s){return s.path===prev;})) sel.value=prev;
-  recCtx.stream = sel.value || (streams[0]&&streams[0].path);
+  sel.innerHTML = recCtx.streams.map(function(s){ return '<option value="'+escAttr(s.path)+'">'+escHtml(s.name)+' · CH'+s.ch+'</option>'; }).join('');
+  if(prev && recCtx.streams.some(function(s){return s.path===prev;})) sel.value=prev;
+  recApplyMode();
+}
+function recApplyMode(){
+  var grid = recCtx.mode>1;
+  $('#recStage').style.display = grid?'none':'';
+  $('#recGrid').style.display = grid?'':'none';
+  $('#recChannel').style.display = grid?'none':'';
+  $('#recPlayBtn').style.display = grid?'':'none';
+  if(grid){
+    var n=recCtx.mode*recCtx.mode;
+    recCtx.cells = recCtx.streams.slice(0,n).map(function(s){ return {stream:s.path, name:s.name, ch:s.ch, segs:[], cur:null, video:null}; });
+    var g=$('#recGrid'); g.style.setProperty('--rc', recCtx.mode);
+    g.innerHTML = recCtx.cells.map(function(c,i){ return '<div class="rec-cell"><video muted playsinline data-ci="'+i+'"></video><span class="rec-clabel">'+escHtml(c.name)+' · CH'+c.ch+'</span></div>'; }).join('');
+    recCtx.cells.forEach(function(c,i){ c.video=g.querySelector('video[data-ci="'+i+'"]'); });
+    recCtx.stream = recCtx.cells[0] ? recCtx.cells[0].stream : null;
+  } else {
+    recCtx.stream = $('#recChannel').value || (recCtx.streams[0] && recCtx.streams[0].path);
+  }
   if(!recCtx.stream){ recRenderEmpty('채널 없음'); return; }
   recLoadDays();
 }
@@ -631,41 +649,70 @@ function recLoadDays(){
 function recLoadDay(){
   var day=recDateInputVal(); if(!day) return;
   recCtx.day=day; recCtx.dayStart=recDayStartSec(day);
+  if(recCtx.mode>1){ recLoadDayGrid(); return; }
   fetch(BASE+'/api/rec?stream='+encodeURIComponent(recCtx.stream)+'&day='+day).then(function(r){return r.ok?r.json():null;}).then(function(d){
-    recCtx.segs=(d&&d.segments)||[]; recRenderTimeline();
+    recCtx.segs=(d&&d.segments)||[]; recRenderTimeline(recCtx.segs);
     if(recCtx.segs.length){ $('#recEmpty').style.display='none'; } else { recRenderEmpty('이 날짜 녹화 없음'); }
   }).catch(function(){ recRenderEmpty('불러오기 실패'); });
 }
+function recLoadDayGrid(){
+  var day=recCtx.day, pending=recCtx.cells.length; if(!pending){ recRenderTimeline([]); return; }
+  recCtx.cells.forEach(function(c){
+    fetch(BASE+'/api/rec?stream='+encodeURIComponent(c.stream)+'&day='+day).then(function(r){return r.ok?r.json():null;}).then(function(d){
+      c.segs=(d&&d.segments)||[]; c.cur=null;
+    }).catch(function(){ c.segs=[]; }).finally(function(){
+      if(--pending===0){ recRenderTimeline((recCtx.cells[0]&&recCtx.cells[0].segs)||[]); $('#recEmpty').style.display='none'; }
+    });
+  });
+}
 function recRenderEmpty(msg){
-  recCtx.segs=[]; recCtx.cur=null; recRenderTimeline();
+  recCtx.segs=[]; recCtx.cur=null; recRenderTimeline([]);
   var e=$('#recEmpty'); if(e){ e.style.display='flex'; var b=e.querySelector('b'); if(b) b.textContent=msg||'녹화 없음'; }
   try{ recVideo.removeAttribute('src'); recVideo.load(); }catch(x){}
   $('#recMeta').textContent=''; $('#recDownload').disabled=true; $('#recPlayhead').style.display='none';
 }
-function recRenderTimeline(){
+function recRenderTimeline(segs){
   var hours=$('#recHours'); if(hours && !hours._done){ var h=''; for(var i=0;i<=24;i+=3){ h+='<span style="left:'+(i/24*100)+'%">'+pad2(i)+':00</span>'; } hours.innerHTML=h; hours._done=true; }
-  $('#recTrack').innerHTML = recCtx.segs.map(function(s){
+  $('#recTrack').innerHTML = (segs||[]).map(function(s){
     var left=(s.start-recCtx.dayStart)/86400*100, w=Math.max(0.12, s.dur/86400*100);
     return '<span class="rec-seg" style="left:'+left+'%;width:'+w+'%"></span>';
   }).join('');
-  var tot=recCtx.segs.reduce(function(a,s){return a+s.dur;},0);
-  $('#recMeta').textContent = recCtx.segs.length? (recCtx.segs.length+'구간 · '+Math.round(tot/60)+'분') : '';
-}
-function recSegAt(sec){
-  for(var i=0;i<recCtx.segs.length;i++){ var s=recCtx.segs[i]; if(sec>=s.start && sec<s.start+s.dur+2) return s; }
-  for(var j=0;j<recCtx.segs.length;j++){ if(recCtx.segs[j].start>=sec) return recCtx.segs[j]; }
-  return null;
+  var tot=(segs||[]).reduce(function(a,s){return a+s.dur;},0);
+  $('#recMeta').textContent = (segs&&segs.length)? ((recCtx.mode>1? recCtx.cells.length+'채널 · ':'')+segs.length+'구간 · '+Math.round(tot/60)+'분') : '';
 }
 function recPlayAt(sec){
-  var s=recSegAt(sec); if(!s) return;
+  var s=recSegAtIn(recCtx.segs, sec); if(!s) return;
   var offset=Math.max(0, sec-s.start); recCtx.cur=s; $('#recDownload').disabled=false; $('#recEmpty').style.display='none';
   var url=BASE+'/api/rec-file?stream='+encodeURIComponent(recCtx.stream)+'&name='+encodeURIComponent(s.name);
   if(recVideo.getAttribute('src')!==url){ recVideo.src=url; recVideo.load(); recVideo.onloadedmetadata=function(){ try{recVideo.currentTime=offset;}catch(e){} recVideo.play().catch(function(){}); }; }
   else { try{recVideo.currentTime=offset;}catch(e){} recVideo.play().catch(function(){}); }
 }
+function recSeekAll(sec){
+  recCtx.master=sec;
+  recCtx.cells.forEach(function(c){
+    var s=recSegAtIn(c.segs, sec), v=c.video; if(!v) return;
+    if(!s){ try{ v.removeAttribute('src'); v.load(); }catch(e){} c.cur=null; return; }
+    var offset=Math.max(0, sec-s.start); c.cur=s;
+    var url=BASE+'/api/rec-file?stream='+encodeURIComponent(c.stream)+'&name='+encodeURIComponent(s.name);
+    if(v.getAttribute('src')!==url){ v.src=url; v.load(); v.onloadedmetadata=function(){ try{v.currentTime=offset;}catch(e){} if(recCtx.playing) v.play().catch(function(){}); }; }
+    else { try{v.currentTime=offset;}catch(e){} if(recCtx.playing) v.play().catch(function(){}); }
+  });
+  recUpdatePlayhead(sec);
+}
+function recUpdatePlayhead(sec){ var ph=$('#recPlayhead'); ph.style.display='block'; ph.style.left=((sec-recCtx.dayStart)/86400*100)+'%'; }
+function recPlayAll(p){
+  recCtx.playing=p; var b=$('#recPlayBtn'); if(b) b.textContent = p?'❚❚':'▶';
+  recCtx.cells.forEach(function(c){ if(c.video){ if(p) c.video.play().catch(function(){}); else c.video.pause(); } });
+}
+if($('#recPlayBtn')) $('#recPlayBtn').addEventListener('click', function(){ recPlayAll(!recCtx.playing); });
+$('#recLayout').addEventListener('click', function(e){
+  var b=e.target.closest('[data-cols]'); if(!b) return;
+  $$('#recLayout button').forEach(function(x){ x.classList.toggle('active', x===b); });
+  recPlayAll(false); recStop(); recCtx.mode=+b.dataset.cols; openRec();
+});
 $('#recTimeline').addEventListener('click', function(e){
-  if(!recCtx.segs.length) return;
-  var rect=this.getBoundingClientRect(); recPlayAt(recCtx.dayStart + Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width))*86400);
+  var rect=this.getBoundingClientRect(), t=recCtx.dayStart + Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width))*86400;
+  if(recCtx.mode>1){ recPlayAll(true); recSeekAll(t); } else { if(recCtx.segs.length) recPlayAt(t); }
 });
 $('#recTimeline').addEventListener('mousemove', function(e){
   var rect=this.getBoundingClientRect(), frac=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
@@ -673,24 +720,35 @@ $('#recTimeline').addEventListener('mousemove', function(e){
   cur.style.display='block'; cur.style.left=(frac*100)+'%'; cur.textContent=pad2(d.getHours())+':'+pad2(d.getMinutes());
 });
 $('#recTimeline').addEventListener('mouseleave', function(){ $('#recCursor').style.display='none'; });
-recVideo.addEventListener('timeupdate', function(){
-  if(!recCtx.cur) return;
-  var frac=((recCtx.cur.start+recVideo.currentTime)-recCtx.dayStart)/86400, ph=$('#recPlayhead');
-  ph.style.display='block'; ph.style.left=(frac*100)+'%';
-});
+recVideo.addEventListener('timeupdate', function(){ if(recCtx.mode>1 || !recCtx.cur) return; recUpdatePlayhead(recCtx.cur.start+recVideo.currentTime); });
 recVideo.addEventListener('ended', function(){
-  if(!recCtx.cur) return; var next=null;
+  if(recCtx.mode>1 || !recCtx.cur) return; var next=null;
   for(var i=0;i<recCtx.segs.length;i++){ if(recCtx.segs[i].start>recCtx.cur.start){ next=recCtx.segs[i]; break; } }
   if(next) recPlayAt(next.start);
 });
-function recStop(){ try{ recVideo.pause(); }catch(e){} }
+setInterval(function(){
+  if(curTab!=='rec' || recCtx.mode<2 || !recCtx.playing) return;
+  var ref=recCtx.cells[0];
+  if(ref && ref.cur && ref.video && !ref.video.paused && ref.video.readyState>1){ recCtx.master = ref.cur.start + ref.video.currentTime; }
+  else { recCtx.master += 1; }
+  recUpdatePlayhead(recCtx.master);
+  recCtx.cells.forEach(function(c){
+    if(!c.video) return; var want=recCtx.master;
+    if(c.cur && want>=c.cur.start && want<c.cur.start+c.cur.dur+1){
+      if(Math.abs(c.video.currentTime-(want-c.cur.start))>0.8){ try{c.video.currentTime=want-c.cur.start;}catch(e){} }
+    } else {
+      var s=recSegAtIn(c.segs, want);
+      if(s && (!c.cur || s.name!==c.cur.name)){ c.cur=s; var off=Math.max(0,want-s.start); c.video.src=BASE+'/api/rec-file?stream='+encodeURIComponent(c.stream)+'&name='+encodeURIComponent(s.name); c.video.load(); c.video.onloadedmetadata=(function(v,o){return function(){ try{v.currentTime=o;}catch(e){} if(recCtx.playing) v.play().catch(function(){}); };})(c.video,off); }
+    }
+  });
+}, 1000);
+function recStop(){ try{ recVideo.pause(); }catch(e){} recCtx.playing=false; (recCtx.cells||[]).forEach(function(c){ try{c.video&&c.video.pause();}catch(e){} }); }
 $('#recChannel').addEventListener('change', function(){ recCtx.stream=this.value; recLoadDays(); });
 $('#recDate').addEventListener('change', recLoadDay);
 function recShiftDay(delta){ var day=recDateInputVal(); if(!day) return; var d=new Date(recDayStartSec(day)*1000); d.setDate(d.getDate()+delta); recSetDateInput(recDayStr(d)); recLoadDay(); }
 $('#recPrevDay').addEventListener('click', function(){ recShiftDay(-1); });
 $('#recNextDay').addEventListener('click', function(){ recShiftDay(1); });
 $('#recDownload').addEventListener('click', function(){ if(recCtx.cur) window.open(BASE+'/api/rec-file?stream='+encodeURIComponent(recCtx.stream)+'&name='+encodeURIComponent(recCtx.cur.name)+'&dl=1','_blank'); });
-
 /* ============================================================ RELAY / CONN */
 var relayDownAt=Date.now();
 function renderConn(){

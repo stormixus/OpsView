@@ -212,17 +212,22 @@
         <!-- RECORDINGS PANE -->
         <section class="pane" id="rec-pane">
           <div class="rec-bar">
+            <div class="rec-layout" id="recLayout">
+              <button data-cols="1" class="active">단일</button><button data-cols="2">2×2</button><button data-cols="3">3×3</button><button data-cols="4">4×4</button>
+            </div>
             <select id="recChannel" class="rec-sel" title="채널"></select>
             <button class="rec-nav" id="recPrevDay" title="이전 날">‹</button>
             <input type="date" id="recDate" class="rec-date">
             <button class="rec-nav" id="recNextDay" title="다음 날">›</button>
+            <button class="rec-nav" id="recPlayBtn" title="재생/일시정지" style="display:none;">▶</button>
             <span class="rec-meta" id="recMeta"></span>
             <button id="recDownload" class="rec-dl" style="margin-left:auto;" disabled>구간 다운로드</button>
           </div>
-          <div class="rec-stage">
+          <div class="rec-stage" id="recStage">
             <video id="recVideo" class="rec-video" controls playsinline></video>
             <div class="rec-empty" id="recEmpty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg><b>이 날짜 녹화 없음</b><span>RELAY_REC_DIR 설정 + 다른 날짜 선택</span></div>
           </div>
+          <div class="rec-grid" id="recGrid" style="display:none;"></div>
           <div class="rec-timewrap">
             <div class="rec-hours" id="recHours"></div>
             <div class="rec-timeline" id="recTimeline">

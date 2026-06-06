@@ -18,6 +18,11 @@ All notable changes to OpsView are documented here.
   readout, and download the current segment. Backed by
   `/dashboard/api/rec` (list) + `/dashboard/api/rec-file` (Range-served MP4),
   admin-gated with path-traversal guards.
+- **Dashboard: multi-channel synced playback.** The 녹화 tab now has a layout
+  toggle (단일 / 2×2 / 3×3 / 4×4): pick a grid and the first N channels play
+  back in lockstep off a shared master clock, so scrubbing the timeline seeks
+  every channel to the same wall-clock instant. A 1s drift corrector keeps the
+  tiles aligned and advances each across segment boundaries independently.
 
 - **Dashboard: hide unused agents (지점 관리).** Hover an agent card → 숨기기 to
   hide it from the dashboard (e.g. the leftover "default" agent after moving to
