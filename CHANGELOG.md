@@ -2,6 +2,20 @@
 
 All notable changes to OpsView are documented here.
 
+## [0.3.8] - 2026-06-06
+
+### Fixed
+
+- **Relay: CCTV WebSocket watchers no longer leak on half-open connections.**
+  `/surv/ws/` handled clean disconnects fine (the client is removed and its
+  goroutines exit), but a half-open TCP peer — a viewer whose Wi-Fi dropped or
+  laptop slept without a RST — left `ReadMessage` blocked forever, so the client
+  entry, its send channel, and two goroutines lingered until the OS TCP
+  keepalive eventually reaped them (hours). Added ping/pong keepalive (54 s
+  ping, 60 s pong deadline) and write deadlines, and the writer now closes the
+  connection on exit to unblock the reader, so a vanished client is cleaned up
+  within ~60 s.
+
 ## [0.3.7] - 2026-06-06
 
 ### Fixed

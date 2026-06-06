@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bluenviron/mediacommon/v2/pkg/codecs/h264"
 	"github.com/bluenviron/mediacommon/v2/pkg/codecs/h265"
@@ -17,6 +18,16 @@ import (
 // survWSTimescale is the H264/H265 RTP clock rate; PTS values from gortsplib are
 // already in these units.
 const survWSTimescale = 90000
+
+// WebSocket keepalive bounds. Without these a half-open TCP connection (client
+// asleep / Wi-Fi dropped with no RST) would block ReadMessage forever and leak
+// the client entry plus its goroutines. The writer pings every survWSPingPeriod;
+// the reader requires a pong within survWSPongWait or it tears the conn down.
+const (
+	survWSWriteWait  = 10 * time.Second
+	survWSPongWait   = 60 * time.Second
+	survWSPingPeriod = (survWSPongWait * 9) / 10
+)
 
 // fragMuxer turns H264/H265 access units into an fMP4 init segment plus one
 // fragment (moof+mdat) per access unit, for Media Source Extensions playback
@@ -257,16 +268,43 @@ func (sp *SurvProxy) ServeWS(w http.ResponseWriter, r *http.Request) {
 	client := entry.wsHub.add()
 	defer entry.wsHub.remove(client)
 
+	// Writer: fragments plus periodic pings, all under a write deadline so a
+	// stuck/half-open peer can't block the goroutine indefinitely. All writes go
+	// through this single goroutine (gorilla allows only one concurrent writer).
 	go func() {
-		for frag := range client.send {
-			if err := conn.WriteMessage(websocket.BinaryMessage, frag); err != nil {
-				return
+		ticker := time.NewTicker(survWSPingPeriod)
+		defer ticker.Stop()
+		// Closing the conn here unblocks the reader's ReadMessage so the handler
+		// returns and cleanup runs, no matter which side detected the failure.
+		defer conn.Close()
+		for {
+			select {
+			case frag, ok := <-client.send:
+				conn.SetWriteDeadline(time.Now().Add(survWSWriteWait))
+				if !ok { // hub removed us -> channel closed
+					conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+					return
+				}
+				if err := conn.WriteMessage(websocket.BinaryMessage, frag); err != nil {
+					return
+				}
+			case <-ticker.C:
+				conn.SetWriteDeadline(time.Now().Add(survWSWriteWait))
+				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					return
+				}
 			}
 		}
 	}()
 
-	// Block until the client disconnects (also drains control frames).
+	// Reader: a missing pong (half-open peer) trips the read deadline, so
+	// ReadMessage errors and the handler returns, firing the deferred cleanup.
 	conn.SetReadLimit(1024)
+	conn.SetReadDeadline(time.Now().Add(survWSPongWait))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(survWSPongWait))
+		return nil
+	})
 	for {
 		if _, _, err := conn.ReadMessage(); err != nil {
 			return
