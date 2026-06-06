@@ -203,6 +203,16 @@ func (sp *SurvProxy) StartChannel(id, name, rawURL string) error {
 		SegmentMinDuration: 1 * time.Second,
 		PartMinDuration:    200 * time.Millisecond,
 		Tracks:             []*gohlslib.Track{track},
+		// gohlslib warns on every part/segment duration jitter ("...will cause an
+		// error in iOS clients") — benign noise from the camera's variable GOP
+		// timing, and viewers prefer WS with HLS as fallback anyway. Drop those;
+		// surface any other encode error.
+		OnEncodeError: func(err error) {
+			if strings.Contains(err.Error(), "iOS clients") {
+				return
+			}
+			log.Printf("[surv] hls encode error: %v", err)
+		},
 	}
 	if err := muxer.Start(); err != nil {
 		c.Close()

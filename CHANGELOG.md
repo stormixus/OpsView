@@ -2,6 +2,16 @@
 
 All notable changes to OpsView are documented here.
 
+## [0.4.1] - 2026-06-06
+
+### Fixed
+
+- **Relay: silence gohlslib CCTV log spam.** The HLS muxer logged a warning on
+  every part/segment duration jitter ("…will cause an error in iOS clients") —
+  benign noise from cameras' variable GOP timing (viewers prefer WS with HLS as
+  fallback). The relay now filters those via `OnEncodeError` and only surfaces
+  genuine encode errors.
+
 ## [0.4.0] - 2026-06-06
 
 A multi-tenant relay release: one relay now hosts many agents (locations),
