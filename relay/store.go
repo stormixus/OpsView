@@ -26,7 +26,33 @@ func openAgentStore(path string) (*agentStore, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS settings (
+		key   TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	)`); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &agentStore{db: db}, nil
+}
+
+const settingDashboardToken = "dashboard_token"
+
+// getSetting returns a stored setting value ("" if unset).
+func (s *agentStore) getSetting(key string) (string, error) {
+	var v string
+	err := s.db.QueryRow(`SELECT value FROM settings WHERE key=?`, key).Scan(&v)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return v, err
+}
+
+// setSetting upserts a setting value.
+func (s *agentStore) setSetting(key, value string) error {
+	_, err := s.db.Exec(`INSERT INTO settings (key, value) VALUES (?,?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
+	return err
 }
 
 func (s *agentStore) count() (int, error) {

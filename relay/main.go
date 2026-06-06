@@ -124,9 +124,13 @@ type Config struct {
 	// Agents is the per-tenant publisher-token registry (RELAY_AGENTS JSON) plus
 	// the default agent (authenticated by PublisherToken).
 	Agents *agentRegistry
-	// DashboardToken gates the operator dashboard. Empty => dashboard disabled
-	// (routes not registered), so it is never exposed unauthenticated.
+	// DashboardToken is the env-configured dashboard password (RELAY_DASHBOARD_TOKEN).
+	// Used as the login password unless one is stored in the DB (Store). Empty +
+	// no DB token => dashboard disabled (routes not registered).
 	DashboardToken string
+	// Store is the SQLite persistence (tenant registry + settings); nil if RELAY_DB
+	// is unset.
+	Store *agentStore
 }
 
 func loadConfig() Config {
@@ -148,10 +152,12 @@ func loadConfig() Config {
 	if err != nil {
 		log.Fatalf("[relay] invalid RELAY_AGENTS: %v", err)
 	}
-	// RELAY_DB (a path on a persistent volume) makes the named-agent registry
-	// editable from the dashboard; unset = env-only (RELAY_AGENTS, read-only).
+	// RELAY_DB (a path on a persistent volume) makes the named-agent registry and
+	// dashboard password editable from the dashboard; unset = env-only.
+	var store *agentStore
 	if dbPath := os.Getenv("RELAY_DB"); dbPath != "" {
-		store, serr := openAgentStore(dbPath)
+		var serr error
+		store, serr = openAgentStore(dbPath)
 		if serr != nil {
 			log.Fatalf("[relay] open RELAY_DB %s: %v", dbPath, serr)
 		}
@@ -168,5 +174,6 @@ func loadConfig() Config {
 		AllowedOrigins:  origins,
 		Agents:          reg,
 		DashboardToken:  os.Getenv("RELAY_DASHBOARD_TOKEN"),
+		Store:           store,
 	}
 }

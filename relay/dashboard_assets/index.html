@@ -235,6 +235,15 @@
       </div>
       <div id="tenant-msg" class="tenant-msg"></div>
     </div>
+    <div class="set" id="pw-set" style="display:none;">
+      <div class="st">대시보드 비밀번호</div>
+      <div class="sd">변경하면 이 relay(DB)에 저장됩니다. 저장된 게 없으면 docker 환경변수(RELAY_DASHBOARD_TOKEN) 비번으로 로그인합니다.</div>
+      <div class="tenant-add">
+        <input id="pw-new" class="tn-in" type="password" placeholder="새 비밀번호 (4자 이상)" autocomplete="new-password">
+        <button id="pw-save" class="tn-add-btn">비밀번호 변경</button>
+      </div>
+      <div id="pw-msg" class="tenant-msg"></div>
+    </div>
   </div>
   <div class="drawer-note">설정은 이 브라우저에 저장됩니다. 운영 배포 시 로고·스냅샷·video 소스를 실제 relay 엔드포인트로 교체하세요.</div>
 </aside>

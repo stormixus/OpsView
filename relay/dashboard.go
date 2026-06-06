@@ -17,7 +17,7 @@ import (
 var dashboardAssets embed.FS
 
 // dashboardEnabled reports whether the operator dashboard is configured.
-func (h *Hub) dashboardEnabled() bool { return h.cfg.DashboardToken != "" }
+func (h *Hub) dashboardEnabled() bool { return h.effectiveDashToken() != "" }
 
 // authedDashboard checks the session cookie.
 func (h *Hub) authedDashboard(r *http.Request) bool {
@@ -25,7 +25,21 @@ func (h *Hub) authedDashboard(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
-	return verifySession(h.cfg.DashboardToken, c.Value, time.Now())
+	return verifySession(h.effectiveDashToken(), c.Value, time.Now())
+}
+
+// issueDashCookie sets a fresh session cookie signed with the current password.
+func (h *Hub) issueDashCookie(w http.ResponseWriter, r *http.Request) {
+	exp := time.Now().Add(dashboardSessionTTL)
+	http.SetCookie(w, &http.Cookie{
+		Name:     dashboardCookieName,
+		Value:    signSession(h.effectiveDashToken(), exp),
+		Path:     "/dashboard",
+		Expires:  exp,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Secure:   r.TLS != nil,
+	})
 }
 
 // HandleDashboardLogin authenticates the admin password (rate-limited, constant-time).
@@ -46,23 +60,45 @@ func (h *Hub) HandleDashboardLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	if subtle.ConstantTimeCompare([]byte(body.Password), []byte(h.cfg.DashboardToken)) != 1 {
+	if subtle.ConstantTimeCompare([]byte(body.Password), []byte(h.effectiveDashToken())) != 1 {
 		h.pinLimiter.recordFailure(ip)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	h.pinLimiter.recordSuccess(ip)
-	exp := time.Now().Add(dashboardSessionTTL)
-	http.SetCookie(w, &http.Cookie{
-		Name:     dashboardCookieName,
-		Value:    signSession(h.cfg.DashboardToken, exp),
-		Path:     "/dashboard",
-		Expires:  exp,
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		Secure:   r.TLS != nil,
-	})
+	h.issueDashCookie(w, r)
 	w.WriteHeader(http.StatusOK)
+}
+
+// HandleDashboardPassword changes the dashboard password (DB-backed). Admin-gated;
+// re-issues the caller's cookie so they stay logged in. Requires RELAY_DB.
+func (h *Hub) HandleDashboardPassword(w http.ResponseWriter, r *http.Request) {
+	if !h.authedDashboard(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if len(body.Password) < 4 {
+		http.Error(w, "비밀번호는 4자 이상이어야 합니다", http.StatusBadRequest)
+		return
+	}
+	if err := h.setDashToken(body.Password); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	// The signing key changed; re-issue this session's cookie so we stay in.
+	h.issueDashCookie(w, r)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // HandleDashboardLogout clears the session cookie.
@@ -211,6 +247,7 @@ func (h *Hub) registerDashboard(mux *http.ServeMux) {
 	mux.HandleFunc("/dashboard/api/state", h.HandleDashboardState)
 	mux.HandleFunc("/dashboard/api/channel-meta", h.HandleDashboardChannelMeta)
 	mux.HandleFunc("/dashboard/api/agents", h.HandleDashboardAgents)
+	mux.HandleFunc("/dashboard/api/password", h.HandleDashboardPassword)
 	mux.HandleFunc("/dashboard", h.HandleDashboardStatic)
 	mux.HandleFunc("/dashboard/", h.HandleDashboardStatic)
 }

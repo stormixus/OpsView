@@ -60,6 +60,47 @@ func TestAgentStoreCRUDAndRegistry(t *testing.T) {
 	}
 }
 
+func TestDashboardPasswordDBOverridesEnv(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "relay.db")
+	store, err := openAgentStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.close() })
+
+	cfg := cfgWithDash("env-pass")
+	cfg.Store = store
+	h := NewHub(cfg)
+	if h.effectiveDashToken() != "env-pass" {
+		t.Fatalf("no DB token yet => should use env, got %q", h.effectiveDashToken())
+	}
+	if err := h.setDashToken("db-pass"); err != nil {
+		t.Fatalf("setDashToken: %v", err)
+	}
+	if h.effectiveDashToken() != "db-pass" {
+		t.Fatal("DB token must override env")
+	}
+	// persists across restart (new hub from same store path)
+	store2, _ := openAgentStore(path)
+	t.Cleanup(func() { store2.close() })
+	cfg2 := cfgWithDash("env-pass")
+	cfg2.Store = store2
+	h2 := NewHub(cfg2)
+	if h2.effectiveDashToken() != "db-pass" {
+		t.Fatal("DB password not loaded on restart")
+	}
+}
+
+func TestDashboardPasswordReadOnlyWithoutStore(t *testing.T) {
+	h := NewHub(cfgWithDash("env-pass"))
+	if err := h.setDashToken("x"); err == nil {
+		t.Fatal("setDashToken must fail without a store")
+	}
+	if h.effectiveDashToken() != "env-pass" {
+		t.Fatal("should still use env")
+	}
+}
+
 func TestRegistryReadOnlyWithoutStore(t *testing.T) {
 	reg, _ := parseAgentRegistry("", "leg")
 	if reg.editable() {
