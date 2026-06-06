@@ -114,7 +114,7 @@ function applyRealRender(){
   if(selected===null){ renderOverview(); }
   else {
     var a=agentById(selected);
-    if(!a){ navTo('overview'); return; }
+    if(!a){ go('overview'); return; }
     renderAgentHeader(a); renderStatus(a); renderWatchers(a); renderStreams(a);
     if(curTab==='live' && !$('#grid').dataset.agent){ renderGrid(a); }
   }
@@ -214,8 +214,24 @@ function syncSidebarActive(){
   $$('.agent-item').forEach(function(b){ b.classList.toggle('active', (b.dataset.nav==='overview' && selected===null) || b.dataset.nav===selected); });
 }
 
-$('#sidebar').addEventListener('click', function(e){ var b=e.target.closest('.agent-item'); if(b) navTo(b.dataset.nav); });
-$('#backBtn').addEventListener('click', function(){ navTo('overview'); });
+/* --- path routing (History API): clicks pushState a real URL
+   (/dashboard or /dashboard/agent/<id>) so back/forward and deep links work.
+   The relay serves index.html for any /dashboard/* non-asset path. --- */
+var BASE='/dashboard';
+function pathFor(target){ return target==='overview' ? BASE : BASE+'/agent/'+encodeURIComponent(target); }
+function go(target){
+  var path=pathFor(target);
+  if(location.pathname.replace(/\/+$/,'')!==path.replace(/\/+$/,'')){ history.pushState({}, '', path); }
+  navTo(target);
+}
+function routeFromPath(){
+  var m=location.pathname.match(/\/dashboard\/agent\/(.+?)\/?$/);
+  navTo(m ? decodeURIComponent(m[1]) : 'overview');
+}
+window.addEventListener('popstate', routeFromPath);
+
+$('#sidebar').addEventListener('click', function(e){ var b=e.target.closest('.agent-item'); if(b) go(b.dataset.nav); });
+$('#backBtn').addEventListener('click', function(){ go('overview'); });
 $('#menuBtn').addEventListener('click', function(){ $('#sidebar').classList.toggle('open'); });
 
 /* tabs */
@@ -266,7 +282,7 @@ function renderOverview(){
   });
   grid.innerHTML=html;
 }
-$('#agentGrid').addEventListener('click', function(e){ var c=e.target.closest('.agent-card'); if(c) navTo(c.dataset.nav); });
+$('#agentGrid').addEventListener('click', function(e){ var c=e.target.closest('.agent-card'); if(c) go(c.dataset.nav); });
 
 function updateOverviewLive(){
   if(selected!==null) return;
@@ -521,8 +537,9 @@ function updateSidebarLive(){
 var loopId=null, snapId=null, pollId=null;
 function startLoop(){
   if(loopId) return;
-  renderSidebar(); navTo(selected===null?'overview':selected);
-  pollState(); // first fetch
+  renderSidebar(); routeFromPath();
+  // first fetch; once data is in, honor a deep link to an agent that wasn't loaded yet
+  pollState().then(function(){ if(selected===null) routeFromPath(); });
   pollId=setInterval(function(){ if(!document.hidden) pollState(); }, 2000);
   loopId=setInterval(tick,1000);
   snapId=setInterval(function(){
@@ -560,7 +577,7 @@ $$('.seg[data-group]').forEach(function(seg){
       demo.agentCount=+b.dataset.val; PREF.agentCount=demo.agentCount; savePref();
       regenAgents(demo.agentCount);
       if(selected && !agentById(selected)) selected=null;
-      renderSidebar(); navTo(selected===null?'overview':selected);
+      renderSidebar(); routeFromPath();
     } else {
       PREF[g]=b.dataset.val; savePref(); applyPref();
     }

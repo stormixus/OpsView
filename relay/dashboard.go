@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -78,20 +79,23 @@ func (h *Hub) HandleDashboardState(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(h.buildDashboardState())
 }
 
-// HandleDashboardStatic serves index.html (at /dashboard) and embedded assets.
+// HandleDashboardStatic serves embedded assets under /dashboard/assets/ and the
+// SPA index.html for every other /dashboard* path (so client-side path routes
+// like /dashboard/agent/<id> deep-link and survive a refresh). The /dashboard/api/*
+// routes are registered separately and take precedence in the mux.
 func (h *Hub) HandleDashboardStatic(w http.ResponseWriter, r *http.Request) {
 	sub, _ := fs.Sub(dashboardAssets, "dashboard_assets")
-	if r.URL.Path == "/dashboard" || r.URL.Path == "/dashboard/" {
-		b, err := fs.ReadFile(sub, "index.html")
-		if err != nil {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(b)
+	if strings.HasPrefix(r.URL.Path, "/dashboard/assets/") {
+		http.StripPrefix("/dashboard/assets/", http.FileServer(http.FS(sub))).ServeHTTP(w, r)
 		return
 	}
-	http.StripPrefix("/dashboard/assets/", http.FileServer(http.FS(sub))).ServeHTTP(w, r)
+	b, err := fs.ReadFile(sub, "index.html")
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(b)
 }
 
 // registerDashboard wires routes onto mux only when the dashboard is enabled.
