@@ -27,6 +27,7 @@ type APIStatus struct {
 	Profile        int    `json:"profile"`
 	AutoStart      bool   `json:"autostart"`
 	PublisherToken string `json:"publisher_token"`
+	AgentID        string `json:"agent_id"`
 }
 
 func getPublicIP() string {
@@ -165,6 +166,7 @@ func handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 		Profile:        cfg.Profile,
 		AutoStart:      cfg.AutoStart,
 		PublisherToken: cfg.PublisherToken,
+		AgentID:        cfg.AgentID,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
@@ -188,6 +190,7 @@ func handleAPISave(w http.ResponseWriter, r *http.Request) {
 	cfg.RelayURL = req.RelayURL
 	cfg.Profile = req.Profile
 	cfg.PublisherToken = strings.TrimSpace(req.PublisherToken)
+	cfg.AgentID = strings.TrimSpace(req.AgentID)
 
 	newAutoStart := req.AutoStart
 	if newAutoStart != cfg.AutoStart {
@@ -501,6 +504,11 @@ const htmlTemplate = `
                     <input type="text" id="publisher-token" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition font-mono text-sm" placeholder="relay의 RELAY_PUBLISHER_TOKEN과 동일한 값">
                     <p class="text-xs text-slate-500 mt-1">Relay의 <code class="text-slate-400">RELAY_PUBLISHER_TOKEN</code>과 <strong class="text-slate-300">정확히 같은 값</strong>이어야 연결됩니다. 비워두면 환경변수(RELAY_PUBLISHER_TOKEN/AGENT_TOKEN)를 사용합니다.</p>
                 </div>
+                <div class="mt-4">
+                    <label class="block text-sm font-medium text-slate-300 mb-2">지점 ID (멀티 매장용, 선택)</label>
+                    <input type="text" id="agent-id" class="block w-full bg-slate-800/80 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition font-mono text-sm" placeholder="예: gangnam (비워두면 단일 매장)">
+                    <p class="text-xs text-slate-500 mt-1">하나의 relay에 여러 매장을 연결할 때만 설정합니다. relay의 <code class="text-slate-400">RELAY_AGENTS</code>에 등록된 ID와 같아야 하며, Publisher Token도 그 지점 토큰으로 넣습니다. <strong class="text-slate-300">비워두면 기존과 동일</strong>(기본 단일 매장).</p>
+                </div>
                 <div class="mt-4 pt-4 border-t border-slate-700/50">
                     <label class="block text-sm font-medium text-slate-300 mb-2">데이터베이스 초기화</label>
                     <button type="button" onclick="resetDatabase()" class="text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 px-3 py-2 rounded-lg transition font-medium">전체 DB 초기화 (DVR 및 채널 전체 삭제)</button>
@@ -732,6 +740,7 @@ const htmlTemplate = `
                 document.getElementById('profile').value = data.profile.toString();
                 document.getElementById('relay-url').value = data.relay_url;
                 document.getElementById('publisher-token').value = data.publisher_token || '';
+                document.getElementById('agent-id').value = data.agent_id || '';
                 document.getElementById('autostart').checked = data.autostart;
 
                 // Populate IP/Port from URL
@@ -770,6 +779,7 @@ const htmlTemplate = `
                 profile: parseInt(document.getElementById('profile').value),
                 relay_url: document.getElementById('relay-url').value.trim(),
                 publisher_token: document.getElementById('publisher-token').value.trim(),
+                agent_id: document.getElementById('agent-id').value.trim(),
                 autostart: document.getElementById('autostart').checked
             };
 

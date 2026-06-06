@@ -19,6 +19,7 @@ func runTray(cfg Config) {
 	agentCfg := AgentConfig{
 		RelayURL:       cfg.RelayURL,
 		PIN:            pin,
+		AgentID:        cfg.AgentID,
 		PublisherToken: token,
 		Profile:        cfg.Profile,
 		FPSMin:         5,

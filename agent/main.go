@@ -44,6 +44,9 @@ func main() {
 type AgentConfig struct {
 	RelayURL string
 	PIN      string
+	// AgentID identifies this agent/location to a multi-tenant relay. Empty =
+	// the default agent (legacy single-site behavior).
+	AgentID string
 	// PublisherToken is the shared relay secret the agent presents to claim the
 	// publisher slot. Sourced from RELAY_PUBLISHER_TOKEN (or AGENT_TOKEN).
 	PublisherToken string

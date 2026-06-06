@@ -12,6 +12,9 @@ type Config struct {
 	RelayURL  string `json:"relay_url"`
 	Profile   int    `json:"profile"`
 	AutoStart bool   `json:"auto_start"`
+	// AgentID names this location for a multi-tenant relay (RELAY_AGENTS).
+	// Empty = the default agent (single-site, unchanged behavior).
+	AgentID string `json:"agent_id"`
 	// PublisherToken is the shared relay secret presented to claim the publisher
 	// slot. Configurable in-app (Settings); when empty, resolvePublisherToken
 	// falls back to the RELAY_PUBLISHER_TOKEN / AGENT_TOKEN environment variable.

@@ -115,6 +115,7 @@ func (a *Agent) connect() error {
 	// Send HELLO
 	hello := proto.Hello{
 		Role:          "publisher",
+		AgentID:       a.cfg.AgentID,
 		Client:        "opsview-agent",
 		ClientVersion: Version,
 		Supports:      []string{"zstd"},
