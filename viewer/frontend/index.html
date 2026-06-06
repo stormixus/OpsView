@@ -1079,7 +1079,7 @@
         clearTimeout(reconnectTimeout);
         setStatus('connected', t('connected'));
         // Send OVP HELLO + AUTH
-        const hello = { role: 'watcher', client: 'opsview-web', client_version: '0.3.6', supports: ['zstd'], want_profile: null };
+        const hello = { role: 'watcher', client: 'opsview-web', client_version: '0.3.7', supports: ['zstd'], want_profile: null };
         sendOVPMsg(1, JSON.stringify(hello));
         const auth = { token: pin };
         sendOVPMsg(2, JSON.stringify(auth));
@@ -1341,13 +1341,10 @@
       return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     }
-    // Only Chromium-based engines (Chrome, Edge, Windows WebView2) reliably play
-    // the relay's raw fMP4 over MSE. Safari/macOS WKWebView accepts addSourceBuffer
-    // but renders black for these fragments — it has solid native HLS instead, so
-    // fall back to HLS there. (UA "Chrome/" is absent on WKWebView/Safari.)
+    // WS+MSE works anywhere MSE exists once fragments play on a 0-based timeline
+    // (see sb.mode = 'sequence' below). iOS has no MSE, so it falls back to HLS.
     function wsTransportUsable() {
-      if (!('MediaSource' in window) || isIOSDevice()) return false;
-      return /Chrome\//.test(navigator.userAgent);
+      return ('MediaSource' in window) && !isIOSDevice();
     }
     function hex2(n) { return n.toString(16).padStart(2, '0'); }
     // Parse the avc1.PPCCLL codec string from an fMP4 init segment's avcC box.
@@ -1408,8 +1405,17 @@
             const mime = codec ? 'video/mp4; codecs="' + codec + '"' : '';
             if (!codec || !MediaSource.isTypeSupported(mime)) { fail('codec'); return; }
             try { sb = ms.addSourceBuffer(mime); } catch (err) { fail('addSourceBuffer'); return; }
-            sb.mode = 'segments';
-            sb.addEventListener('updateend', flush);
+            // 'sequence' re-bases each fragment to a 0-based timeline. The relay's
+            // fragments carry the RTSP stream's running baseMediaDecodeTime (can be
+            // many hours), so in 'segments' mode the buffered range starts far from
+            // currentTime=0 — Chrome auto-seeks but Safari/WKWebView renders black.
+            sb.mode = 'sequence';
+            sb.addEventListener('updateend', () => {
+              flush();
+              // Safari/WKWebView won't auto-start once data arrives if play() was
+              // called before the buffer had anything — nudge it on every append.
+              video.play().catch(() => {});
+            });
             sb.addEventListener('error', () => fail('sb'));
           }
           queue.push(data);

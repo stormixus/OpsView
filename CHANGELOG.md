@@ -2,6 +2,26 @@
 
 All notable changes to OpsView are documented here.
 
+## [0.3.7] - 2026-06-06
+
+### Fixed
+
+- **CCTV over WebSocket now actually plays in Safari / WKWebView** (so the macOS
+  desktop viewer uses the `wss` path instead of falling back to HLS). Two
+  WebKit-strict issues, both invisible in Chromium:
+  - The relay's fMP4 fragments carry the RTSP stream's running
+    `baseMediaDecodeTime` (often many hours in), so under MSE `'segments'` mode
+    the buffered range starts far from `currentTime = 0`. Chrome auto-seeks;
+    WebKit just shows black. Fixed by appending in `'sequence'` mode, which
+    re-bases every fragment onto a 0-based timeline.
+  - WebKit does not auto-start playback if `video.play()` was called before the
+    SourceBuffer had any data, so the picture stayed frozen. Fixed by nudging
+    `play()` after each append.
+  The v0.3.6 Chromium-only gate is therefore lifted — WS+MSE is used on any
+  engine with MSE (iOS, which has none, still uses HLS), and an H.265 substream
+  (no H.264 MSE support outside Safari) still falls back to HLS via the
+  `MediaSource.isTypeSupported` check.
+
 ## [0.3.6] - 2026-06-05
 
 ### Fixed

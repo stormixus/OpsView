@@ -292,7 +292,7 @@ function connect() {
     const hello = {
       role: 'watcher',
       client: 'opsview-web',
-      client_version: '0.3.6',
+      client_version: '0.3.7',
       supports: ['zstd'],
       want_profile: null
     };
@@ -773,12 +773,10 @@ function isIOSDevice() {
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
-// Only Chromium-based engines reliably play the relay's raw fMP4 over MSE.
-// Safari/WKWebView accepts addSourceBuffer but renders black for these fragments;
-// it has solid native HLS instead, so fall back to HLS there.
+// WS+MSE works anywhere MSE exists once fragments play on a 0-based timeline
+// (see sb.mode = 'sequence' below). iOS has no MSE, so it falls back to HLS.
 function wsTransportUsable() {
-  if (!('MediaSource' in window) || isIOSDevice()) return false;
-  return /Chrome\//.test(navigator.userAgent);
+  return ('MediaSource' in window) && !isIOSDevice();
 }
 
 function hex2(n) { return (n < 16 ? '0' : '') + n.toString(16); }
@@ -845,8 +843,16 @@ function playRelayCCTVWS(video, wsUrl, onFail) {
         const mime = codec ? 'video/mp4; codecs="' + codec + '"' : '';
         if (!codec || !MediaSource.isTypeSupported(mime)) { fail('codec'); return; }
         try { sb = ms.addSourceBuffer(mime); } catch (err) { fail('addSourceBuffer'); return; }
-        sb.mode = 'segments';
-        sb.addEventListener('updateend', flush);
+        // 'sequence' re-bases fragments to a 0-based timeline; the relay's
+        // baseMediaDecodeTime is the RTSP stream's running clock (hours in), which
+        // leaves Safari/WKWebView black under 'segments'.
+        sb.mode = 'sequence';
+        sb.addEventListener('updateend', () => {
+          flush();
+          // Safari/WKWebView won't auto-start once data arrives if play() ran
+          // before the buffer had anything — nudge it on every append.
+          video.play().catch(() => {});
+        });
         sb.addEventListener('error', () => fail('sb'));
       }
       queue.push(data);
