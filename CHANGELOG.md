@@ -13,6 +13,10 @@ All notable changes to OpsView are documented here.
   The dashboard can edit too (drag-reorder + rename per device), round-tripping
   the edit to the agent over its publisher connection (new `MsgSurvMeta`) so both
   surfaces stay in sync.
+- **Agent: optional 지점 ID (`agent_id`) for multi-tenant relays.** Settings gains
+  an Agent ID field; when set, the agent claims a named tenant session on the
+  relay (`RELAY_AGENTS`) with its own streams/PIN/isolation. Empty keeps the
+  legacy single "default" agent behavior, so existing installs are unchanged.
 - **Dashboard: group CCTV by DVR/NVR device.** A device chip selector
   (전체 + one chip per DVR) filters the status table and live grid to one device,
   so a 36-channel agent isn't a flat wall (and fewer live WS connections). The
