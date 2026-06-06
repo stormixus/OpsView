@@ -629,6 +629,7 @@ function loadTenants(){
   fetch('/dashboard/api/agents').then(function(r){ return r.ok? r.json() : null; }).then(function(d){
     var list=$('#tenant-list'); if(!list) return;
     if(!d){ list.innerHTML='<div class="mut" style="font-size:12px;">불러오기 실패</div>'; return; }
+    var pwSet=$('#pw-set'); if(pwSet) pwSet.style.display = d.editable ? '' : 'none';
     var addUI=$('.tenant-add');
     if(!d.editable){
       if(addUI) addUI.style.display='none';
@@ -654,6 +655,14 @@ function loadTenants(){
 if($('#tn-gen')) $('#tn-gen').addEventListener('click', function(){
   var a=new Uint8Array(16); (crypto||window.crypto).getRandomValues(a);
   $('#tn-token').value=[].map.call(a,function(b){return ('0'+b.toString(16)).slice(-2);}).join('');
+});
+if($('#pw-save')) $('#pw-save').addEventListener('click', function(){
+  var pw=$('#pw-new').value;
+  var m=$('#pw-msg'); var set=function(t,bad){ m.textContent=t; m.className='tenant-msg'+(bad?' bad':''); };
+  if(pw.length<4){ set('비밀번호는 4자 이상이어야 합니다.', true); return; }
+  fetch('/dashboard/api/password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})})
+    .then(function(r){ if(r.ok){ $('#pw-new').value=''; set('비밀번호가 변경되었습니다.'); }
+      else r.text().then(function(t){ set('변경 실패: '+t, true); }); });
 });
 if($('#tn-add')) $('#tn-add').addEventListener('click', function(){
   var id=$('#tn-id').value.trim(), name=$('#tn-name').value.trim(), token=$('#tn-token').value.trim();

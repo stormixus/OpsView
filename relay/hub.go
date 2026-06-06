@@ -46,6 +46,35 @@ type Hub struct {
 	done         chan struct{}
 	testPattern  *TestPattern
 	pinLimiter   *pinLimiter
+
+	dashTokMu sync.RWMutex
+	dashTokDB string // dashboard password stored in the DB ("" = use env)
+}
+
+// effectiveDashToken returns the active dashboard password: the DB-stored value
+// if set, otherwise the env-configured RELAY_DASHBOARD_TOKEN.
+func (h *Hub) effectiveDashToken() string {
+	h.dashTokMu.RLock()
+	db := h.dashTokDB
+	h.dashTokMu.RUnlock()
+	if db != "" {
+		return db
+	}
+	return h.cfg.DashboardToken
+}
+
+// setDashToken persists a new dashboard password to the DB.
+func (h *Hub) setDashToken(tok string) error {
+	if h.cfg.Store == nil {
+		return fmt.Errorf("dashboard password is read-only (no RELAY_DB configured)")
+	}
+	if err := h.cfg.Store.setSetting(settingDashboardToken, tok); err != nil {
+		return err
+	}
+	h.dashTokMu.Lock()
+	h.dashTokDB = tok
+	h.dashTokMu.Unlock()
+	return nil
 }
 
 // Watcher wraps a viewer WebSocket connection with a send queue.
@@ -67,6 +96,12 @@ func NewHub(cfg Config) *Hub {
 	}
 	// Pre-create the default session so the legacy flat path always resolves.
 	h.sessions["default"] = newAgentSession("default", "default")
+	// Load any DB-stored dashboard password (overrides the env one for login).
+	if cfg.Store != nil {
+		if v, err := cfg.Store.getSetting(settingDashboardToken); err == nil {
+			h.dashTokDB = v
+		}
+	}
 	h.testPattern = NewTestPattern(h)
 	return h
 }
