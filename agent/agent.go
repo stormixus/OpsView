@@ -206,6 +206,8 @@ func (a *Agent) readPump(conn *websocket.Conn) {
 					}
 				}
 			}
+		} else if hdr.Type == proto.MsgSurvMeta {
+			a.applySurvMeta(data[proto.HeaderSize:])
 		} else if hdr.Type == proto.MsgSurvSnapshot {
 			// Bound concurrent snapshot handlers; drop when saturated so a flood
 			// of requests cannot exhaust goroutines/connections.
@@ -305,6 +307,30 @@ func (a *Agent) sendSurvConfig() {
 			log.Printf("[agent] sendSurvConfig send error: %v", err)
 		} else {
 			log.Printf("[agent] sent surveillance config: %d DVRs, %d channels", len(cfg.DVRs), len(cfg.Channels))
+		}
+	}
+}
+
+// applySurvMeta applies a relay-originated channel metadata edit (reorder/rename)
+// to the local DB. Each mutation fires onChange -> sendSurvConfig, re-broadcasting
+// the updated config so all viewers + the dashboard reflect it.
+func (a *Agent) applySurvMeta(payload []byte) {
+	if a.survMgr == nil {
+		return
+	}
+	var m proto.SurvMeta
+	if err := json.Unmarshal(payload, &m); err != nil {
+		log.Printf("[agent] surv meta parse: %v", err)
+		return
+	}
+	for _, rn := range m.Renames {
+		if err := a.survMgr.RenameChannel(m.DVRID, rn.ChNum, rn.Name); err != nil {
+			log.Printf("[agent] surv meta rename ch %d: %v", rn.ChNum, err)
+		}
+	}
+	if len(m.Order) > 0 {
+		if err := a.survMgr.ReorderChannels(m.DVRID, m.Order); err != nil {
+			log.Printf("[agent] surv meta reorder dvr %d: %v", m.DVRID, err)
 		}
 	}
 }

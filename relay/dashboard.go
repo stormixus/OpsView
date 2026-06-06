@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/opsview/opsview/proto"
 )
 
 //go:embed dashboard_assets
@@ -79,6 +81,39 @@ func (h *Hub) HandleDashboardState(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(h.buildDashboardState())
 }
 
+// HandleDashboardChannelMeta forwards a channel-metadata edit (reorder/rename)
+// from the dashboard to a specific agent's publisher (relay -> agent round-trip).
+// The agent applies it to its DB and re-broadcasts the updated config.
+func (h *Hub) HandleDashboardChannelMeta(w http.ResponseWriter, r *http.Request) {
+	if !h.authedDashboard(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		AgentID string `json:"agent_id"`
+		proto.SurvMeta
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	s := h.sessionByID(body.AgentID)
+	if s == nil {
+		s = h.defaultSession()
+	}
+	if s == nil || !s.online() {
+		http.Error(w, "agent offline", http.StatusConflict)
+		return
+	}
+	payload, _ := json.Marshal(body.SurvMeta)
+	s.sendToPublisher(proto.MarshalMessage(proto.MsgSurvMeta, payload))
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // HandleDashboardStatic serves embedded assets under /dashboard/assets/ and the
 // SPA index.html for every other /dashboard* path (so client-side path routes
 // like /dashboard/agent/<id> deep-link and survive a refresh). The /dashboard/api/*
@@ -106,6 +141,7 @@ func (h *Hub) registerDashboard(mux *http.ServeMux) {
 	mux.HandleFunc("/dashboard/api/login", h.HandleDashboardLogin)
 	mux.HandleFunc("/dashboard/api/logout", h.HandleDashboardLogout)
 	mux.HandleFunc("/dashboard/api/state", h.HandleDashboardState)
+	mux.HandleFunc("/dashboard/api/channel-meta", h.HandleDashboardChannelMeta)
 	mux.HandleFunc("/dashboard", h.HandleDashboardStatic)
 	mux.HandleFunc("/dashboard/", h.HandleDashboardStatic)
 }

@@ -87,6 +87,7 @@ function adaptState(api){
       id:a.id, name:a.name, online:!!a.connected,
       dvr:(a.dvrs&&a.dvrs[0]?a.dvrs[0].name:''),
       dvrs:(a.dvrs||[]).map(function(d){return {id:d.id, name:d.name, channels:d.channels};}),
+      chans:(a.channels||[]).map(function(c){return {dvr_id:c.dvr_id, ch_num:c.ch_num, name:c.name, order:c.order, enabled:c.enabled, active:c.active};}),
       since_ms: a.since? Date.parse(a.since): now,
       last_publish_ms: a.last_publish_at? Date.parse(a.last_publish_at): now,
       pin_set:!!a.pin_set, publish_count:a.publish_count||0,
@@ -626,5 +627,68 @@ tgRelay.addEventListener('click', function(){
   if(demo.relayDown) relayDownAt=Date.now();
   renderConn();
 });
+
+/* ============================================================ CHANNEL EDITOR */
+var editEl = $('#edit-modal');
+if ($('#editBtn')) $('#editBtn').addEventListener('click', function(){ if (selected) openEditor(selected); });
+if ($('#editClose')) $('#editClose').addEventListener('click', closeEditor);
+if (editEl) editEl.addEventListener('click', function(e){ if (e.target === editEl) closeEditor(); });
+function escHtml(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escAttr(s){ return escHtml(s).replace(/"/g,'&quot;'); }
+function openEditor(agentId){
+  var a = agentById(agentId); if (!a) return;
+  $('#edit-agname').textContent = a.name;
+  var byDvr = {};
+  (a.chans||[]).forEach(function(c){ (byDvr[c.dvr_id] = byDvr[c.dvr_id]||[]).push(c); });
+  Object.keys(byDvr).forEach(function(k){ byDvr[k].sort(function(x,y){ return (x.order||0)-(y.order||0); }); });
+  var dvrs = (a.dvrs && a.dvrs.length) ? a.dvrs : Object.keys(byDvr).map(function(id){ return {id:+id, name:'DVR '+id}; });
+  var html = '';
+  dvrs.forEach(function(d){
+    var list = byDvr[d.id] || []; if (!list.length) return;
+    html += '<div class="edit-dvr"><div class="edit-dvr-name">'+escHtml(d.name)+' <span class="mut">'+list.length+'ch</span></div><ul class="edit-list" data-dvr="'+d.id+'">';
+    list.forEach(function(c){
+      html += '<li class="edit-row" draggable="true" data-ch="'+c.ch_num+'">'+
+        '<span class="grip">⋮</span><span class="edit-chno mono">CH'+c.ch_num+'</span>'+
+        '<input class="edit-name" data-ch="'+c.ch_num+'" value="'+escAttr(c.name||'')+'">'+
+        (c.active?'<span class="edit-live">live</span>':'')+'</li>';
+    });
+    html += '</ul></div>';
+  });
+  $('#edit-body').innerHTML = html || '<p class="mut" style="padding:16px;">채널이 없습니다. 먼저 에이전트에서 채널 탐색을 해주세요.</p>';
+  wireEditor(agentId);
+  editEl.classList.add('show');
+}
+function closeEditor(){ if (editEl) editEl.classList.remove('show'); }
+function wireEditor(agentId){
+  $$('#edit-body .edit-name').forEach(function(inp){
+    inp.addEventListener('change', function(){
+      var ul = inp.closest('.edit-list');
+      postMeta(agentId, +ul.dataset.dvr, null, [{ ch_num:+inp.dataset.ch, name: inp.value }]);
+    });
+    inp.addEventListener('keydown', function(e){ if (e.key==='Enter') inp.blur(); });
+  });
+  $$('#edit-body .edit-list').forEach(function(ul){
+    var dragging = null;
+    ul.addEventListener('dragstart', function(e){ var li=e.target.closest('.edit-row'); if (li && ul.contains(li)){ dragging=li; li.classList.add('drag'); } });
+    ul.addEventListener('dragend', function(){ if (dragging){ dragging.classList.remove('drag'); var d=dragging; dragging=null; saveOrder(agentId, ul); } });
+    ul.addEventListener('dragover', function(e){ e.preventDefault(); if (!dragging) return; var after=rowAfter(ul, e.clientY); if (after==null) ul.appendChild(dragging); else ul.insertBefore(dragging, after); });
+  });
+}
+function rowAfter(ul, y){
+  var rows = [].slice.call(ul.querySelectorAll('.edit-row:not(.drag)'));
+  for (var i=0;i<rows.length;i++){ var r=rows[i].getBoundingClientRect(); if (y < r.top + r.height/2) return rows[i]; }
+  return null;
+}
+function saveOrder(agentId, ul){
+  var nums = [].slice.call(ul.querySelectorAll('.edit-row')).map(function(li){ return +li.dataset.ch; });
+  postMeta(agentId, +ul.dataset.dvr, nums, null);
+}
+function postMeta(agentId, dvrId, order, renames){
+  var body = { agent_id: agentId, dvr_id: dvrId };
+  if (order) body.order = order;
+  if (renames) body.renames = renames;
+  fetch('/dashboard/api/channel-meta', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
+    .then(function(r){ if (r.status===409) { alert('에이전트 오프라인 — 편집을 적용할 수 없습니다.'); } });
+}
 
 })();

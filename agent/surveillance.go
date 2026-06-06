@@ -273,6 +273,37 @@ func (m *SurveillanceManager) ListChannels(dvrID int64) ([]ChannelConfig, error)
 	return chs, rows.Err()
 }
 
+// ReorderChannels sets each channel's display_order to its position in
+// orderedChNums, then pushes the updated config to the relay (via onChange).
+func (m *SurveillanceManager) ReorderChannels(dvrID int64, orderedChNums []int) error {
+	tx, err := m.db.Begin()
+	if err != nil {
+		return err
+	}
+	for i, chNum := range orderedChNums {
+		if _, err := tx.Exec(`UPDATE channels SET display_order=? WHERE dvr_id=? AND ch_num=?`, i, dvrID, chNum); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if m.onChange != nil {
+		m.onChange()
+	}
+	return nil
+}
+
+// RenameChannel updates a channel's display name and pushes the updated config.
+func (m *SurveillanceManager) RenameChannel(dvrID int64, chNum int, name string) error {
+	_, err := m.db.Exec(`UPDATE channels SET name=? WHERE dvr_id=? AND ch_num=?`, name, dvrID, chNum)
+	if err == nil && m.onChange != nil {
+		m.onChange()
+	}
+	return err
+}
+
 func (m *SurveillanceManager) DiscoverChannels(dvrID int64) ([]ChannelConfig, error) {
 	dvr, err := m.getDVR(dvrID)
 	if err != nil {
