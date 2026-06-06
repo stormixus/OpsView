@@ -36,6 +36,10 @@ type ErrorMsg struct {
 type SurvConfig struct {
 	DVRs     []DVRInfo     `json:"dvrs"`
 	Channels []ChannelInfo `json:"channels"`
+	// AgentID is the tenant/session scope for /surv paths. The publisher leaves it
+	// empty (it doesn't know its tenant id); the relay stamps it before forwarding
+	// to watchers so a named agent's streams resolve as /surv/<id>/dvrN_chM.
+	AgentID string `json:"agent_id,omitempty"`
 }
 
 // DVRInfo describes a single DVR/NVR.

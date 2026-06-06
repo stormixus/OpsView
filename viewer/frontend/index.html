@@ -1488,8 +1488,13 @@
     // WS-preferred dispatcher: tries fMP4-over-WS, falls back to HLS on any failure.
     function playRelayCCTV(video, scheme, ip, port, streamDvrId, chNum) {
       teardownCellPlayer(video); // clean any prior player on this cell before re-arming
-      const hlsUrl = scheme + '://' + ip + ':' + port + '/surv/dvr' + streamDvrId + '_ch' + chNum + '/index.m3u8';
-      const wsUrl = (scheme === 'https' ? 'wss' : 'ws') + '://' + ip + ':' + port + '/surv/ws/dvr' + streamDvrId + '_ch' + chNum;
+      // Named (multi-tenant) agents namespace their streams as /surv/<agentId>/dvrN_chM.
+      // The relay stamps the tenant id into survConfig.agent_id; without this prefix the
+      // request falls to the default session and finds no stream (black grid).
+      const aid = window.survRemoteConfig && window.survRemoteConfig.agent_id;
+      const scope = aid ? encodeURIComponent(aid) + '/' : '';
+      const hlsUrl = scheme + '://' + ip + ':' + port + '/surv/' + scope + 'dvr' + streamDvrId + '_ch' + chNum + '/index.m3u8';
+      const wsUrl = (scheme === 'https' ? 'wss' : 'ws') + '://' + ip + ':' + port + '/surv/' + 'ws/' + scope + 'dvr' + streamDvrId + '_ch' + chNum;
       const player = playRelayCCTVWS(video, wsUrl, () => startRelayHLS(video, hlsUrl, 'ch' + chNum));
       if (player) { video._wsPlayer = player; remoteWSPlayers.push(player); }
     }

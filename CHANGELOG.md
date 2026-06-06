@@ -4,6 +4,19 @@ All notable changes to OpsView are documented here.
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-06-07
+
+### Fixed
+
+- **CCTV black in the desktop viewer for named (multi-tenant) agents.** The relay
+  namespaces a named agent's streams as `/surv/<agentId>/dvrN_chM`, but the viewer
+  built the path without the scope (`/surv/dvrN_chM`), so the request fell to the
+  default session, found no stream, and every cell went black. (Single "default"
+  agents were unaffected — they fall back to direct RTSP.) The relay now stamps the
+  session id into the surv config (`agent_id`) it forwards to watchers, and the
+  viewer prefixes the scope onto the `/surv` (HLS) and `/surv/ws` (fMP4) paths.
+  Needs **both** a relay image pull and a viewer update. proto: `SurvConfig.AgentID`.
+
 ## [0.8.1] - 2026-06-07
 
 ### Added

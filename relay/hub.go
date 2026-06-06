@@ -364,12 +364,15 @@ func (h *Hub) HandlePublish(w http.ResponseWriter, r *http.Request) {
 
 		switch hdr.Type {
 		case proto.MsgSurvConfig:
-			cfgCopy := make([]byte, len(data))
-			copy(cfgCopy, data)
+			// Stamp the session (tenant) id into the config so watchers learn the
+			// /surv path scope to use (named agents are namespaced as
+			// /surv/<id>/dvrN_chM; the publisher itself doesn't know its tenant id).
+			// Always returns a fresh buffer, safe to hand the proxy goroutine + broadcast.
+			cfgCopy := stampSurvConfigAgentID(data, sess.id)
 			sess.survConfigMu.Lock()
 			sess.survConfig = cfgCopy
 			sess.survConfigMu.Unlock()
-			sess.broadcast <- data
+			sess.broadcast <- cfgCopy
 			// Start RTSP→HLS proxy streams off the read loop (blocking DVR connects
 			// must not stall publisher frame ingestion). cfgCopy is a private copy.
 			go sess.survProxy.HandleSurvConfig(cfgCopy[proto.HeaderSize:])
@@ -530,6 +533,28 @@ func (h *Hub) routeSnapshotResponse(s *agentSession, reqID string, rawMsg []byte
 			return
 		}
 	}
+}
+
+// stampSurvConfigAgentID returns a fresh copy of a MsgSurvConfig message with its
+// AgentID set to the session (tenant) id, so watchers know the /surv path scope.
+// The default/legacy session keeps the flat path (no stamp). Always returns a
+// private buffer; on any parse/marshal error it falls back to a plain copy.
+func stampSurvConfigAgentID(msg []byte, agentID string) []byte {
+	cp := make([]byte, len(msg))
+	copy(cp, msg)
+	if agentID == "" || agentID == "default" || len(msg) <= proto.HeaderSize {
+		return cp
+	}
+	var cfg proto.SurvConfig
+	if err := json.Unmarshal(msg[proto.HeaderSize:], &cfg); err != nil {
+		return cp
+	}
+	cfg.AgentID = agentID
+	payload, err := json.Marshal(cfg)
+	if err != nil {
+		return cp
+	}
+	return proto.MarshalMessage(proto.MsgSurvConfig, payload)
 }
 
 // redactSurvConfigPayload parses a SurvConfig JSON payload and returns a copy
