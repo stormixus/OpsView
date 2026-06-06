@@ -91,7 +91,7 @@ func (h *Hub) HandleDashboardStatic(w http.ResponseWriter, r *http.Request) {
 		w.Write(b)
 		return
 	}
-	http.StripPrefix("/dashboard/", http.FileServer(http.FS(sub))).ServeHTTP(w, r)
+	http.StripPrefix("/dashboard/assets/", http.FileServer(http.FS(sub))).ServeHTTP(w, r)
 }
 
 // registerDashboard wires routes onto mux only when the dashboard is enabled.
