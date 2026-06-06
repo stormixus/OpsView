@@ -40,7 +40,41 @@ func openAgentStore(path string) (*agentStore, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS hidden_agents (
+		id TEXT PRIMARY KEY
+	)`); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &agentStore{db: db}, nil
+}
+
+// hiddenAgents loads the set of operator-hidden agent ids.
+func (s *agentStore) hiddenAgents() ([]string, error) {
+	rows, err := s.db.Query(`SELECT id FROM hidden_agents`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// setAgentHidden adds or removes an agent id from the hidden set.
+func (s *agentStore) setAgentHidden(id string, hidden bool) error {
+	if hidden {
+		_, err := s.db.Exec(`INSERT OR IGNORE INTO hidden_agents (id) VALUES (?)`, id)
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM hidden_agents WHERE id=?`, id)
+	return err
 }
 
 // ipLabels loads the operator-assigned IP -> name map.

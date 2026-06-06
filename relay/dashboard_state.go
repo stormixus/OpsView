@@ -9,8 +9,15 @@ import (
 )
 
 type dashboardState struct {
-	Relay  relayInfo    `json:"relay"`
-	Agents []agentState `json:"agents"`
+	Relay        relayInfo    `json:"relay"`
+	Agents       []agentState `json:"agents"`
+	HiddenAgents []agentRef   `json:"hidden_agents,omitempty"` // operator-hidden agents (for restore)
+}
+
+// agentRef is a minimal agent identity (used for the hidden-agents list).
+type agentRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type relayInfo struct {
@@ -89,11 +96,16 @@ func msToRFC3339(ms int64) string {
 func (h *Hub) buildDashboardState() dashboardState {
 	sessions := h.allSessions()
 	agents := make([]agentState, 0, len(sessions))
+	hidden := make([]agentRef, 0)
 
 	var online, watchersTotal, streamsTotal int
 	var bin, bout int64
 
 	for _, s := range sessions {
+		if h.isAgentHidden(s.id) {
+			hidden = append(hidden, agentRef{ID: s.id, Name: s.name})
+			continue // excluded from the dashboard (operator-hidden)
+		}
 		s.mu.RLock()
 		connected := s.publisher != nil
 		pinSet := s.pin != ""
@@ -172,12 +184,13 @@ func (h *Hub) buildDashboardState() dashboardState {
 			Version:       relayVersion,
 			UptimeSec:     int64(time.Since(h.startedAt).Seconds()),
 			AgentsOnline:  online,
-			AgentsTotal:   len(sessions),
+			AgentsTotal:   len(agents),
 			WatchersTotal: watchersTotal,
 			StreamsTotal:  streamsTotal,
 			BytesIn:       bin,
 			BytesOut:      bout,
 		},
-		Agents: agents,
+		Agents:       agents,
+		HiddenAgents: hidden,
 	}
 }

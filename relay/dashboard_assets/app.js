@@ -322,6 +322,7 @@ function renderOverview(){
     html+='<button class="agent-card'+(a.online?'':' offline')+'" data-nav="'+a.id+'">'+
       '<div class="ac-snap">'+deskMiniHTML()+
         '<span class="ac-badge '+(a.online?'on':'off')+'">'+(a.online?'<span class="dot live"></span>온라인':'오프라인')+'</span>'+
+        '<span class="ac-hide" data-hide="'+a.id+'" title="대시보드에서 숨기기"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19M6.6 6.6A18.5 18.5 0 0 0 2 12s3 8 10 8a9.1 9.1 0 0 0 5.4-1.6M1 1l22 22"/></svg></span>'+
         (a.online?'<span class="ac-chcount">'+act+'/'+a.chTotal+' CH</span>':'')+
         '<div class="ac-off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 5l20 14M2 5h20v14"/></svg><span>연결 끊김</span></div>'+
       '</div>'+
@@ -334,7 +335,16 @@ function renderOverview(){
   });
   grid.innerHTML=html;
 }
-$('#agentGrid').addEventListener('click', function(e){ var c=e.target.closest('.agent-card'); if(c) go(c.dataset.nav); });
+$('#agentGrid').addEventListener('click', function(e){
+  var hb=e.target.closest('.ac-hide');
+  if(hb){ e.stopPropagation(); e.preventDefault(); hideAgent(hb.dataset.hide, true); return; }
+  var c=e.target.closest('.agent-card'); if(c) go(c.dataset.nav);
+});
+// Hide/unhide an agent (e.g. the unused default) from the dashboard.
+function hideAgent(id, hidden){
+  fetch('/dashboard/api/agent-hide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,hidden:hidden})})
+    .then(function(r){ if(r.ok){ pollState().then(function(){ if(selected!==null && !agentById(selected) && hidden) go('overview'); }); loadHiddenAgents(); } });
+}
 
 function updateOverviewLive(){
   if(selected!==null) return;
@@ -681,7 +691,7 @@ function stopLoop(){
 
 /* ============================================================ DRAWER */
 var drawer=$('#drawer'), scrim=$('#scrim');
-function openDrawer(){ drawer.classList.add('show'); scrim.classList.add('show'); loadTenants(); }
+function openDrawer(){ drawer.classList.add('show'); scrim.classList.add('show'); loadTenants(); loadHiddenAgents(); }
 function closeDrawer(){ drawer.classList.remove('show'); scrim.classList.remove('show'); }
 $('#gearBtn').addEventListener('click', openDrawer);
 $('#drawerClose').addEventListener('click', closeDrawer);
@@ -754,6 +764,24 @@ if($('#pw-save')) $('#pw-save').addEventListener('click', function(){
     .then(function(r){ if(r.ok){ $('#pw-new').value=''; set('비밀번호가 변경되었습니다.'); }
       else r.text().then(function(t){ set('변경 실패: '+t, true); }); });
 });
+/* --- hidden agents (지점 관리: 숨긴 지점 복원) --- */
+function loadHiddenAgents(){
+  var block=$('#hidden-block'), list=$('#hidden-list');
+  if(!block||!list) return;
+  fetch('/dashboard/api/state').then(function(r){ return r.ok?r.json():null; }).then(function(s){
+    var hidden=(s&&s.hidden_agents)||[];
+    if(!hidden.length){ block.style.display='none'; list.innerHTML=''; return; }
+    block.style.display='';
+    list.innerHTML=hidden.map(function(a){
+      return '<div class="hidden-row"><span>'+escHtml(a.name||a.id)+' <span class="mono" style="opacity:.45;">'+escHtml(a.id)+'</span></span>'+
+        '<button class="tn-restore" data-restore="'+escAttr(a.id)+'">복원</button></div>';
+    }).join('');
+  }).catch(function(){});
+}
+if($('#hidden-list')) $('#hidden-list').addEventListener('click', function(e){
+  var b=e.target.closest('[data-restore]'); if(b) hideAgent(b.dataset.restore, false);
+});
+
 /* --- fault alerts (telegram / webhook) --- */
 function alMsg(t,bad){ var m=$('#al-msg'); if(m){ m.textContent=t; m.className='tenant-msg'+(bad?' bad':''); } }
 function loadAlertCfg(){

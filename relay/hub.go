@@ -55,6 +55,9 @@ type Hub struct {
 
 	alertMu  sync.RWMutex
 	alertCfg alertConfig // fault-alert delivery settings (telegram/webhook)
+
+	hiddenMu     sync.RWMutex
+	hiddenAgents map[string]bool // operator-hidden agent ids (excluded from dashboard)
 }
 
 // effectiveDashToken returns the active dashboard password: the DB-stored value
@@ -115,8 +118,41 @@ func NewHub(cfg Config) *Hub {
 		h.ipLabels = make(map[string]string)
 	}
 	h.alertCfg = loadAlertConfig(cfg.Store)
+	h.hiddenAgents = make(map[string]bool)
+	if cfg.Store != nil {
+		if ids, err := cfg.Store.hiddenAgents(); err == nil {
+			for _, id := range ids {
+				h.hiddenAgents[id] = true
+			}
+		}
+	}
 	h.testPattern = NewTestPattern(h)
 	return h
+}
+
+// isAgentHidden reports whether an agent id is operator-hidden.
+func (h *Hub) isAgentHidden(id string) bool {
+	h.hiddenMu.RLock()
+	defer h.hiddenMu.RUnlock()
+	return h.hiddenAgents[id]
+}
+
+// setAgentHidden hides or unhides an agent and persists it. Requires a store.
+func (h *Hub) setAgentHidden(id string, hidden bool) error {
+	if h.cfg.Store == nil {
+		return fmt.Errorf("hidden agents are read-only (no RELAY_DB configured)")
+	}
+	if err := h.cfg.Store.setAgentHidden(id, hidden); err != nil {
+		return err
+	}
+	h.hiddenMu.Lock()
+	if hidden {
+		h.hiddenAgents[id] = true
+	} else {
+		delete(h.hiddenAgents, id)
+	}
+	h.hiddenMu.Unlock()
+	return nil
 }
 
 // getAlertConfig returns the current fault-alert settings (thread-safe copy).

@@ -247,6 +247,37 @@ func (h *Hub) HandleDashboardIPLabel(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// HandleDashboardAgentHide hides or unhides an agent (e.g. the unused "default"
+// agent) from the dashboard. Admin-gated; persisted in the DB (requires RELAY_DB).
+func (h *Hub) HandleDashboardAgentHide(w http.ResponseWriter, r *http.Request) {
+	if !h.authedDashboard(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		ID     string `json:"id"`
+		Hidden bool   `json:"hidden"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	body.ID = strings.TrimSpace(body.ID)
+	if body.ID == "" {
+		http.Error(w, "id required", http.StatusBadRequest)
+		return
+	}
+	if err := h.setAgentHidden(body.ID, body.Hidden); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // HandleDashboardAlertConfig gets (GET) or saves (POST) the fault-alert delivery
 // settings (telegram/webhook). Admin-gated; saving requires RELAY_DB.
 func (h *Hub) HandleDashboardAlertConfig(w http.ResponseWriter, r *http.Request) {
@@ -405,6 +436,7 @@ func (h *Hub) registerDashboard(mux *http.ServeMux) {
 	mux.HandleFunc("/dashboard/api/ip-label", h.HandleDashboardIPLabel)
 	mux.HandleFunc("/dashboard/api/alert-config", h.HandleDashboardAlertConfig)
 	mux.HandleFunc("/dashboard/api/alert-test", h.HandleDashboardAlertTest)
+	mux.HandleFunc("/dashboard/api/agent-hide", h.HandleDashboardAgentHide)
 	mux.HandleFunc("/dashboard/api/agents", h.HandleDashboardAgents)
 	mux.HandleFunc("/dashboard/api/password", h.HandleDashboardPassword)
 	mux.HandleFunc("/dashboard", h.HandleDashboardStatic)

@@ -6,6 +6,11 @@ All notable changes to OpsView are documented here.
 
 ### Added
 
+- **Dashboard: hide unused agents (지점 관리).** Hover an agent card → 숨기기 to
+  hide it from the dashboard (e.g. the leftover "default" agent after moving to
+  named tenants). Hidden agents drop from the overview, cards, and totals;
+  restore them from the settings drawer's 지점 관리 → 숨긴 지점 list. Persisted in
+  the relay DB (`hidden_agents`, requires `RELAY_DB`). Relay-only.
 - **Fault alerts (Telegram + webhook).** The relay watches each agent (지점) and,
   when one goes offline for >30s, pushes an alert — and again on recovery — to
   Telegram and/or a webhook (Slack/Discord/etc.). Configure in the dashboard

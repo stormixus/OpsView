@@ -510,3 +510,13 @@ button{font-family:inherit; cursor:pointer;}
 /* ---- fault alert settings (drawer) ---- */
 .al-toggle{display:flex; align-items:center; gap:9px; margin:4px 0 12px; font-size:13.5px; font-weight:600; color:var(--text-muted); cursor:pointer;}
 .al-toggle input{width:16px; height:16px; accent-color:var(--accent); cursor:pointer;}
+
+/* ---- agent card hide button + hidden-agents (지점 관리) ---- */
+.ac-hide{position:absolute; top:10px; right:10px; z-index:4; width:26px; height:26px; border-radius:7px; display:grid; place-items:center; background:rgba(0,0,0,.45); border:1px solid rgba(255,255,255,.15); color:rgba(255,255,255,.75); opacity:0; transition:opacity .15s ease, background .15s ease, color .15s ease; cursor:pointer;}
+.agent-card:hover .ac-hide{opacity:1;}
+.ac-hide:hover{background:var(--bad-bg); color:var(--bad); border-color:color-mix(in srgb,var(--bad) 50%, transparent);}
+.ac-hide svg{width:15px; height:15px;}
+.hidden-list{display:flex; flex-direction:column; gap:6px; margin-top:8px;}
+.hidden-row{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 11px; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; font-size:13px;}
+.tn-restore{padding:5px 11px; border-radius:7px; border:1px solid var(--border-strong); background:transparent; color:var(--accent-2); font-size:12px; font-weight:700; cursor:pointer;}
+.tn-restore:hover{background:color-mix(in srgb,var(--accent-2) 14%, transparent);}

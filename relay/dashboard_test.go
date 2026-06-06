@@ -227,3 +227,55 @@ func TestIPLabelHandler(t *testing.T) {
 		t.Fatalf("label not stored: %q", h.getIPLabel("1.2.3.4"))
 	}
 }
+
+func TestAgentHide(t *testing.T) {
+	store, _ := openAgentStore(t.TempDir() + "/relay.db")
+	t.Cleanup(func() { store.close() })
+	cfg := cfgWithDash("x")
+	cfg.Store = store
+	h := NewHub(cfg) // pre-creates the "default" session
+
+	if h.isAgentHidden("default") {
+		t.Fatal("not hidden initially")
+	}
+	if err := h.setAgentHidden("default", true); err != nil {
+		t.Fatal(err)
+	}
+	if !h.isAgentHidden("default") {
+		t.Fatal("should be hidden")
+	}
+	st := h.buildDashboardState()
+	for _, a := range st.Agents {
+		if a.ID == "default" {
+			t.Fatal("hidden agent still listed in Agents")
+		}
+	}
+	found := false
+	for _, a := range st.HiddenAgents {
+		if a.ID == "default" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("hidden agent missing from HiddenAgents")
+	}
+	if err := h.setAgentHidden("default", false); err != nil || h.isAgentHidden("default") {
+		t.Fatal("unhide failed")
+	}
+}
+
+func TestAgentHideHandler(t *testing.T) {
+	h := NewHub(cfgWithDash("x")) // no store
+	rec := httptest.NewRecorder()
+	h.HandleDashboardAgentHide(rec, httptest.NewRequest("POST", "/dashboard/api/agent-hide", strings.NewReader(`{"id":"default","hidden":true}`)))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no cookie: want 401, got %d", rec.Code)
+	}
+	req := httptest.NewRequest("POST", "/dashboard/api/agent-hide", strings.NewReader(`{"id":"default","hidden":true}`))
+	req.AddCookie(&http.Cookie{Name: dashboardCookieName, Value: signSession(h.effectiveDashToken(), time.Now().Add(time.Hour))})
+	rec2 := httptest.NewRecorder()
+	h.HandleDashboardAgentHide(rec2, req)
+	if rec2.Code != http.StatusConflict { // authed but no RELAY_DB
+		t.Fatalf("no store: want 409, got %d", rec2.Code)
+	}
+}
