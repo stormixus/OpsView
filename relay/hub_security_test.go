@@ -38,7 +38,7 @@ func TestValidPublisherToken(t *testing.T) {
 // (not just any non-empty string), and the watcher PIN is the separate value
 // the publisher advertises — not the publisher's auth token.
 func TestPublisherWatcherAuthEndToEnd(t *testing.T) {
-	hub := NewHub(Config{MaxWatcherQueue: 4, PublisherToken: "secret-token"})
+	hub := NewHub(cfgWithToken("secret-token"))
 	go hub.Run()
 	defer hub.Stop()
 
@@ -123,9 +123,10 @@ func TestRedactSurvConfigPayload(t *testing.T) {
 // The unauthenticated /api/surv endpoint must (a) require the viewer PIN and
 // (b) never return DVR credentials even to an authenticated caller.
 func TestHandleSurvConfigRedactsAndRequiresPIN(t *testing.T) {
-	hub := NewHub(Config{MaxWatcherQueue: 4, PublisherToken: "x"})
-	hub.publisher = &websocket.Conn{} // non-nil marker: a publisher is "connected"
-	hub.publisherPIN = "123456"
+	hub := NewHub(cfgWithToken("x"))
+	s := hub.defaultSession()
+	s.publisher = &websocket.Conn{} // non-nil marker: a publisher is "connected"
+	s.pin = "123456"
 
 	cfg := proto.SurvConfig{
 		DVRs: []proto.DVRInfo{{
@@ -133,7 +134,7 @@ func TestHandleSurvConfigRedactsAndRequiresPIN(t *testing.T) {
 			Username: "rootuser", Password: "s3cr3t-pw",
 		}},
 	}
-	hub.survConfig = proto.MarshalMessage(proto.MsgSurvConfig, mustJSON(cfg))
+	s.survConfig = proto.MarshalMessage(proto.MsgSurvConfig, mustJSON(cfg))
 
 	// No PIN -> 401
 	if rec := callSurv(hub, ""); rec.Code != http.StatusUnauthorized {
