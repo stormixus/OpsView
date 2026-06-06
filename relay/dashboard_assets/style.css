@@ -408,6 +408,7 @@ button{font-family:inherit; cursor:pointer;}
 
 /* real video fill for live grid cells */
 .cell .cellvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000;z-index:0;}
+.modal-cell .cellvid{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:0;}
 .cell .clabel,.cell .cstat,.cell .rec,.cell .ts,.cell .expand,.cell .wn{z-index:2;}
 
 /* DVR/NVR device selector chips */

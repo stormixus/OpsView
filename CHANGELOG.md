@@ -2,6 +2,18 @@
 
 All notable changes to OpsView are documented here.
 
+## [0.6.1] - 2026-06-06
+
+### Fixed
+
+- **Dashboard: enlarging a CCTV channel now shows the video.** The modal video
+  element was only sized by a `.cell`-scoped rule, so in the fullscreen modal it
+  had no dimensions and the stream (though attached) stayed invisible. Added a
+  `.modal-cell .cellvid` rule (object-fit: contain).
+- **Dashboard: assets are no longer served stale.** Static assets now send
+  `Cache-Control: no-cache`, so a new relay build's CSS/JS/logo is picked up on
+  the next load instead of after a manual hard refresh.
+
 ## [0.6.0] - 2026-06-06
 
 ### Added
