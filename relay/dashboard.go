@@ -437,6 +437,8 @@ func (h *Hub) registerDashboard(mux *http.ServeMux) {
 	mux.HandleFunc("/dashboard/api/alert-config", h.HandleDashboardAlertConfig)
 	mux.HandleFunc("/dashboard/api/alert-test", h.HandleDashboardAlertTest)
 	mux.HandleFunc("/dashboard/api/agent-hide", h.HandleDashboardAgentHide)
+	mux.HandleFunc("/dashboard/api/rec", h.HandleDashboardRecordings)
+	mux.HandleFunc("/dashboard/api/rec-file", h.HandleDashboardRecFile)
 	mux.HandleFunc("/dashboard/api/agents", h.HandleDashboardAgents)
 	mux.HandleFunc("/dashboard/api/password", h.HandleDashboardPassword)
 	mux.HandleFunc("/dashboard", h.HandleDashboardStatic)

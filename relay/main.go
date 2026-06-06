@@ -33,6 +33,7 @@ func runServer() (stop func()) {
 	go hub.Run()
 	go hub.alertMonitor() // fault alerts (agent offline/recovery) via telegram/webhook
 	if rec := newRecorder(hub, cfg.Port); rec != nil {
+		hub.rec = rec
 		go rec.Run() // NVR: record active streams to RELAY_REC_DIR (opt-in)
 	}
 

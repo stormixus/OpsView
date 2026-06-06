@@ -49,3 +49,33 @@ func TestRecorderJanitor(t *testing.T) {
 		}
 	}
 }
+
+func TestRecordingsListing(t *testing.T) {
+	dir := t.TempDir()
+	r := &Recorder{dir: dir, segSecs: 300}
+	stream := "dvr4_ch1"
+	sd := filepath.Join(dir, stream)
+	os.MkdirAll(sd, 0o755)
+	os.WriteFile(filepath.Join(sd, "20260607_120000.mp4"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(sd, "20260607_120500.mp4"), []byte("xx"), 0o644)
+	os.WriteFile(filepath.Join(sd, "20260606_235500.mp4"), []byte("y"), 0o644)
+
+	days := r.days(stream)
+	if len(days) != 2 || days[0] != "20260607" {
+		t.Fatalf("days: %v", days)
+	}
+	segs := r.segments(stream, "20260607")
+	if len(segs) != 2 || segs[0].Dur != 300 {
+		t.Fatalf("segs: %+v", segs)
+	}
+	// path safety
+	if _, ok := r.safeStreamDir("../etc"); ok {
+		t.Fatal("traversal dir allowed")
+	}
+	if _, ok := r.segmentFile(stream, "../x.mp4"); ok {
+		t.Fatal("traversal file allowed")
+	}
+	if _, ok := r.segmentFile(stream, "20260607_120000.mp4"); !ok {
+		t.Fatal("valid segment rejected")
+	}
+}

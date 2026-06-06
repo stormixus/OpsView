@@ -58,6 +58,8 @@ type Hub struct {
 
 	hiddenMu     sync.RWMutex
 	hiddenAgents map[string]bool // operator-hidden agent ids (excluded from dashboard)
+
+	rec *Recorder // NVR recorder (nil when recording is disabled)
 }
 
 // effectiveDashToken returns the active dashboard password: the DB-stored value

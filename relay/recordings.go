@@ -1,0 +1,178 @@
+package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+)
+
+// recSegment is one recorded MP4 file in the review timeline.
+type recSegment struct {
+	Name  string `json:"name"`  // e.g. "20260607_153000.mp4"
+	Start int64  `json:"start"` // unix seconds (local time parsed from the name)
+	Dur   int    `json:"dur"`   // seconds (gap to next segment, capped at nominal)
+	Size  int64  `json:"size"`
+}
+
+const recNameLayout = "20060102_150405"
+
+// safeStreamDir validates a stream path (allows one "agent/stream" slash, blocks
+// traversal) and returns its on-disk directory.
+func (r *Recorder) safeStreamDir(stream string) (string, bool) {
+	stream = strings.Trim(stream, "/")
+	if stream == "" || strings.Contains(stream, "..") {
+		return "", false
+	}
+	for _, c := range stream {
+		ok := c == '/' || c == '_' || c == '-' ||
+			(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+		if !ok {
+			return "", false
+		}
+	}
+	dir := filepath.Join(r.dir, filepath.FromSlash(stream))
+	if rel, err := filepath.Rel(r.dir, dir); err != nil || strings.HasPrefix(rel, "..") {
+		return "", false
+	}
+	return dir, true
+}
+
+// days returns the YYYYMMDD dates with recordings for a stream (newest first).
+func (r *Recorder) days(stream string) []string {
+	dir, ok := r.safeStreamDir(stream)
+	if !ok {
+		return nil
+	}
+	set := map[string]bool{}
+	for _, e := range readDirSafe(dir) {
+		n := e.Name()
+		if !e.IsDir() && strings.HasSuffix(n, ".mp4") && len(n) >= 8 {
+			set[n[:8]] = true
+		}
+	}
+	out := make([]string, 0, len(set))
+	for d := range set {
+		out = append(out, d)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(out)))
+	return out
+}
+
+// segments returns the recordings for a stream on a YYYYMMDD day, time-sorted,
+// with durations computed from the gap to the next segment.
+func (r *Recorder) segments(stream, day string) []recSegment {
+	dir, ok := r.safeStreamDir(stream)
+	if !ok || len(day) != 8 {
+		return nil
+	}
+	var segs []recSegment
+	for _, e := range readDirSafe(dir) {
+		n := e.Name()
+		if e.IsDir() || !strings.HasPrefix(n, day) || !strings.HasSuffix(n, ".mp4") {
+			continue
+		}
+		t, err := time.ParseInLocation(recNameLayout, strings.TrimSuffix(n, ".mp4"), time.Local)
+		if err != nil {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		segs = append(segs, recSegment{Name: n, Start: t.Unix(), Size: info.Size()})
+	}
+	sort.Slice(segs, func(i, j int) bool { return segs[i].Start < segs[j].Start })
+	nominal := r.segSecs
+	if nominal <= 0 {
+		nominal = recSegSeconds
+	}
+	for i := range segs {
+		dur := nominal
+		if i+1 < len(segs) {
+			if gap := int(segs[i+1].Start - segs[i].Start); gap > 0 && gap < nominal {
+				dur = gap
+			}
+		}
+		segs[i].Dur = dur
+	}
+	return segs
+}
+
+// segmentFile resolves + validates one segment file path for serving.
+func (r *Recorder) segmentFile(stream, name string) (string, bool) {
+	dir, ok := r.safeStreamDir(stream)
+	if !ok {
+		return "", false
+	}
+	if name == "" || strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") || !strings.HasSuffix(name, ".mp4") {
+		return "", false
+	}
+	return filepath.Join(dir, name), true
+}
+
+func readDirSafe(dir string) []os.DirEntry {
+	e, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	return e
+}
+
+// HandleDashboardRecordings lists recording days (no day param) or the segments
+// for a given day. Admin-gated. ?stream=<path>[&day=YYYYMMDD].
+func (h *Hub) HandleDashboardRecordings(w http.ResponseWriter, r *http.Request) {
+	if !h.authedDashboard(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.rec == nil {
+		http.Error(w, "recording disabled", http.StatusConflict)
+		return
+	}
+	stream := r.URL.Query().Get("stream")
+	day := r.URL.Query().Get("day")
+	w.Header().Set("Content-Type", "application/json")
+	if day != "" {
+		json.NewEncoder(w).Encode(map[string]interface{}{"segments": h.rec.segments(stream, day)})
+	} else {
+		json.NewEncoder(w).Encode(map[string]interface{}{"days": h.rec.days(stream)})
+	}
+}
+
+// HandleDashboardRecFile serves a recorded segment MP4 (Range-enabled, so the
+// browser can seek), optionally as a download (?dl=1). Admin-gated.
+func (h *Hub) HandleDashboardRecFile(w http.ResponseWriter, r *http.Request) {
+	if !h.authedDashboard(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.rec == nil {
+		http.Error(w, "recording disabled", http.StatusConflict)
+		return
+	}
+	path, ok := h.rec.segmentFile(r.URL.Query().Get("stream"), r.URL.Query().Get("name"))
+	if !ok {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.IsDir() {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "video/mp4")
+	if r.URL.Query().Get("dl") != "" {
+		w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(path)+`"`)
+	}
+	http.ServeContent(w, r, info.Name(), info.ModTime(), f)
+}

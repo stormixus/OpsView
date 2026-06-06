@@ -285,6 +285,7 @@ function setTab(t){
   $('#'+t+'-pane').classList.add('active');
   if(t==='live' && selected){ renderGrid(agentById(selected)); }
   else { stopLiveGrid(); }
+  if(t==='rec' && selected){ openRec(); } else { recStop(); }
 }
 $$('#agent-view .tab').forEach(function(b){ b.addEventListener('click', function(){ setTab(b.dataset.tab); }); });
 
@@ -600,6 +601,95 @@ function saveIPName(inp){
 }
 modalCell.addEventListener('change', function(e){ if(e.target.classList.contains('ipname-in')) saveIPName(e.target); });
 modalCell.addEventListener('keydown', function(e){ if(e.target.classList.contains('ipname-in') && e.key==='Enter'){ e.preventDefault(); e.target.blur(); } });
+
+/* ============================================================ RECORDINGS (녹화) */
+var recCtx = { stream:null, day:null, dayStart:0, segs:[], cur:null };
+var recVideo = $('#recVideo');
+function pad2(n){ return (n<10?'0':'')+n; }
+function recDayStr(d){ return ''+d.getFullYear()+pad2(d.getMonth()+1)+pad2(d.getDate()); }
+function recSetDateInput(ymd){ $('#recDate').value=ymd.slice(0,4)+'-'+ymd.slice(4,6)+'-'+ymd.slice(6,8); }
+function recDateInputVal(){ var v=$('#recDate').value; return v? v.replace(/-/g,'') : ''; }
+function recDayStartSec(ymd){ return Math.floor(new Date(+ymd.slice(0,4),+ymd.slice(4,6)-1,+ymd.slice(6,8),0,0,0).getTime()/1000); }
+
+function openRec(){
+  var a = selected!==null ? agentById(selected) : null; if(!a) return;
+  var sel=$('#recChannel'), prev=sel.value;
+  var streams=(a.streams||[]).slice().sort(function(x,y){return (x.ch||0)-(y.ch||0);});
+  sel.innerHTML = streams.map(function(s){ return '<option value="'+escAttr(s.path)+'">'+escHtml(s.name)+' · CH'+s.ch+'</option>'; }).join('');
+  if(prev && streams.some(function(s){return s.path===prev;})) sel.value=prev;
+  recCtx.stream = sel.value || (streams[0]&&streams[0].path);
+  if(!recCtx.stream){ recRenderEmpty('채널 없음'); return; }
+  recLoadDays();
+}
+function recLoadDays(){
+  fetch(BASE+'/api/rec?stream='+encodeURIComponent(recCtx.stream)).then(function(r){return r.ok?r.json():null;}).then(function(d){
+    var days=(d&&d.days)||[], want=recDateInputVal();
+    if(!want || days.indexOf(want)<0) want = days[0] || recDayStr(new Date());
+    recSetDateInput(want); recLoadDay();
+  }).catch(function(){ recRenderEmpty('녹화 비활성/불러오기 실패'); });
+}
+function recLoadDay(){
+  var day=recDateInputVal(); if(!day) return;
+  recCtx.day=day; recCtx.dayStart=recDayStartSec(day);
+  fetch(BASE+'/api/rec?stream='+encodeURIComponent(recCtx.stream)+'&day='+day).then(function(r){return r.ok?r.json():null;}).then(function(d){
+    recCtx.segs=(d&&d.segments)||[]; recRenderTimeline();
+    if(recCtx.segs.length){ $('#recEmpty').style.display='none'; } else { recRenderEmpty('이 날짜 녹화 없음'); }
+  }).catch(function(){ recRenderEmpty('불러오기 실패'); });
+}
+function recRenderEmpty(msg){
+  recCtx.segs=[]; recCtx.cur=null; recRenderTimeline();
+  var e=$('#recEmpty'); if(e){ e.style.display='flex'; var b=e.querySelector('b'); if(b) b.textContent=msg||'녹화 없음'; }
+  try{ recVideo.removeAttribute('src'); recVideo.load(); }catch(x){}
+  $('#recMeta').textContent=''; $('#recDownload').disabled=true; $('#recPlayhead').style.display='none';
+}
+function recRenderTimeline(){
+  var hours=$('#recHours'); if(hours && !hours._done){ var h=''; for(var i=0;i<=24;i+=3){ h+='<span style="left:'+(i/24*100)+'%">'+pad2(i)+':00</span>'; } hours.innerHTML=h; hours._done=true; }
+  $('#recTrack').innerHTML = recCtx.segs.map(function(s){
+    var left=(s.start-recCtx.dayStart)/86400*100, w=Math.max(0.12, s.dur/86400*100);
+    return '<span class="rec-seg" style="left:'+left+'%;width:'+w+'%"></span>';
+  }).join('');
+  var tot=recCtx.segs.reduce(function(a,s){return a+s.dur;},0);
+  $('#recMeta').textContent = recCtx.segs.length? (recCtx.segs.length+'구간 · '+Math.round(tot/60)+'분') : '';
+}
+function recSegAt(sec){
+  for(var i=0;i<recCtx.segs.length;i++){ var s=recCtx.segs[i]; if(sec>=s.start && sec<s.start+s.dur+2) return s; }
+  for(var j=0;j<recCtx.segs.length;j++){ if(recCtx.segs[j].start>=sec) return recCtx.segs[j]; }
+  return null;
+}
+function recPlayAt(sec){
+  var s=recSegAt(sec); if(!s) return;
+  var offset=Math.max(0, sec-s.start); recCtx.cur=s; $('#recDownload').disabled=false; $('#recEmpty').style.display='none';
+  var url=BASE+'/api/rec-file?stream='+encodeURIComponent(recCtx.stream)+'&name='+encodeURIComponent(s.name);
+  if(recVideo.getAttribute('src')!==url){ recVideo.src=url; recVideo.load(); recVideo.onloadedmetadata=function(){ try{recVideo.currentTime=offset;}catch(e){} recVideo.play().catch(function(){}); }; }
+  else { try{recVideo.currentTime=offset;}catch(e){} recVideo.play().catch(function(){}); }
+}
+$('#recTimeline').addEventListener('click', function(e){
+  if(!recCtx.segs.length) return;
+  var rect=this.getBoundingClientRect(); recPlayAt(recCtx.dayStart + Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width))*86400);
+});
+$('#recTimeline').addEventListener('mousemove', function(e){
+  var rect=this.getBoundingClientRect(), frac=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
+  var d=new Date((recCtx.dayStart+frac*86400)*1000), cur=$('#recCursor');
+  cur.style.display='block'; cur.style.left=(frac*100)+'%'; cur.textContent=pad2(d.getHours())+':'+pad2(d.getMinutes());
+});
+$('#recTimeline').addEventListener('mouseleave', function(){ $('#recCursor').style.display='none'; });
+recVideo.addEventListener('timeupdate', function(){
+  if(!recCtx.cur) return;
+  var frac=((recCtx.cur.start+recVideo.currentTime)-recCtx.dayStart)/86400, ph=$('#recPlayhead');
+  ph.style.display='block'; ph.style.left=(frac*100)+'%';
+});
+recVideo.addEventListener('ended', function(){
+  if(!recCtx.cur) return; var next=null;
+  for(var i=0;i<recCtx.segs.length;i++){ if(recCtx.segs[i].start>recCtx.cur.start){ next=recCtx.segs[i]; break; } }
+  if(next) recPlayAt(next.start);
+});
+function recStop(){ try{ recVideo.pause(); }catch(e){} }
+$('#recChannel').addEventListener('change', function(){ recCtx.stream=this.value; recLoadDays(); });
+$('#recDate').addEventListener('change', recLoadDay);
+function recShiftDay(delta){ var day=recDateInputVal(); if(!day) return; var d=new Date(recDayStartSec(day)*1000); d.setDate(d.getDate()+delta); recSetDateInput(recDayStr(d)); recLoadDay(); }
+$('#recPrevDay').addEventListener('click', function(){ recShiftDay(-1); });
+$('#recNextDay').addEventListener('click', function(){ recShiftDay(1); });
+$('#recDownload').addEventListener('click', function(){ if(recCtx.cur) window.open(BASE+'/api/rec-file?stream='+encodeURIComponent(recCtx.stream)+'&name='+encodeURIComponent(recCtx.cur.name)+'&dl=1','_blank'); });
 
 /* ============================================================ RELAY / CONN */
 var relayDownAt=Date.now();

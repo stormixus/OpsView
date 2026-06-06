@@ -11,7 +11,13 @@ All notable changes to OpsView are documented here.
   channel that copies the relay's *own* HLS — so the DVR is not pulled a second
   time and nothing is re-encoded. `RELAY_REC_MAX` (e.g. "2TB") caps disk use; a
   janitor deletes the oldest segments past the cap. Records whatever quality the
-  relay streams (substream here). Review/timeline UI is next. Relay-only.
+  relay streams (substream here). Relay-only.
+- **Dashboard: 녹화 review tab.** A new 녹화 tab per agent: pick a channel + day,
+  scrub a 24-hour timeline of recorded segments, click any time to play it
+  instantly (with seek + auto-advance to the next segment), hover for the time
+  readout, and download the current segment. Backed by
+  `/dashboard/api/rec` (list) + `/dashboard/api/rec-file` (Range-served MP4),
+  admin-gated with path-traversal guards.
 
 - **Dashboard: hide unused agents (지점 관리).** Hover an agent card → 숨기기 to
   hide it from the dashboard (e.g. the leftover "default" agent after moving to

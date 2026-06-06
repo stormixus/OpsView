@@ -114,6 +114,7 @@
         <nav class="tabs">
           <button class="tab active" data-tab="status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>상태</button>
           <button class="tab" data-tab="live"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M10 9.5l5 2.5-5 2.5z" fill="currentColor" stroke="none"/></svg>라이브</button>
+          <button class="tab" data-tab="rec"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg>녹화</button>
         </nav>
 
         <!-- DVR/NVR device selector (shown when an agent has more than one device) -->
@@ -206,6 +207,30 @@
           <div class="live-bar"><h2>라이브 그리드</h2><span class="meta" id="liveMeta"></span><button class="live-edit-toggle" id="liveEditBtn" style="margin-left:auto;">편집</button></div>
           <div class="grid" id="grid"></div>
           <div class="grid-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 5l20 14"/></svg><b>표시할 채널 없음</b><span>활성 CCTV 스트림이 없습니다</span></div>
+        </section>
+
+        <!-- RECORDINGS PANE -->
+        <section class="pane" id="rec-pane">
+          <div class="rec-bar">
+            <select id="recChannel" class="rec-sel" title="채널"></select>
+            <button class="rec-nav" id="recPrevDay" title="이전 날">‹</button>
+            <input type="date" id="recDate" class="rec-date">
+            <button class="rec-nav" id="recNextDay" title="다음 날">›</button>
+            <span class="rec-meta" id="recMeta"></span>
+            <button id="recDownload" class="rec-dl" style="margin-left:auto;" disabled>구간 다운로드</button>
+          </div>
+          <div class="rec-stage">
+            <video id="recVideo" class="rec-video" controls playsinline></video>
+            <div class="rec-empty" id="recEmpty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg><b>이 날짜 녹화 없음</b><span>RELAY_REC_DIR 설정 + 다른 날짜 선택</span></div>
+          </div>
+          <div class="rec-timewrap">
+            <div class="rec-hours" id="recHours"></div>
+            <div class="rec-timeline" id="recTimeline">
+              <div class="rec-track" id="recTrack"></div>
+              <div class="rec-playhead" id="recPlayhead"></div>
+            </div>
+            <div class="rec-cursor" id="recCursor"></div>
+          </div>
         </section>
       </section>
     </div>
