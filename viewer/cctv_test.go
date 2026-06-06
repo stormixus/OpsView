@@ -127,3 +127,20 @@ func splitTestHostPort(addr net.Addr) (string, int, error) {
 	}
 	return host, port, nil
 }
+
+func TestRTSPPortFor(t *testing.T) {
+	cases := []struct {
+		stored, want int
+	}{
+		{0, 554},    // unset -> RTSP default
+		{80, 554},   // HTTP/ISAPI port -> RTSP 554
+		{8000, 554}, // Hikvision SDK port -> RTSP 554
+		{554, 554},  // already RTSP
+		{8554, 8554}, // custom RTSP port kept as-is
+	}
+	for _, c := range cases {
+		if got := rtspPortFor(DVRConfig{Port: c.stored}); got != c.want {
+			t.Errorf("rtspPortFor(Port=%d) = %d, want %d", c.stored, got, c.want)
+		}
+	}
+}

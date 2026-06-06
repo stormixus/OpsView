@@ -168,3 +168,21 @@ func TestSessionWatcherList(t *testing.T) {
 		t.Fatalf("watcherList=%+v", list)
 	}
 }
+
+func TestOpsSnapshotAuthAndOffline(t *testing.T) {
+	h := NewHub(cfgWithDash("dash-secret"))
+	// no cookie -> 401
+	rec := httptest.NewRecorder()
+	h.HandleDashboardOpsSnapshot(rec, httptest.NewRequest("GET", "/dashboard/api/ops-snapshot", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no cookie: want 401, got %d", rec.Code)
+	}
+	// authed but no online agent -> 204 (dashboard keeps its placeholder)
+	req := httptest.NewRequest("GET", "/dashboard/api/ops-snapshot", nil)
+	req.AddCookie(&http.Cookie{Name: dashboardCookieName, Value: signSession(h.effectiveDashToken(), time.Now().Add(time.Hour))})
+	rec2 := httptest.NewRecorder()
+	h.HandleDashboardOpsSnapshot(rec2, req)
+	if rec2.Code != http.StatusNoContent {
+		t.Fatalf("offline: want 204, got %d", rec2.Code)
+	}
+}

@@ -204,3 +204,31 @@ func mustJSON(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b
 }
+
+func TestDisplayClientIPHonorsForwardingHeaders(t *testing.T) {
+	mk := func(remote, cf, xff string) *http.Request {
+		r := httptest.NewRequest("GET", "/watch", nil)
+		r.RemoteAddr = remote
+		if cf != "" {
+			r.Header.Set("CF-Connecting-IP", cf)
+		}
+		if xff != "" {
+			r.Header.Set("X-Forwarded-For", xff)
+		}
+		return r
+	}
+	cases := []struct {
+		name, remote, cf, xff, want string
+	}{
+		{"direct", "203.0.113.7:5512", "", "", "203.0.113.7"},
+		{"cf tunnel", "127.0.0.1:9000", "203.0.113.9", "", "203.0.113.9"},
+		{"xff single", "10.0.0.1:80", "", "203.0.113.5", "203.0.113.5"},
+		{"xff chain first hop", "10.0.0.1:80", "", "203.0.113.5, 70.1.2.3", "203.0.113.5"},
+		{"cf wins over xff", "10.0.0.1:80", "198.51.100.2", "203.0.113.5", "198.51.100.2"},
+	}
+	for _, c := range cases {
+		if got := displayClientIP(mk(c.remote, c.cf, c.xff)); got != c.want {
+			t.Errorf("%s: displayClientIP = %q, want %q", c.name, got, c.want)
+		}
+	}
+}

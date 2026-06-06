@@ -472,3 +472,22 @@ button{font-family:inherit; cursor:pointer;}
 .tn-add-btn{background:#22d3ee;color:#06202a;border:0;border-radius:7px;padding:9px;font-size:13px;font-weight:600;cursor:pointer;}
 .tenant-msg{font-size:12px;color:#10b981;min-height:16px;margin-top:6px;}
 .tenant-msg.bad{color:#f87171;}
+
+/* ---- Ops live snapshot + click-to-enlarge ---- */
+.ops-snap{position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#0a0d12; z-index:2;}
+#pubSnap{cursor:zoom-in;}
+.modal-cell.bare{width:auto; aspect-ratio:auto; border:none; overflow:visible; box-shadow:none; background:transparent;}
+.ops-modal-img{display:block; max-width:94vw; max-height:86vh; border-radius:12px; border:1px solid var(--border-strong); box-shadow:0 30px 80px rgba(0,0,0,.6); background:#0a0d12;}
+
+/* ---- clickable stat (Watchers) + watcher detail modal ---- */
+.stat-click{cursor:pointer; transition:border-color .15s ease, background .15s ease;}
+.stat-click:hover{border-color:var(--border-strong); background:rgba(255,255,255,.025);}
+.watchers-detail{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:18px 20px; min-width:min(540px,92vw); max-height:80vh; overflow:auto; box-shadow:0 30px 80px rgba(0,0,0,.6);}
+.watchers-detail h3{margin:0 0 12px; font-size:15px; font-weight:700;}
+
+/* ---- brand logo (viewer app icon, transparent) + clickable home ---- */
+.brand-img{width:30px; height:30px; flex:none; display:block; object-fit:contain;}
+.login-card .brand-img{width:40px; height:40px;}
+.brand-home{cursor:pointer; border-radius:10px; padding:3px 7px; margin:-3px -7px; transition:background .15s ease;}
+.brand-home:hover{background:rgba(255,255,255,.05);}
+.brand-home:focus-visible{outline:2px solid var(--accent-2); outline-offset:2px;}

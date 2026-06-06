@@ -151,6 +151,34 @@ func (h *Hub) HandleDashboardChannelMeta(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// HandleDashboardOpsSnapshot returns a PNG snapshot of an agent's current Ops
+// (screen-share) frame, rendered on demand from the relay's frame buffer.
+// Admin-gated. Returns 204 when the agent is offline or has no frame yet, so the
+// dashboard can keep showing its placeholder/offline state. ?agent=<id> selects
+// the tenant (empty/"default" => the default agent).
+func (h *Hub) HandleDashboardOpsSnapshot(w http.ResponseWriter, r *http.Request) {
+	if !h.authedDashboard(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	s := h.sessionByID(r.URL.Query().Get("agent"))
+	if s == nil {
+		s = h.defaultSession()
+	}
+	if s == nil || !s.online() {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	png, err := s.frameBuf.SnapshotPNG()
+	if err != nil {
+		w.WriteHeader(http.StatusNoContent) // no frame buffered yet
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(png)
+}
+
 // HandleDashboardAgents manages the named-agent (tenant) registry from the
 // dashboard: GET lists agents, POST upserts one, DELETE removes one. Editing
 // requires a persistent store (RELAY_DB); without it the registry is read-only.
@@ -246,6 +274,7 @@ func (h *Hub) registerDashboard(mux *http.ServeMux) {
 	mux.HandleFunc("/dashboard/api/logout", h.HandleDashboardLogout)
 	mux.HandleFunc("/dashboard/api/state", h.HandleDashboardState)
 	mux.HandleFunc("/dashboard/api/channel-meta", h.HandleDashboardChannelMeta)
+	mux.HandleFunc("/dashboard/api/ops-snapshot", h.HandleDashboardOpsSnapshot)
 	mux.HandleFunc("/dashboard/api/agents", h.HandleDashboardAgents)
 	mux.HandleFunc("/dashboard/api/password", h.HandleDashboardPassword)
 	mux.HandleFunc("/dashboard", h.HandleDashboardStatic)

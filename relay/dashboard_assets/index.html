@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>OpsView Relay</title>
 <link rel="stylesheet" href="/dashboard/assets/style.css" />
+<link rel="icon" type="image/png" href="/dashboard/assets/logo.png" />
 </head>
 <body>
 
@@ -13,7 +14,7 @@
   <div class="login-card" id="loginCard">
     <!-- LOGO: replace .brand-mark svg + .brand-name with your asset -->
     <div class="brand">
-      <span class="brand-mark"><svg viewBox="0 0 32 32" fill="none"><rect x="2.5" y="6" width="27" height="17" rx="3" stroke="currentColor" stroke-width="2.2"/><circle cx="16" cy="14.5" r="4" stroke="currentColor" stroke-width="2.2"/><circle cx="16" cy="14.5" r="1.4" fill="currentColor"/><path d="M11 28h10" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span>
+      <span class="brand-mark"><img class="brand-img" src="/dashboard/assets/logo.png" alt="OpsView" /></span>
       <span class="brand-name">OpsView <b>Relay</b></span>
     </div>
     <p class="login-sub">운영자 콘솔 · 매장 화면 & CCTV 중계</p>
@@ -33,8 +34,8 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
     </button>
     <!-- LOGO: replace .brand-mark svg + .brand-name with your asset -->
-    <div class="brand">
-      <span class="brand-mark"><svg viewBox="0 0 32 32" fill="none"><rect x="2.5" y="6" width="27" height="17" rx="3" stroke="currentColor" stroke-width="2.2"/><circle cx="16" cy="14.5" r="4" stroke="currentColor" stroke-width="2.2"/><circle cx="16" cy="14.5" r="1.4" fill="currentColor"/><path d="M11 28h10" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span>
+    <div class="brand brand-home" id="brandHome" title="홈으로" role="button" tabindex="0">
+      <span class="brand-mark"><img class="brand-img" src="/dashboard/assets/logo.png" alt="OpsView" /></span>
       <span class="brand-name">OpsView <b>Relay</b></span>
     </div>
     <div class="top-right">
@@ -62,7 +63,7 @@
           <h1>전체 개요</h1>
           <span class="sub" id="ovSub">relay 전역 요약</span>
           <div class="relay-meta">
-            <div class="rm"><div class="k">버전</div><div class="v">0.3.8</div></div>
+            <div class="rm"><div class="k">버전</div><div class="v">0.6.0</div></div>
             <div class="rm"><div class="k">업타임</div><div class="v" id="ovUptime">0:00:00</div></div>
           </div>
         </div>
@@ -125,10 +126,10 @@
               <div class="stat-num" id="pubState">연결됨</div>
               <div class="stat-sub"><span id="pubAgo" class="mono">0초</span> 전 프레임 · <b id="pubCount" class="mono">0</b> publish</div>
             </div>
-            <div class="stat">
+            <div class="stat stat-click" id="statWatch" title="클릭하면 시청자 상세">
               <div class="stat-head"><span class="stat-label">Watchers</span><span class="dot live"></span></div>
               <div class="stat-num"><span id="watchNum">0</span><span class="unit">명</span></div>
-              <div class="stat-sub">접속 중인 시청자</div>
+              <div class="stat-sub">접속 중인 시청자 · 클릭하면 상세</div>
             </div>
             <div class="stat">
               <div class="stat-head"><span class="stat-label">Streams</span><span class="dot live"></span></div>
@@ -148,10 +149,11 @@
           <div class="grid2">
             <div class="col">
               <div class="panel" id="pubPanel">
-                <div class="panel-head"><h3>Publisher · Ops 화면</h3><span class="count">v0.3.8</span></div>
+                <div class="panel-head"><h3>Publisher · Ops 화면</h3><span class="count">v0.6.0</span></div>
                 <div class="panel-body">
-                  <div class="pub-snap">
-                    <!-- SNAPSHOT: replace whole .desk block with <img src="/agents/{id}/snapshot.jpg"> -->
+                  <div class="pub-snap" id="pubSnap">
+                    <!-- Live Ops snapshot (rendered from the relay frame buffer); falls back to the .desk placeholder when offline / no frame. -->
+                    <img id="opsSnap" class="ops-snap" alt="Ops 화면" style="display:none;">
                     <div class="desk">
                       <div class="wall"></div>
                       <div class="win w1"><div class="tb"><i></i><i></i><i></i></div><div class="body"><div class="ln" style="width:80%"></div><div class="ln" style="width:55%"></div><div class="ln" style="width:70%"></div><div class="ln" style="width:40%"></div></div></div>

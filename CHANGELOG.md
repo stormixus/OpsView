@@ -20,6 +20,37 @@ All notable changes to OpsView are documented here.
   live tab turns the camera tiles into draggable, inline-renamable cells — drag
   to reorder, edit the name in place — replacing the separate modal editor. Each
   change round-trips to the agent per device.
+- **Dashboard: live Ops snapshot.** The "Publisher · Ops 화면" panel now shows the
+  real publisher screen (rendered on demand from the relay frame buffer via
+  `GET /dashboard/api/ops-snapshot`, admin-gated) instead of a placeholder,
+  refreshing while online and falling back to the placeholder when offline.
+  Click the panel to enlarge it (faster-refreshing full view).
+- **Dashboard: watcher detail.** Clicking the Watchers stat opens the full
+  watcher list (id, client IP, connected duration).
+- **Dashboard: branding.** The logo is now the OpsView app icon (background
+  removed → transparent) used as the header logo and favicon; clicking it
+  returns to the home overview.
+
+### Fixed
+
+- **Dashboard: enlarging a CCTV channel now plays live.** Clicking a channel
+  rendered a demo placeholder instead of attaching the stream; the modal now
+  uses the same live WS→HLS player as the grid cells.
+- **Dashboard: show the watcher's real IP behind a tunnel.** Watcher IPs are now
+  taken from `CF-Connecting-IP` / `X-Forwarded-For` (the real client) instead of
+  the Cloudflare Tunnel's socket address. Rate limiting still keys on the
+  unspoofable socket peer.
+- **Viewer: Hikvision DVRs no longer get stuck on 2-second snapshots.** A DVR
+  that answers ISAPI was probed as snapshot-only even when it also served live
+  RTSP, downgrading every channel to 2s snapshot polling. Discovery now prefers
+  live RTSP when its port is reachable (ISAPI stays the snapshot fallback), and
+  RTSP targets port 554 even when the DVR is stored on an HTTP port (80/8000).
+
+- **Viewer: connecting via a domain (Cloudflare Tunnel) just works.** Entering a
+  domain host (e.g. `ops.example.net`) now auto-uses `wss`/`https` on 443 for
+  both the Ops `/watch` socket and CCTV HLS, regardless of the port box (which
+  becomes optional for domains). Previously only an explicit port `443` switched
+  to TLS, so a tunnel domain silently tried plain `ws` and failed to connect.
 
 ## [0.5.0] - 2026-06-06
 

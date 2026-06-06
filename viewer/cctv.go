@@ -220,7 +220,7 @@ func (m *CCTVManager) DiscoverChannels(dvrID int64) ([]ChannelConfig, error) {
 	}
 
 	if dvr.Protocol == "auto" || dvr.Protocol == "" {
-		dvr.Protocol = m.probeDVRProtocol(dvr)
+		dvr.Protocol = m.streamProtocolFor(dvr)
 		// Save the discovered protocol for future rapid access
 		m.db.Exec(`UPDATE dvrs SET protocol=? WHERE id=?`, dvr.Protocol, dvr.ID)
 	}
@@ -591,6 +591,27 @@ func (m *CCTVManager) probeDVRProtocol(dvr DVRConfig) string {
 	// 3. Fallback to generic RTSP profile if port is alive but HTTP APIs fail
 	log.Printf("[cctv] Probe fallback to RTSP for %s:%d", dvr.Addr, dvr.Port)
 	return "rtsp"
+}
+
+// streamProtocolFor decides the streaming protocol for a DVR. It detects the
+// vendor via probeDVRProtocol, then prefers live "rtsp" whenever the RTSP port
+// is reachable — a Hikvision/Dahua DVR exposes both ISAPI/CGI (HTTP snapshot)
+// and RTSP (live H264/H265), and using the snapshot API for live view silently
+// downgrades it to slow 2s snapshot polling. ISAPI/CGI stays the snapshot
+// fallback for the rtsp path. Only a device with no reachable RTSP port stays
+// in snapshot ("isapi"/"dahua") mode. Unlike probeDVRProtocol (used by the LAN
+// scanner for vendor detection), this is the right call for actually viewing.
+func (m *CCTVManager) streamProtocolFor(dvr DVRConfig) string {
+	vendor := m.probeDVRProtocol(dvr)
+	if vendor == "rtsp" {
+		return vendor // already RTSP, nothing to prefer
+	}
+	if checkRTSPPort(dvr.Addr, rtspPortFor(dvr)) {
+		log.Printf("[cctv] %s at %s also serves RTSP %d — using live RTSP over snapshot", vendor, dvr.Addr, rtspPortFor(dvr))
+		return "rtsp"
+	}
+	log.Printf("[cctv] %s at %s has no reachable RTSP — snapshot mode", vendor, dvr.Addr)
+	return vendor
 }
 
 // ProbeReachable reports whether the DVR HTTP/RTSP ports are reachable from this machine (LAN).

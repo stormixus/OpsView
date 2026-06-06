@@ -292,7 +292,7 @@ func (m *CCTVManager) connectH264(dvr DVRConfig, chNum int) (*gortsplib.Client, 
 	}
 
 	for _, streamID := range streamOrder {
-		rtspURL := buildRTSPURL(dvr.Username, dvr.Password, dvr.Addr, dvr.Port,
+		rtspURL := buildRTSPURL(dvr.Username, dvr.Password, dvr.Addr, rtspPortFor(dvr),
 			fmt.Sprintf("/Streaming/Channels/%d%s", chNum, streamID))
 
 		u, err := base.ParseURL(rtspURL)
@@ -358,16 +358,17 @@ func (m *CCTVManager) TestDVRConnection(dvrID int64) (string, error) {
 	report.WriteString(fmt.Sprintf("DVR: %s (%s:%d) protocol=%s\n", dvr.Name, dvr.Addr, dvr.Port, dvr.Protocol))
 
 	// 1. TCP port check
-	if checkRTSPPort(dvr.Addr, dvr.Port) {
-		report.WriteString(fmt.Sprintf("Port %d: OPEN\n", dvr.Port))
+	rtspPort := rtspPortFor(dvr)
+	if checkRTSPPort(dvr.Addr, rtspPort) {
+		report.WriteString(fmt.Sprintf("RTSP port %d: OPEN\n", rtspPort))
 	} else {
-		report.WriteString(fmt.Sprintf("Port %d: CLOSED — check address/port\n", dvr.Port))
+		report.WriteString(fmt.Sprintf("RTSP port %d: CLOSED — check address/port\n", rtspPort))
 		return report.String(), nil
 	}
 
 	// 2. Try RTSP DESCRIBE on channel 1
 	for _, streamID := range []string{"01", "02"} {
-		rtspURL := buildRTSPURL(dvr.Username, dvr.Password, dvr.Addr, dvr.Port,
+		rtspURL := buildRTSPURL(dvr.Username, dvr.Password, dvr.Addr, rtspPort,
 			fmt.Sprintf("/Streaming/Channels/1%s", streamID))
 		u, err := base.ParseURL(rtspURL)
 		if err != nil {
@@ -433,7 +434,7 @@ func (m *CCTVManager) discoverFromDVRRTSP(dvr DVRConfig) ([]ChannelConfig, error
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			rtspURL := buildRTSPURL(dvr.Username, dvr.Password, dvr.Addr, dvr.Port,
+			rtspURL := buildRTSPURL(dvr.Username, dvr.Password, dvr.Addr, rtspPortFor(dvr),
 				fmt.Sprintf("/Streaming/Channels/%d01", ch))
 			found := probeRTSPChannelGo(rtspURL)
 			results <- probeResult{ch: ch, found: found}
@@ -499,6 +500,20 @@ func probeRTSPChannelGo(rtspURL string) bool {
 
 // --- Helpers ---
 
+// rtspPortFor returns the port to use for RTSP streaming/discovery. A DVR's
+// stored Port is usually its HTTP/ISAPI port (80/8000), while RTSP on
+// Hikvision/Dahua DVRs is conventionally 554. A stored port that isn't a known
+// HTTP port is assumed to already be the RTSP port (covers custom RTSP ports
+// and DVRs added directly on 554).
+func rtspPortFor(dvr DVRConfig) int {
+	switch dvr.Port {
+	case 0, 80, 8000:
+		return 554
+	default:
+		return dvr.Port
+	}
+}
+
 func buildRTSPURL(username, password, addr string, port int, path string) string {
 	u := &url.URL{
 		Scheme: "rtsp",
@@ -519,7 +534,7 @@ func (m *CCTVManager) fetchSnapshotRTSP(dvr DVRConfig, chNum int) ([]byte, error
 	if dvr.StreamQuality == "main" {
 		streamID = "01"
 	}
-	rtspURL := buildRTSPURL(dvr.Username, dvr.Password, dvr.Addr, dvr.Port,
+	rtspURL := buildRTSPURL(dvr.Username, dvr.Password, dvr.Addr, rtspPortFor(dvr),
 		fmt.Sprintf("/Streaming/Channels/%d%s", chNum, streamID))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

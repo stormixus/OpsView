@@ -294,8 +294,10 @@ func (h *Hub) HandleWatch(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(maxWSMessageBytes)
 
-	ip := r.RemoteAddr
-	if !h.pinLimiter.allowed(clientIP(ip)) {
+	// rateIP is the socket peer (unspoofable) used for rate limiting; the
+	// display IP below honors proxy/tunnel headers for the real client address.
+	rateIP := clientIP(r.RemoteAddr)
+	if !h.pinLimiter.allowed(rateIP) {
 		sendError(conn, 429, "too many attempts; try again later")
 		conn.Close()
 		return
@@ -315,19 +317,19 @@ func (h *Hub) HandleWatch(w http.ResponseWriter, r *http.Request) {
 
 	sess := h.sessionByPIN(auth.Token)
 	if sess == nil {
-		h.pinLimiter.recordFailure(clientIP(ip))
+		h.pinLimiter.recordFailure(rateIP)
 		sendError(conn, 401, "invalid PIN")
 		log.Printf("[relay] watcher PIN mismatch from %s", conn.RemoteAddr())
 		conn.Close()
 		return
 	}
-	h.pinLimiter.recordSuccess(clientIP(ip))
+	h.pinLimiter.recordSuccess(rateIP)
 
 	watcher := &Watcher{
 		id:          h.watcherIDSeq.Add(1),
 		conn:        conn,
 		send:        make(chan []byte, h.cfg.MaxWatcherQueue),
-		ip:          ip,
+		ip:          displayClientIP(r),
 		connectedAt: time.Now(),
 	}
 	sess.mu.Lock()
@@ -349,11 +351,11 @@ func (h *Hub) HandleWatch(w http.ResponseWriter, r *http.Request) {
 		conn.WriteMessage(websocket.BinaryMessage, frameMsg)
 	}
 
-	log.Printf("[relay:%s] watcher authenticated from %s (id=%d)", sess.id, ip, watcher.id)
+	log.Printf("[relay:%s] watcher authenticated from %s (id=%d)", sess.id, watcher.ip, watcher.id)
 
 	defer func() {
 		sess.removeWatcher(watcher)
-		log.Printf("[relay:%s] watcher disconnected: %s", sess.id, ip)
+		log.Printf("[relay:%s] watcher disconnected: %s", sess.id, watcher.ip)
 	}()
 
 	go h.watcherWritePump(sess, watcher)
@@ -608,6 +610,24 @@ func clientIP(remoteAddr string) string {
 		return host
 	}
 	return remoteAddr
+}
+
+// displayClientIP returns the best-effort real client IP for display, honoring
+// the Cloudflare Tunnel / reverse-proxy forwarding headers — behind a tunnel the
+// socket peer is cloudflared, not the viewer. Falls back to the socket address.
+// For display only: security decisions (rate limiting) must keep using the
+// socket peer, which the client cannot spoof.
+func displayClientIP(r *http.Request) string {
+	if cf := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cf != "" {
+		return cf
+	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if i := strings.IndexByte(xff, ','); i >= 0 {
+			return strings.TrimSpace(xff[:i]) // first hop = original client
+		}
+		return strings.TrimSpace(xff)
+	}
+	return clientIP(r.RemoteAddr)
 }
 
 func (h *Hub) readHelloAuth(conn *websocket.Conn) (proto.Header, proto.Hello, proto.Auth, error) {

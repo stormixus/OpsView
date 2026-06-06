@@ -975,6 +975,12 @@
       }
     }
 
+    /** A non-IP host (e.g. a Cloudflare Tunnel domain like ops.example.net) is
+     *  served over TLS on 443; an IP/LAN host uses the entered port over plain
+     *  ws/http. So a domain auto-uses wss/https/443 regardless of the port box. */
+    function relayIsDomain(h) {
+      return /[a-zA-Z]/.test(h) && h.indexOf('.') >= 0 && h !== 'localhost' && !/\.local$/i.test(h);
+    }
     /** Per-DVR override for relay HLS HTTP endpoint (ext_addr/ext_port), else global relay settings. */
     function resolveRelayHLSEndpoint(dvr) {
       let ip = document.getElementById('relayIp').value.trim();
@@ -983,6 +989,7 @@
         ip = dvr.ext_addr.trim();
         if (dvr.ext_port > 0) port = String(dvr.ext_port);
       }
+      if (relayIsDomain(ip)) port = '443'; // tunnel/domain -> TLS on 443
       const scheme = port === '443' ? 'https' : 'http';
       return { ip, port, scheme };
     }
@@ -1049,13 +1056,18 @@
 
     function connect() {
       const ip = document.getElementById('relayIp').value.trim();
-      const port = document.getElementById('relayPort').value.trim();
+      let port = document.getElementById('relayPort').value.trim();
       const pin = document.getElementById('pin').value.trim();
 
-      if (!ip || !port) {
+      // A domain (Cloudflare Tunnel etc.) is served over TLS on 443, so the
+      // port box is optional and ignored for domains. An IP/LAN host still
+      // needs an explicit port.
+      const isDomain = relayIsDomain(ip);
+      if (!ip || (!port && !isDomain)) {
         setStatus('error', t('enterIpPort'));
         return;
       }
+      if (isDomain) port = '443';
 
       // Port 443 means TLS (e.g. a Cloudflare Tunnel domain) -> wss/https.
       const secure = port === '443';

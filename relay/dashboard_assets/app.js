@@ -260,6 +260,10 @@ window.addEventListener('popstate', routeFromPath);
 
 $('#sidebar').addEventListener('click', function(e){ var b=e.target.closest('.agent-item'); if(b) go(b.dataset.nav); });
 $('#backBtn').addEventListener('click', function(){ go('overview'); });
+(function(){ var bh=$('#brandHome'); if(!bh) return;
+  bh.addEventListener('click', function(){ go('overview'); });
+  bh.addEventListener('keydown', function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); go('overview'); } });
+})();
 $('#menuBtn').addEventListener('click', function(){ $('#sidebar').classList.toggle('open'); });
 
 /* tabs */
@@ -492,16 +496,71 @@ function updateCellClocks(){ var ts=fmtTs(new Date()); $$('.cellts').forEach(fun
 
 /* modal */
 var modal=$('#modal'), modalCell=$('#modalCell');
+var modalPlayer=null;
 function openModal(id){
   if(!selected) return; var a=agentById(selected); if(!a) return;
   var s=a.streams.filter(function(x){return x.id===id;})[0]; if(!s) return;
-  modalCell.innerHTML=cellHTML(s); var ex=modalCell.querySelector('.expand'); if(ex) ex.style.display='none';
+  // Render the real video cell (not the demo placeholder) and attach the live
+  // WS/HLS player — same path as the grid cells, so the enlarged view streams.
+  modalCell.innerHTML=liveCellHTML(s); var ex=modalCell.querySelector('.expand'); if(ex) ex.style.display='none';
   modal.classList.add('show'); updateCellClocks();
+  if(s.active){
+    var video=modalCell.querySelector('video');
+    if(video){
+      var wsUrl=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/surv/ws/'+s.path;
+      var hlsUrl=location.origin+'/surv/'+s.path+'/index.m3u8';
+      modalPlayer=playWS(video, wsUrl, function(){ playHLS(video, hlsUrl); });
+    }
+  }
 }
-function closeModal(){ modal.classList.remove('show'); modalCell.innerHTML=''; }
+function closeModal(){ modal.classList.remove('show'); if(modalPlayer){try{modalPlayer.close&&modalPlayer.close();}catch(e){} modalPlayer=null;} modalCell.innerHTML=''; modalCell.classList.remove('bare'); if(opsModalTimer){clearInterval(opsModalTimer);opsModalTimer=null;} }
 $('#modalClose').addEventListener('click', closeModal);
 modal.addEventListener('click', function(e){ if(e.target===modal) closeModal(); });
 document.addEventListener('keydown', function(e){ if(e.key==='Escape'){ closeModal(); closeDrawer(); } });
+
+/* ============================================================ OPS SNAPSHOT */
+function opsSnapURL(a){ return '/dashboard/api/ops-snapshot?agent='+encodeURIComponent(a.id)+'&t='+Date.now(); }
+// Refresh the inline Ops snapshot for the selected agent. The relay renders the
+// latest screen frame to PNG on demand; a 204 (offline / no frame) trips onerror
+// and we fall back to the .desk placeholder.
+function refreshOpsSnap(){
+  var img=$('#opsSnap'), desk=$('#pubSnap .desk');
+  var a = selected!==null ? agentById(selected) : null;
+  if(!img) return;
+  if(!a || !a.online || demo.relayDown){ img.style.display='none'; img.removeAttribute('src'); if(desk) desk.style.display=''; return; }
+  img.onload=function(){ img.style.display=''; if(desk) desk.style.display='none'; };
+  img.onerror=function(){ img.style.display='none'; if(desk) desk.style.display=''; };
+  img.src=opsSnapURL(a);
+}
+// Click the Ops panel (agent detail) to enlarge — bigger snapshot, faster refresh.
+var opsModalTimer=null;
+function openOpsModal(){
+  var a = selected!==null ? agentById(selected) : null;
+  if(!a || !a.online) return;
+  modalCell.classList.add('bare');
+  modalCell.innerHTML='<img id="opsModalImg" class="ops-modal-img" alt="Ops 화면">';
+  modal.classList.add('show');
+  var img=$('#opsModalImg');
+  function r(){ if(!modal.classList.contains('show')||!img) return; img.src=opsSnapURL(a); }
+  r(); opsModalTimer=setInterval(r, 600);
+}
+$('#pubSnap').addEventListener('click', openOpsModal);
+
+/* ============================================================ WATCHERS DETAIL */
+// Click the Watchers stat to pop the full watcher list (id, real client IP, age).
+function openWatchersModal(){
+  var a = selected!==null ? agentById(selected) : null; if(!a) return;
+  var list=a.watchers||[];
+  var rows = list.length ? list.map(function(w){
+    var ago=Math.floor((Date.now()-w.since)/1000);
+    return '<tr><td><span class="id">#'+w.id+'</span></td><td class="mono">'+escHtml(w.ip)+'</td><td class="num">'+fmtAgo(ago)+' 전</td></tr>';
+  }).join('') : '<tr><td colspan="3" style="text-align:center;opacity:.55;padding:22px;">접속 중인 시청자 없음</td></tr>';
+  modalCell.classList.add('bare');
+  modalCell.innerHTML='<div class="watchers-detail"><h3>Watchers · '+list.length+'명</h3>'+
+    '<table class="tbl"><thead><tr><th>ID</th><th>IP</th><th>접속 시간</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  modal.classList.add('show');
+}
+$('#statWatch').addEventListener('click', openWatchersModal);
 
 /* ============================================================ RELAY / CONN */
 var relayDownAt=Date.now();
@@ -570,7 +629,7 @@ function updateSidebarLive(){
   });
 }
 
-var loopId=null, snapId=null, pollId=null;
+var loopId=null, snapId=null, pollId=null, opsSnapId=null;
 function startLoop(){
   if(loopId) return;
   renderSidebar(); routeFromPath();
@@ -578,6 +637,7 @@ function startLoop(){
   pollState().then(function(){ if(selected===null) routeFromPath(); });
   pollId=setInterval(function(){ if(!document.hidden) pollState(); }, 2000);
   loopId=setInterval(tick,1000);
+  opsSnapId=setInterval(function(){ if(!document.hidden && curTab==='status') refreshOpsSnap(); }, 1500);
   snapId=setInterval(function(){
     if(demo.relayDown) return;
     var f=$('#snapFlash'); if(f && selected && (agentById(selected)||{}).online){ f.classList.remove('on'); void f.offsetWidth; f.classList.add('on'); }
@@ -587,6 +647,7 @@ function stopLoop(){
   if(loopId){clearInterval(loopId);loopId=null;}
   if(snapId){clearInterval(snapId);snapId=null;}
   if(pollId){clearInterval(pollId);pollId=null;}
+  if(opsSnapId){clearInterval(opsSnapId);opsSnapId=null;}
   stopLiveGrid();
 }
 
