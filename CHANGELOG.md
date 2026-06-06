@@ -2,7 +2,30 @@
 
 All notable changes to OpsView are documented here.
 
-## [0.3.8] - 2026-06-06
+## [0.4.0] - 2026-06-06
+
+A multi-tenant relay release: one relay now hosts many agents (locations),
+plus a built-in operator dashboard. Backward compatible — existing single-agent
+deployments keep working unchanged (they become the "default" agent).
+
+### Added
+
+- **Relay: multi-agent (multi-tenant) hosting.** One relay can serve several
+  locations at once, each with its own Ops screen, CCTV streams, watchers, and
+  PIN — isolated from one another. The single-publisher `Hub` became a map of
+  per-agent sessions. A publisher claims its session via `agent_id` + a
+  per-agent token (`RELAY_AGENTS` registry; the legacy `RELAY_PUBLISHER_TOKEN`
+  is the "default" agent). A watcher's PIN both selects and authenticates its
+  tenant, so existing viewers connect unchanged. CCTV is namespaced per agent
+  (`/surv/{agentID}/…`; the default agent keeps the flat `/surv/…` path).
+- **Relay: operator dashboard** at `/dashboard`, served by the relay (enabled
+  only when `RELAY_DASHBOARD_TOKEN` is set — otherwise the routes 404). Admin
+  password login over an HMAC-signed cookie; an aggregated `/dashboard/api/state`
+  (polled every 2 s) drives an agent-grouped UI — a relay overview with a card
+  per location, and a per-agent drill-in with a status tab (publisher / watchers
+  / streams / throughput) and a live tab that plays every channel over the
+  fMP4-over-WS player (HLS fallback). Real URL routing (History API), so browser
+  back/forward and deep links work.
 
 ### Fixed
 

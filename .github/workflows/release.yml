@@ -247,6 +247,8 @@ jobs:
           file: relay/Dockerfile
           platforms: linux/amd64
           push: true
+          build-args: |
+            VERSION=${{ steps.tag.outputs.version }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/opsview-relay:${{ steps.tag.outputs.version }}
             ghcr.io/${{ github.repository_owner }}/opsview-relay:latest
