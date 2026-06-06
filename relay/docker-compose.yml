@@ -12,6 +12,13 @@ services:
       - RELAY_PUBLISHER_TOKEN=${RELAY_PUBLISHER_TOKEN:?set RELAY_PUBLISHER_TOKEN in relay/.env}
       # Optional WebSocket Origin allowlist (comma-separated); empty = allow all.
       - RELAY_ALLOWED_ORIGINS=${RELAY_ALLOWED_ORIGINS:-}
+      # Optional operator dashboard. Set to enable /dashboard (admin password).
+      # Empty = dashboard disabled (routes return 404). Avoid # and $ in the
+      # value — they are special in .env/compose.
+      - RELAY_DASHBOARD_TOKEN=${RELAY_DASHBOARD_TOKEN:-}
+      # Optional multi-tenant agent registry (JSON array of {id,name,token}).
+      # Empty = single "default" agent (legacy, authed by RELAY_PUBLISHER_TOKEN).
+      - RELAY_AGENTS=${RELAY_AGENTS:-}
     restart: unless-stopped
 
   # Cloudflare Tunnel: exposes the relay over TLS (wss/https) at your domain with
