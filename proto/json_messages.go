@@ -67,6 +67,20 @@ type ChannelInfo struct {
 	RtspURI string `json:"rtsp_uri,omitempty"`
 }
 
+// SurvMeta is the MsgSurvMeta payload (relay→publisher): a channel-metadata edit
+// the agent applies to its DB. Either Order (reorder), Renames, or both.
+type SurvMeta struct {
+	DVRID   int64           `json:"dvr_id"`
+	Order   []int           `json:"order,omitempty"`   // ch_nums in desired display order
+	Renames []ChannelRename `json:"renames,omitempty"` // per-channel name changes
+}
+
+// ChannelRename is one channel's new display name.
+type ChannelRename struct {
+	ChNum int    `json:"ch_num"`
+	Name  string `json:"name"`
+}
+
 // SnapshotRequest is sent by watcher to request a snapshot via agent proxy.
 type SnapshotRequest struct {
 	ReqID string `json:"req_id"`

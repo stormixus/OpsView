@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/opsview/opsview/proto"
@@ -36,6 +37,16 @@ type agentState struct {
 	Watchers      []WatcherInfo `json:"watchers"`
 	Streams       []streamState `json:"streams"`
 	DVRs          []dvrSummary  `json:"dvrs"`
+	Channels      []channelMeta `json:"channels"` // all configured channels (for the editor)
+}
+
+type channelMeta struct {
+	DVRID   int64  `json:"dvr_id"`
+	ChNum   int    `json:"ch_num"`
+	Name    string `json:"name"`
+	Order   int    `json:"order"`
+	Enabled bool   `json:"enabled"`
+	Active  bool   `json:"active"`
 }
 
 type streamState struct {
@@ -60,6 +71,11 @@ func streamPath(agentID, streamID string) string {
 		return streamID
 	}
 	return agentID + "/" + streamID
+}
+
+// streamIDFor builds the relay stream key for a channel (matches StreamStats IDs).
+func streamIDFor(dvrID int64, chNum int) string {
+	return fmt.Sprintf("dvr%d_ch%d", dvrID, chNum)
 }
 
 func msToRFC3339(ms int64) string {
@@ -87,26 +103,36 @@ func (h *Hub) buildDashboardState() dashboardState {
 		raw := s.survConfig
 		s.survConfigMu.RUnlock()
 
+		streams := make([]streamState, 0)
+		activeSet := map[string]bool{}
+		for _, st := range s.survProxy.StreamStats() {
+			streams = append(streams, streamState{
+				ID: st.ID, Name: st.Name, Active: st.Active, Codec: st.Codec,
+				WSWatchers: st.WSWatchers, Path: streamPath(s.id, st.ID),
+			})
+			if st.Active {
+				activeSet[st.ID] = true
+			}
+		}
+
 		dvrs := []dvrSummary{}
+		channels := []channelMeta{}
 		if len(raw) > proto.HeaderSize {
 			var cfg proto.SurvConfig
 			if json.Unmarshal(raw[proto.HeaderSize:], &cfg) == nil {
 				counts := map[int64]int{}
 				for _, ch := range cfg.Channels {
 					counts[ch.DVRID]++
+					channels = append(channels, channelMeta{
+						DVRID: ch.DVRID, ChNum: ch.ChNum, Name: ch.Name, Order: ch.Order,
+						Enabled: ch.Enabled,
+						Active:  activeSet[streamIDFor(ch.DVRID, ch.ChNum)],
+					})
 				}
 				for _, d := range cfg.DVRs {
 					dvrs = append(dvrs, dvrSummary{ID: d.ID, Name: d.Name, Channels: counts[d.ID]})
 				}
 			}
-		}
-
-		streams := make([]streamState, 0)
-		for _, st := range s.survProxy.StreamStats() {
-			streams = append(streams, streamState{
-				ID: st.ID, Name: st.Name, Active: st.Active, Codec: st.Codec,
-				WSWatchers: st.WSWatchers, Path: streamPath(s.id, st.ID),
-			})
 		}
 
 		watchers := s.watcherList()
@@ -134,6 +160,7 @@ func (h *Hub) buildDashboardState() dashboardState {
 			Watchers:      watchers,
 			Streams:       streams,
 			DVRs:          dvrs,
+			Channels:      channels,
 		})
 	}
 
