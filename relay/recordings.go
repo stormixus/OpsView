@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,6 +20,39 @@ type recSegment struct {
 }
 
 const recNameLayout = "20060102_150405"
+
+// recFinalizeQuiesce: a segment file untouched (mtime not advancing) for at least
+// this long is treated as finalized and safe to cache immutably. ffmpeg writes the
+// active segment continuously, so its mtime stays fresh; once it rolls to the next
+// segment the previous file's mtime freezes. Comfortably larger than any write gap.
+const recFinalizeQuiesce = 90 * time.Second
+
+// recSegIdxCap bounds the in-memory segment-index cache (one entry per browsed
+// (stream,day)); past it the cache is reset so it can't grow without limit over a
+// long uptime as an operator browses historical days.
+const recSegIdxCap = 1024
+
+// segCacheEntry / dayCacheEntry memoize directory scans keyed by the stream dir's
+// mtime — a new segment bumps the dir mtime and invalidates the entry, so past
+// days (whose dirs never change) are scanned once and the timeline + per-second
+// seek lookups resolve from memory instead of re-reading the disk every time.
+type segCacheEntry struct {
+	mtime time.Time
+	segs  []recSegment
+}
+type dayCacheEntry struct {
+	mtime time.Time
+	days  []string
+}
+
+// dirMtime returns a directory's modification time, or the zero time if it can't
+// be stat'd (which disables caching for that path).
+func dirMtime(dir string) time.Time {
+	if info, err := os.Stat(dir); err == nil {
+		return info.ModTime()
+	}
+	return time.Time{}
+}
 
 // safeStreamDir validates a stream path (allows one "agent/stream" slash, blocks
 // traversal) and returns its on-disk directory.
@@ -47,6 +81,16 @@ func (r *Recorder) days(stream string) []string {
 	if !ok {
 		return nil
 	}
+	mtime := dirMtime(dir)
+	if !mtime.IsZero() {
+		r.idxMu.Lock()
+		if e, ok := r.dayCache[stream]; ok && e.mtime.Equal(mtime) {
+			days := e.days
+			r.idxMu.Unlock()
+			return days
+		}
+		r.idxMu.Unlock()
+	}
 	set := map[string]bool{}
 	for _, e := range readDirSafe(dir) {
 		n := e.Name()
@@ -59,6 +103,14 @@ func (r *Recorder) days(stream string) []string {
 		out = append(out, d)
 	}
 	sort.Sort(sort.Reverse(sort.StringSlice(out)))
+	if !mtime.IsZero() {
+		r.idxMu.Lock()
+		if r.dayCache == nil {
+			r.dayCache = make(map[string]dayCacheEntry)
+		}
+		r.dayCache[stream] = dayCacheEntry{mtime: mtime, days: out}
+		r.idxMu.Unlock()
+	}
 	return out
 }
 
@@ -68,6 +120,17 @@ func (r *Recorder) segments(stream, day string) []recSegment {
 	dir, ok := r.safeStreamDir(stream)
 	if !ok || len(day) != 8 {
 		return nil
+	}
+	mtime := dirMtime(dir)
+	key := stream + "|" + day
+	if !mtime.IsZero() {
+		r.idxMu.Lock()
+		if e, ok := r.segCache[key]; ok && e.mtime.Equal(mtime) {
+			segs := e.segs
+			r.idxMu.Unlock()
+			return segs
+		}
+		r.idxMu.Unlock()
 	}
 	var segs []recSegment
 	for _, e := range readDirSafe(dir) {
@@ -98,6 +161,14 @@ func (r *Recorder) segments(stream, day string) []recSegment {
 			}
 		}
 		segs[i].Dur = dur
+	}
+	if !mtime.IsZero() {
+		r.idxMu.Lock()
+		if r.segCache == nil || len(r.segCache) >= recSegIdxCap {
+			r.segCache = make(map[string]segCacheEntry) // bounded: reset past the cap
+		}
+		r.segCache[key] = segCacheEntry{mtime: mtime, segs: segs}
+		r.idxMu.Unlock()
 	}
 	return segs
 }
@@ -183,6 +254,7 @@ func (h *Hub) HandleDashboardRecordings(w http.ResponseWriter, r *http.Request) 
 	stream := r.URL.Query().Get("stream")
 	day := r.URL.Query().Get("day")
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store") // today's listing changes as segments land
 	if day != "" {
 		json.NewEncoder(w).Encode(map[string]interface{}{"segments": h.rec.segments(stream, day)})
 	} else {
@@ -220,6 +292,22 @@ func (h *Hub) HandleDashboardRecFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "video/mp4")
 	if r.URL.Query().Get("dl") != "" {
 		w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(path)+`"`)
+	}
+	// A finalized segment is immutable: let the browser cache it so scrub seeks, the
+	// hover-scrub preview, replays, and multi-cam re-seeks resolve from cache instead
+	// of re-fetching byte ranges (incl. the moov) every time. CRITICAL: ffmpeg cuts
+	// segments on input media PTS, not wall-clock — and the recorder's input is the
+	// relay's own HLS, which can stall — so a name/clock check can mis-classify a
+	// still-growing file as "past". The file's mtime instead stops advancing the
+	// moment ffmpeg closes the segment (after the +faststart moov relocation), so a
+	// file untouched for the quiescence window is guaranteed complete; only then is
+	// it safe to cache long-term. The currently-recording segment stays no-cache.
+	// http.ServeContent honors If-None-Match/If-Range against the Etag below.
+	if time.Since(info.ModTime()) > recFinalizeQuiesce {
+		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+		w.Header().Set("Etag", fmt.Sprintf(`"%x-%x"`, info.Size(), info.ModTime().UnixNano()))
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
 	}
 	http.ServeContent(w, r, info.Name(), info.ModTime(), f)
 }

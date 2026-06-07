@@ -465,14 +465,16 @@ button{font-family:inherit; cursor:pointer;}
 .tn-tok:hover{color:#22d3ee;}
 .tn-del{background:rgba(239,68,68,.12);color:#f87171;border:0;border-radius:6px;padding:5px 9px;font-size:12px;cursor:pointer;flex:none;}
 .tenant-add{display:flex;flex-direction:column;gap:6px;margin-top:6px;}
-.tn-in{background:#0b1020;border:1px solid #28304a;color:#e2e8f0;border-radius:7px;padding:8px 10px;font-size:13px;outline:none;}
-.tn-in:focus{border-color:#22d3ee;}
+.tn-in{background:var(--field);border:1px solid var(--border-strong);color:var(--text);border-radius:var(--r-sm);padding:8px 10px;font-size:13px;outline:none;transition:border-color .15s ease, box-shadow .15s ease;}
+.tn-in:focus{border-color:var(--accent-2);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent-2) 22%, transparent);}
 .tn-tokrow{display:flex;gap:6px;}
 .tn-tokrow .tn-in{flex:1;}
-.tn-gen{background:#1e293b;color:#94a3b8;border:1px solid #28304a;border-radius:7px;padding:0 12px;font-size:12px;cursor:pointer;}
-.tn-add-btn{background:#22d3ee;color:#06202a;border:0;border-radius:7px;padding:9px;font-size:13px;font-weight:600;cursor:pointer;}
-.tenant-msg{font-size:12px;color:#10b981;min-height:16px;margin-top:6px;}
-.tenant-msg.bad{color:#f87171;}
+.tn-gen{background:var(--panel-2);color:var(--text-muted);border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:0 12px;font-size:12px;cursor:pointer;transition:.15s;}
+.tn-gen:hover{color:var(--accent-2);border-color:var(--accent-2);}
+.tn-add-btn{background:var(--accent);color:var(--on-accent);border:0;border-radius:var(--r-sm);padding:9px;font-size:13px;font-weight:700;cursor:pointer;transition:background .15s ease;}
+.tn-add-btn:hover{background:var(--accent-2);}
+.tenant-msg{font-size:12px;color:var(--ok);min-height:16px;margin-top:6px;}
+.tenant-msg.bad{color:var(--bad);}
 
 /* ---- Ops live snapshot + click-to-enlarge ---- */
 .ops-snap{position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#0a0d12; z-index:2;}
@@ -589,6 +591,10 @@ button{font-family:inherit; cursor:pointer;}
 /* ============================ 관리 (manage: 지점 / 알림 / 보안) ============================ */
 /* header entry button */
 .mng-btn{display:flex; align-items:center; gap:7px; height:38px; padding:0 14px; border-radius:var(--r); background:var(--panel-2); border:1px solid var(--border); color:var(--text-muted); font-size:13.5px; font-weight:600; cursor:pointer; transition:.15s;}
+.mng-btn.on{color:var(--text); border-color:var(--accent-2); background:color-mix(in srgb,var(--accent-2) 14%, var(--panel-2));}
+.mg-loading{animation:mgPulse 1.2s ease-in-out infinite;}
+@keyframes mgPulse{0%,100%{opacity:.5;}50%{opacity:1;}}
+.mg-empty .tn-restore{margin-left:6px;}
 .mng-btn:hover{color:var(--accent-2); border-color:color-mix(in srgb,var(--accent-2) 50%, var(--border));}
 .mng-btn svg{width:16px; height:16px;}
 @media (max-width:560px){ .mng-btn span{display:none;} }
@@ -655,4 +661,9 @@ button{font-family:inherit; cursor:pointer;}
   .manage-nav{flex-direction:row; flex-wrap:wrap; position:static;}
   .mg-tab.active{box-shadow:inset 0 -3px 0 var(--accent-2);}
   .mg-cards{grid-template-columns:1fr;}
+}
+@media (max-width:480px){
+  .manage-ro{min-width:0;}
+  .mgc-actions{gap:5px;}
+  .mgc-actions button{flex:1 1 auto; text-align:center;}
 }

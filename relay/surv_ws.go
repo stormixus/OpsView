@@ -29,6 +29,18 @@ const (
 	survWSPingPeriod = (survWSPongWait * 9) / 10
 )
 
+// Fast-start GOP cache: a new WS client is seeded with the init segment plus the
+// current GOP (fragments since the last keyframe) so it decodes a picture
+// immediately instead of waiting for the next camera keyframe (seconds of black
+// on long-GOP DVRs). gopMaxFrags caps the cache so a pathologically long GOP — or
+// a stream that never produces a keyframe — can't grow it unbounded; past the cap
+// fast-start is disabled for that stream until the next keyframe. The per-client
+// send buffer must comfortably hold an init + full-GOP burst plus live headroom.
+const (
+	gopMaxFrags   = 256
+	survWSSendBuf = 512
+)
+
 // fragMuxer turns H264/H265 access units into an fMP4 init segment plus one
 // fragment (moof+mdat) per access unit, for Media Source Extensions playback
 // over a WebSocket. CCTV streams are typically B-frame-free, so DTS == PTS.
@@ -197,6 +209,7 @@ type survWSHub struct {
 	mu      sync.Mutex
 	clients map[*survWSClient]struct{}
 	initSeg []byte
+	gop     [][]byte // fragments since (and including) the last keyframe — for fast-start
 }
 
 func newSurvWSHub() *survWSHub {
@@ -215,6 +228,18 @@ func (h *survWSHub) setInit(seg []byte) {
 func (h *survWSHub) broadcast(frag []byte, keyframe bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	// Maintain the current-GOP cache that fast-starts future joiners. Kept here,
+	// inside the same lock as the fan-out, so add()'s seed reads a snapshot that is
+	// always consistent with what live clients have received.
+	if keyframe {
+		h.gop = append([][]byte(nil), frag) // new GOP backing array, starting at this keyframe
+	} else if h.gop != nil {
+		if len(h.gop) >= gopMaxFrags {
+			h.gop = nil // long GOP / no keyframe -> disable fast-start until the next IDR
+		} else {
+			h.gop = append(h.gop, frag)
+		}
+	}
 	for c := range h.clients {
 		if !c.started {
 			if !keyframe {
@@ -225,7 +250,8 @@ func (h *survWSHub) broadcast(frag []byte, keyframe bool) {
 				select {
 				case c.send <- h.initSeg:
 				default:
-					continue // can't seed init -> skip this round
+					c.started = false // couldn't seed init -> retry on next keyframe (never init-less)
+					continue
 				}
 			}
 		}
@@ -244,9 +270,20 @@ func (h *survWSHub) ClientCount() int {
 }
 
 func (h *survWSHub) add() *survWSClient {
-	c := &survWSClient{send: make(chan []byte, 256)}
+	c := &survWSClient{send: make(chan []byte, survWSSendBuf)}
 	h.mu.Lock()
 	h.clients[c] = struct{}{}
+	// Fast-start: if we hold init + a full GOP, seed it now so the client decodes
+	// the cached keyframe at once (<=1 GOP behind live) instead of waiting for the
+	// next camera keyframe. All-or-nothing, and only when it fits the fresh send
+	// buffer; otherwise leave started=false to fall back to next-keyframe seeding.
+	if h.initSeg != nil && len(h.gop) > 0 && 1+len(h.gop) <= cap(c.send) {
+		c.send <- h.initSeg
+		for _, f := range h.gop {
+			c.send <- f
+		}
+		c.started = true
+	}
 	h.mu.Unlock()
 	return c
 }

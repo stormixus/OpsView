@@ -27,6 +27,10 @@ type Recorder struct {
 	mu   sync.Mutex
 	recs map[string]*recProc // stream path -> running recorder
 	stop chan struct{}
+
+	idxMu    sync.Mutex                  // guards the segment/day index caches
+	segCache map[string]segCacheEntry    // "stream|day" -> cached segments (keyed by dir mtime)
+	dayCache map[string]dayCacheEntry    // "stream" -> cached day list (keyed by dir mtime)
 }
 
 type recProc struct {
@@ -58,6 +62,8 @@ func newRecorder(h *Hub, relayPort string) *Recorder {
 		hub:      h,
 		recs:     make(map[string]*recProc),
 		stop:     make(chan struct{}),
+		segCache: make(map[string]segCacheEntry),
+		dayCache: make(map[string]dayCacheEntry),
 	}
 }
 

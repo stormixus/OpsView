@@ -4,6 +4,36 @@ All notable changes to OpsView are documented here.
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-06-07
+
+### Changed
+
+- **CCTV live video loads near-instantly (GOP fast-start).** A freshly-joined
+  WebSocket viewer used to wait for the camera's *next* keyframe before any frame
+  decoded — seconds of black on long-GOP DVRs. The relay now keeps the current GOP
+  (the fragments since the last keyframe) per channel and flushes init + that GOP
+  to a new client the moment it connects, so it decodes immediately and sits at
+  most ~1 GOP behind live. Bounded + all-or-nothing so a pathological/keyframeless
+  stream can't grow the cache or seed a client a broken GOP. Benefits both the
+  dashboard and desktop viewer (server-side; no viewer update needed). Relay-only.
+- **녹화 playback is much snappier.** (1) Finalized segments are served immutable
+  (`Cache-Control: immutable` + ETag), so scrubbing, the hover preview, replays,
+  and multi-cam re-seeks resolve from the browser cache instead of re-fetching byte
+  ranges every time — the currently-recording segment stays no-cache (gated on
+  mtime quiescence so a still-growing file is never cached). (2) Per-(stream,day)
+  segment indexes are cached in memory keyed by the directory mtime, removing
+  repeated disk scans from every day-switch/seek/grid-cell load. (3) The player
+  pre-warms the next segment near the boundary and uses `preload=auto`, so
+  auto-advance and click-to-play stop cold-opening. (4) Hover-scrub is throttled to
+  animation frames and multi-cam drift correction is tighter (grid-size-aware).
+- **Settings 관리 page polish.** Branch cards now refresh live (online/시청자/
+  마지막 접속 stop freezing while the page is open) via a non-destructive patch that
+  doesn't clobber an in-flight rename or a revealed token; the 관리 topbar button
+  shows an active state and the sidebar no longer double-highlights while in manage;
+  a loading skeleton + retry replaces the blank-until-loaded gap; branch tokens are
+  kept out of the DOM (in a JS map) and auto-re-mask after reveal; the 알림/보안
+  forms use design tokens (follow the accent + light theme); tighter mobile layout.
+
 ## [0.8.2] - 2026-06-07
 
 ### Fixed

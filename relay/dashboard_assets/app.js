@@ -222,6 +222,7 @@ function renderSidebar(){
 }
 
 function navTo(target){
+  var _mb=$('#manageBtn'); if(_mb) _mb.classList.toggle('on', target==='manage');
   if(target==='manage'){
     $('#sidebar').classList.remove('open');
     stopLiveGrid(); recStop();
@@ -249,7 +250,8 @@ function navTo(target){
   syncSidebarActive();
 }
 function syncSidebarActive(){
-  $$('.agent-item').forEach(function(b){ b.classList.toggle('active', (b.dataset.nav==='overview' && selected===null) || b.dataset.nav===selected); });
+  var inMng=$('#manage-view').classList.contains('active');
+  $$('.agent-item').forEach(function(b){ b.classList.toggle('active', !inMng && ((b.dataset.nav==='overview' && selected===null) || b.dataset.nav===selected)); });
 }
 
 /* --- path routing (History API): clicks pushState a real URL
@@ -643,7 +645,7 @@ function recApplyMode(){
     var n=recCtx.mode*recCtx.mode;
     recCtx.cells = recCtx.streams.slice(0,n).map(function(s){ return {stream:s.path, name:s.name, ch:s.ch, segs:[], cur:null, video:null}; });
     var g=$('#recGrid'); g.style.setProperty('--rc', recCtx.mode);
-    g.innerHTML = recCtx.cells.map(function(c,i){ return '<div class="rec-cell"><video muted playsinline data-ci="'+i+'"></video><span class="rec-clabel">'+escHtml(c.name)+' · CH'+c.ch+'</span></div>'; }).join('');
+    g.innerHTML = recCtx.cells.map(function(c,i){ return '<div class="rec-cell"><video muted playsinline preload="auto" data-ci="'+i+'"></video><span class="rec-clabel">'+escHtml(c.name)+' · CH'+c.ch+'</span></div>'; }).join('');
     recCtx.cells.forEach(function(c,i){ c.video=g.querySelector('video[data-ci="'+i+'"]'); });
     recCtx.stream = recCtx.cells[0] ? recCtx.cells[0].stream : null;
   } else {
@@ -780,17 +782,44 @@ function recPreviewAt(frac, sec){
   var d=new Date(sec*1000); $('#recPrevTime').textContent=pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds());
 }
 if(recPrevVid) recPrevVid.addEventListener('seeked', function(){ recPrevVid._busy=false; if(Math.abs(recPrevVid.currentTime-recPrevVid._want)>1){ recPrevVid._busy=true; try{recPrevVid.currentTime=recPrevVid._want;}catch(e){} } });
+var recHover=null, recHoverRAF=0;
 $('#recTimeline').addEventListener('mousemove', function(e){
-  var rect=this.getBoundingClientRect(), frac=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
-  var sec=recCtx.dayStart+frac*86400, d=new Date(sec*1000), cur=$('#recCursor');
-  cur.style.display='block'; cur.style.left=(frac*100)+'%'; cur.textContent=pad2(d.getHours())+':'+pad2(d.getMinutes());
-  recPreviewAt(frac, sec);
+  recHover={ x:e.clientX, rect:this.getBoundingClientRect() };
+  if(recHoverRAF) return; // coalesce per-pixel events to one update per animation frame
+  recHoverRAF=requestAnimationFrame(function(){
+    recHoverRAF=0; if(!recHover) return;
+    var r=recHover.rect, frac=Math.max(0,Math.min(1,(recHover.x-r.left)/r.width));
+    var sec=recCtx.dayStart+frac*86400, d=new Date(sec*1000), cur=$('#recCursor');
+    cur.style.display='block'; cur.style.left=(frac*100)+'%'; cur.textContent=pad2(d.getHours())+':'+pad2(d.getMinutes());
+    recPreviewAt(frac, sec);
+  });
 });
-$('#recTimeline').addEventListener('mouseleave', function(){ $('#recCursor').style.display='none'; $('#recPreview').style.display='none'; });
-recVideo.addEventListener('timeupdate', function(){ if(recCtx.mode>1 || !recCtx.cur) return; recUpdatePlayhead(recCtx.cur.start+recVideo.currentTime); });
+$('#recTimeline').addEventListener('mouseleave', function(){ if(recHoverRAF){ cancelAnimationFrame(recHoverRAF); recHoverRAF=0; } recHover=null; $('#recCursor').style.display='none'; $('#recPreview').style.display='none'; });
+function recNextSeg(segs, cur){
+  if(!cur || !segs) return null;
+  for(var i=0;i<segs.length;i++){ if(segs[i].start>cur.start) return segs[i]; }
+  return null;
+}
+function recFileURL(stream, name){ return BASE+'/api/rec-file?stream='+encodeURIComponent(stream)+'&name='+encodeURIComponent(name); }
+// Hidden double-buffer: warm the next segment into the HTTP cache near the segment
+// boundary so auto-advance (and the next click) hit cache instead of cold-opening.
+var recWarm=document.createElement('video'); recWarm.muted=true; recWarm.preload='auto';
+recWarm.style.cssText='position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;';
+var recWarmURL=null;
+function recWarmNext(url){ if(!url||url===recWarmURL) return; recWarmURL=url; try{ if(!recWarm.parentNode) document.body.appendChild(recWarm); recWarm.src=url; recWarm.load(); }catch(e){} }
+recVideo.addEventListener('timeupdate', function(){
+  if(recCtx.mode>1 || !recCtx.cur) return;
+  recUpdatePlayhead(recCtx.cur.start+recVideo.currentTime);
+  if(recCtx.cur.dur && recVideo.currentTime > recCtx.cur.dur-15){
+    // only warm a FINALIZED next segment — the live (still-recording) one is served
+    // no-cache so warming it caches nothing (matches server recFinalizeQuiesce=90s).
+    var nx=recNextSeg(recCtx.segs, recCtx.cur);
+    if(nx && Date.now()/1000 > nx.start+(nx.dur||300)+90) recWarmNext(recFileURL(recCtx.stream, nx.name));
+  }
+});
 recVideo.addEventListener('ended', function(){
-  if(recCtx.mode>1 || !recCtx.cur) return; var next=null;
-  for(var i=0;i<recCtx.segs.length;i++){ if(recCtx.segs[i].start>recCtx.cur.start){ next=recCtx.segs[i]; break; } }
+  if(recCtx.mode>1 || !recCtx.cur) return;
+  var next=recNextSeg(recCtx.segs, recCtx.cur);
   if(next) recPlayAt(next.start);
 });
 setInterval(function(){
@@ -802,7 +831,7 @@ setInterval(function(){
   recCtx.cells.forEach(function(c){
     if(!c.video) return; var want=recCtx.master;
     if(c.cur && want>=c.cur.start && want<c.cur.start+c.cur.dur+1){
-      if(Math.abs(c.video.currentTime-(want-c.cur.start))>0.8){ try{c.video.currentTime=want-c.cur.start;}catch(e){} }
+      if(Math.abs(c.video.currentTime-(want-c.cur.start))>(recCtx.mode>=3?0.7:0.4)){ try{c.video.currentTime=want-c.cur.start;}catch(e){} } // wider deadband on big grids avoids per-tick seek thrash on lagging cells
     } else {
       var s=recSegAtIn(c.segs, want);
       if(s && (!c.cur || s.name!==c.cur.name)){ c.cur=s; var off=Math.max(0,want-s.start); c.video.src=BASE+'/api/rec-file?stream='+encodeURIComponent(c.stream)+'&name='+encodeURIComponent(s.name); c.video.load(); c.video.onloadedmetadata=(function(v,o){return function(){ try{v.currentTime=o;}catch(e){} if(recCtx.playing) v.play().catch(function(){}); };})(c.video,off); }
@@ -861,6 +890,7 @@ function tick(){
   renderConn();
   // live UI refresh
   if(state.agents.length>1) updateSidebarLive();
+  if($('#manage-view').classList.contains('active')){ patchBranchCards(); return; }
   if(selected===null){ if(!demo.relayDown) updateOverviewLive(); }
   else {
     var a=agentById(selected); if(!a) return;
@@ -955,10 +985,16 @@ syncSegs();
 
 /* ===== 지점(tenant) 관리 ===== */
 function tnMsg(t, bad){ var m=$('#tenant-msg'); if(m){ m.textContent=t||''; m.className='tenant-msg'+(bad?' bad':''); } }
+// Branch tokens are kept in a JS map, NOT a DOM attribute, so a casual DOM dump /
+// screen-share doesn't leak every branch token (reveal/copy read from here).
+var branchTokens={};
 function loadBranches(){
+  var l0=$('#tenant-list');
+  if(l0 && !l0.querySelector('.mg-card')) l0.innerHTML='<div class="mg-empty mg-loading">불러오는 중…</div>';
+  var fail=function(){ var list=$('#tenant-list'); if(list && !list.querySelector('.mg-card')){ list.innerHTML='<div class="mg-empty">불러오기 실패 · <button class="tn-restore" data-retry>다시 시도</button></div>'; var rb=list.querySelector('[data-retry]'); if(rb) rb.onclick=loadBranches; } };
   fetch('/dashboard/api/agents').then(function(r){ return r.ok? r.json() : null; }).then(function(d){
     var list=$('#tenant-list'); if(!list) return;
-    if(!d){ list.innerHTML='<div class="mg-empty">불러오기 실패</div>'; return; }
+    if(!d){ fail(); return; }
     var editable=!!d.editable;
     var ro=$('#manage-ro'); if(ro) ro.style.display = editable ? 'none' : '';
     var pwSet=$('#pw-set'); if(pwSet) pwSet.style.display = editable ? '' : 'none';
@@ -966,42 +1002,62 @@ function loadBranches(){
     var addUI=$('#tenant-add'); if(addUI) addUI.style.display = editable ? '' : 'none';
     // registry agents (id,name,token,online) joined with any live-only agents (e.g. the
     // legacy "default", which has no registry row) — the latter render as limited cards.
-    var reg={}; (d.agents||[]).forEach(function(a){ reg[a.id]=true; });
+    var reg={}; branchTokens={};
+    (d.agents||[]).forEach(function(a){ reg[a.id]=true; if(a.token) branchTokens[a.id]=a.token; });
     var extra=(state.agents||[]).filter(function(a){ return !reg[a.id]; })
       .map(function(a){ return {id:a.id, name:a.name, token:'', online:a.online, legacy:true}; });
     var all=(d.agents||[]).concat(extra);
     if(!all.length){ list.innerHTML='<div class="mg-empty">등록된 지점이 없습니다.'+(editable?' 아래에서 추가하세요.':'')+'</div>'; return; }
     list.innerHTML=all.map(function(a){ return branchCardHTML(a, editable); }).join('');
     wireBranchCards();
-  });
+  }).catch(fail);
 }
-function branchCardHTML(a, editable){
+// Volatile (live) fields of a branch card, derived from polled state.
+function branchCardData(a){
   var live=agentById(a.id);
-  var online=!!(a.online || (live&&live.online));
+  var online=!!((a&&a.online) || (live&&live.online));
   var dvrs=(live&&live.dvrs)||[];
   var chTotal=dvrs.reduce(function(n,x){return n+(x.channels||0);},0) || (live?(live.streams||[]).length:0);
-  var chAct=live?activeStreams(live).length:0;
-  var watchers=live?(live.watchers||[]).length:0;
-  var statusTxt = online ? '실시간' : (live ? '마지막 접속 '+fmtAgo((Date.now()-live.last_publish_ms)/1000)+' 전' : '접속 기록 없음');
-  var canEdit = editable && !a.legacy && !!a.token;
-  return '<div class="mg-card'+(online?'':' off')+'" data-id="'+escAttr(a.id)+'">'+
-    '<div class="mgc-head"><span class="mgc-dot'+(online?' on':'')+'"></span>'+
+  return { online:online, ndvr:dvrs.length, chTotal:chTotal, chAct:live?activeStreams(live).length:0,
+    watchers:live?(live.watchers||[]).length:0,
+    status: online ? '실시간' : (live ? '마지막 접속 '+fmtAgo((Date.now()-live.last_publish_ms)/1000)+' 전' : '접속 기록 없음') };
+}
+function branchCardHTML(a, editable){
+  var s=branchCardData(a), canEdit = editable && !a.legacy && !!a.token;
+  return '<div class="mg-card'+(s.online?'':' off')+'" data-id="'+escAttr(a.id)+'">'+
+    '<div class="mgc-head"><span class="mgc-dot'+(s.online?' on':'')+'"></span>'+
       '<div class="mgc-id"><span class="mgc-name">'+escHtml(a.name||a.id)+'</span><span class="mgc-code mono">'+escHtml(a.id)+(a.legacy?' · 기본':'')+'</span></div>'+
-      '<span class="mgc-badge'+(online?' on':'')+'">'+(online?'온라인':'오프라인')+'</span></div>'+
+      '<span class="mgc-badge'+(s.online?' on':'')+'">'+(s.online?'온라인':'오프라인')+'</span></div>'+
     '<div class="mgc-stats">'+
-      '<div class="mgc-stat"><span class="mgc-k">DVR·채널</span><span class="mgc-v">'+dvrs.length+'·'+chAct+'/'+chTotal+'</span></div>'+
-      '<div class="mgc-stat"><span class="mgc-k">시청자</span><span class="mgc-v">'+watchers+'</span></div>'+
-      '<div class="mgc-stat"><span class="mgc-k">상태</span><span class="mgc-v">'+statusTxt+'</span></div>'+
+      '<div class="mgc-stat"><span class="mgc-k">DVR·채널</span><span class="mgc-v" data-mgc="ch">'+s.ndvr+'·'+s.chAct+'/'+s.chTotal+'</span></div>'+
+      '<div class="mgc-stat"><span class="mgc-k">시청자</span><span class="mgc-v" data-mgc="watchers">'+s.watchers+'</span></div>'+
+      '<div class="mgc-stat"><span class="mgc-k">상태</span><span class="mgc-v" data-mgc="status">'+s.status+'</span></div>'+
     '</div>'+
-    (a.token?('<div class="mgc-token"><span class="mgc-tok mono" data-tok="'+escAttr(a.token)+'">••••••••••••</span>'+
+    (a.token?('<div class="mgc-token"><span class="mgc-tok mono">••••••••••••</span>'+
       '<button class="mgc-ic" data-act="reveal" title="토큰 보기">보기</button>'+
       '<button class="mgc-ic" data-act="copy" title="토큰 복사">복사</button></div>'):'')+
     '<div class="mgc-actions">'+
       (canEdit?'<button data-act="rename">이름변경</button><button data-act="regen">토큰 재발급</button>':'')+
-      '<button data-act="reconnect"'+(online?'':' disabled')+'>재접속</button>'+
+      '<button data-act="reconnect"'+(s.online?'':' disabled')+'>재접속</button>'+
       '<button data-act="hide">숨기기</button>'+
       (canEdit?'<button class="danger" data-act="delete">삭제</button>':'')+
     '</div></div>';
+}
+// Live, non-destructive refresh: update only the volatile fields on existing cards
+// so online/watcher/last-seen don't freeze while the 관리 page is open — without
+// clobbering an in-flight rename input or a revealed token.
+function patchBranchCards(){
+  var list=$('#tenant-list'); if(!list) return;
+  list.querySelectorAll('.mg-card[data-id]').forEach(function(card){
+    if(card.querySelector('.mgc-rename')) return; // mid-edit
+    var s=branchCardData({id:card.dataset.id});
+    card.classList.toggle('off', !s.online);
+    var dot=card.querySelector('.mgc-dot'); if(dot) dot.classList.toggle('on', s.online);
+    var badge=card.querySelector('.mgc-badge'); if(badge){ badge.classList.toggle('on', s.online); badge.textContent=s.online?'온라인':'오프라인'; }
+    var setV=function(k,v){ var el=card.querySelector('.mgc-v[data-mgc="'+k+'"]'); if(el && el.textContent!==v) el.textContent=v; };
+    setV('ch', s.ndvr+'·'+s.chAct+'/'+s.chTotal); setV('watchers', String(s.watchers)); setV('status', s.status);
+    var rb=card.querySelector('[data-act="reconnect"]'); if(rb && rb.textContent==='재접속') rb.disabled=!s.online;
+  });
 }
 function genTokenStr(){ var a=new Uint8Array(16); (crypto||window.crypto).getRandomValues(a); return [].map.call(a,function(b){return ('0'+b.toString(16)).slice(-2);}).join(''); }
 function upsertTenant(id,name,token){
@@ -1021,9 +1077,11 @@ function wireBranchCards(){
     var btn=e.target.closest('[data-act]'); if(!btn) return;
     var card=e.target.closest('.mg-card'); if(!card) return;
     var id=card.dataset.id, act=btn.dataset.act;
-    var tokEl=card.querySelector('.mgc-tok'); var token=tokEl?tokEl.getAttribute('data-tok'):'';
+    var tokEl=card.querySelector('.mgc-tok'); var token=branchTokens[id]||'';
     var nameEl=card.querySelector('.mgc-name'); var name=nameEl?nameEl.textContent:id;
-    if(act==='reveal'){ var shown=tokEl.dataset.shown==='1'; tokEl.textContent=shown?'••••••••••••':token; tokEl.dataset.shown=shown?'':'1'; btn.textContent=shown?'보기':'숨김'; }
+    if(act==='reveal'){ var shown=tokEl.dataset.shown==='1';
+      if(shown){ tokEl.textContent='••••••••••••'; tokEl.dataset.shown=''; btn.textContent='보기'; if(tokEl._mask){ clearTimeout(tokEl._mask); tokEl._mask=0; } }
+      else { tokEl.textContent=token; tokEl.dataset.shown='1'; btn.textContent='숨김'; tokEl._mask=setTimeout(function(){ tokEl.textContent='••••••••••••'; tokEl.dataset.shown=''; btn.textContent='보기'; }, 20000); } }
     else if(act==='copy'){ if(navigator.clipboard) navigator.clipboard.writeText(token); tnMsg('토큰 복사됨'); }
     else if(act==='reconnect'){ btn.disabled=true; var o=btn.textContent; btn.textContent='요청 중…';
       fetch('/dashboard/api/agent-control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agent_id:id,action:'reconnect'})})
