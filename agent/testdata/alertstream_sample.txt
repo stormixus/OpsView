@@ -1,0 +1,35 @@
+--boundary
+Content-Type: application/xml; charset="UTF-8"
+Content-Length: 300
+
+<EventNotificationAlert version="1.0" xmlns="http://www.hikvision.com/ver20/XMLSchema">
+<channelID>0</channelID>
+<dateTime>2026-06-08T15:05:00</dateTime>
+<eventType>videoloss</eventType>
+<eventState>inactive</eventState>
+<eventDescription>videoloss alarm</eventDescription>
+</EventNotificationAlert>
+--boundary
+Content-Type: application/xml; charset="UTF-8"
+Content-Length: 470
+
+<EventNotificationAlert version="1.0" xmlns="http://www.hikvision.com/ver20/XMLSchema">
+<channelID>8</channelID>
+<dateTime>2026-06-08T15:05:33</dateTime>
+<eventType>VMD</eventType>
+<eventState>active</eventState>
+<eventDescription>Motion alarm</eventDescription>
+<targetType>human</targetType>
+</EventNotificationAlert>
+--boundary
+Content-Type: application/xml; charset="UTF-8"
+Content-Length: 440
+
+<EventNotificationAlert version="1.0" xmlns="http://www.hikvision.com/ver20/XMLSchema">
+<channelID>8</channelID>
+<dateTime>2026-06-08T15:05:39</dateTime>
+<eventType>VMD</eventType>
+<eventState>inactive</eventState>
+<eventDescription>Motion alarm</eventDescription>
+</EventNotificationAlert>
+--boundary--
