@@ -687,6 +687,7 @@ function recLoadDay(){
     recRenderTimeline(recCtx.segs);
     recRenderEventList();
     if(recCtx.segs.length){ $('#recEmpty').style.display='none'; } else { recRenderEmpty('이 날짜 녹화 없음'); }
+    if(recCtx.pendingSeek!=null){ var ps=recCtx.pendingSeek; recCtx.pendingSeek=null; if(recCtx.segs.length) recPlayAt(ps); }
   }).catch(function(){ recRenderEmpty('불러오기 실패'); });
 }
 function loadRecEventList(day){
@@ -729,13 +730,16 @@ $('#recEventFilters').addEventListener('click', function(e){
 $('#recEventList').addEventListener('click', function(e){
   var card=e.target.closest('.ev-card'); if(!card) return;
   var evStream=card.dataset.stream, evStart=+card.dataset.start;
-  var sel=$('#recChannel');
-  if(sel && evStream && evStream!==recCtx.stream){
-    sel.value=evStream; recCtx.stream=evStream;
-    recLoadDays();
-    setTimeout(function(){ if(recCtx.mode>1) recSeekAll(evStart); else recPlayAt(evStart); }, 500);
-  } else {
-    if(recCtx.mode>1){ recPlayAll(true); recSeekAll(evStart); } else { if(recCtx.segs.length) recPlayAt(evStart); }
+  // Different camera (single mode): switch channel, then seek AFTER the day's
+  // segments actually load (recCtx.pendingSeek is consumed in recLoadDay/Grid) —
+  // a fixed delay raced the async load and silently dropped the jump.
+  if(recCtx.mode<=1 && evStream && evStream!==recCtx.stream){
+    var sel=$('#recChannel'); if(sel) sel.value=evStream;
+    recCtx.stream=evStream; recCtx.pendingSeek=evStart; recLoadDays();
+  } else if(recCtx.mode>1){
+    recPlayAll(true); recSeekAll(evStart);
+  } else if(recCtx.segs.length){
+    recPlayAt(evStart);
   }
 });
 function recLoadDayGrid(){
@@ -745,7 +749,8 @@ function recLoadDayGrid(){
     fetch(BASE+'/api/rec?stream='+encodeURIComponent(c.stream)+'&day='+day).then(function(r){return r.ok?r.json():null;}).then(function(d){
       c.segs=(d&&d.segments)||[]; c.cur=null;
     }).catch(function(){ c.segs=[]; }).finally(function(){
-      if(--pending===0){ recRenderTimeline((recCtx.cells[0]&&recCtx.cells[0].segs)||[]); $('#recEmpty').style.display='none'; }
+      if(--pending===0){ recRenderTimeline((recCtx.cells[0]&&recCtx.cells[0].segs)||[]); $('#recEmpty').style.display='none';
+        if(recCtx.pendingSeek!=null){ var ps=recCtx.pendingSeek; recCtx.pendingSeek=null; recPlayAll(true); recSeekAll(ps); } }
     });
   });
 }
