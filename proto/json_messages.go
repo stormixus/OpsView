@@ -5,9 +5,9 @@ type Hello struct {
 	Role          string   `json:"role"`               // "publisher" or "watcher"
 	AgentID       string   `json:"agent_id,omitempty"` // publisher only: tenant/agent id; empty = default agent
 	Client        string   `json:"client"`             // "opsview-agent", "opsview-viewer", "opsview-web"
-	ClientVersion string   `json:"client_version"` // e.g. "0.1.0"
-	Supports      []string `json:"supports"`       // e.g. ["zstd"]
-	WantProfile   *string  `json:"want_profile"`   // "1080", "720", or null
+	ClientVersion string   `json:"client_version"`     // e.g. "0.1.0"
+	Supports      []string `json:"supports"`           // e.g. ["zstd"]
+	WantProfile   *string  `json:"want_profile"`       // "1080", "720", or null
 }
 
 // Auth is the AUTH message payload (JSON-encoded).
@@ -107,4 +107,16 @@ type SnapshotResponse struct {
 	ChNum int    `json:"ch_num"`
 	Data  string `json:"data,omitempty"`
 	Error string `json:"error,omitempty"`
+}
+
+// SurvEvent is one DVR event edge (publisher→relay). The relay pairs Active
+// true/false edges per (AgentID,ChID,Kind) into intervals for the recording
+// timeline and retention. AgentID is left empty by the publisher and stamped by
+// the relay, mirroring SurvConfig.
+type SurvEvent struct {
+	AgentID string `json:"agent_id,omitempty"`
+	ChID    string `json:"ch_id"`  // "dvr1_ch2" — matches the stream/segment path
+	Kind    string `json:"kind"`   // "motion" | "linecross" | "person" | "vehicle" | ...
+	Active  bool   `json:"active"` // true = event started, false = ended
+	TS      int64  `json:"ts"`     // event time, UTC unix milliseconds
 }

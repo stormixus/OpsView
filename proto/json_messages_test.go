@@ -31,3 +31,29 @@ func TestAgentControlRoundTrip(t *testing.T) {
 		t.Fatalf("String: %s", MsgAgentControl.String())
 	}
 }
+
+func TestSurvEventRoundTrip(t *testing.T) {
+	ev := SurvEvent{ChID: "dvr1_ch2", Kind: "motion", Active: true, TS: 1717843200123}
+	payload, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	msg := MarshalMessage(MsgSurvEvent, payload)
+	hdr, err := DecodeHeader(msg)
+	if err != nil {
+		t.Fatalf("decode header: %v", err)
+	}
+	if hdr.Type != MsgSurvEvent {
+		t.Fatalf("type = %v, want MsgSurvEvent", hdr.Type)
+	}
+	var got SurvEvent
+	if err := json.Unmarshal(msg[HeaderSize:], &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got != ev {
+		t.Fatalf("round-trip = %+v, want %+v", got, ev)
+	}
+	if MsgSurvEvent.String() != "SURV_EVENT" {
+		t.Fatalf("String() = %q, want SURV_EVENT", MsgSurvEvent.String())
+	}
+}
