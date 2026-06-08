@@ -131,6 +131,10 @@ function activeStreams(a){return a.streams.filter(function(s){return s.active;})
 
 /* --- device (DVR/NVR) grouping: show one device's channels at a time --- */
 var selDvr='all'; // 'all' or a dvr id (number)
+// The selected DVR filter lives in the URL (?dvr=<id>) so a reload restores it
+// instead of snapping back to 전체 (the filter had no route before).
+function dvrParam(){ var v=new URLSearchParams(location.search).get('dvr'); return (v==null||v==='all') ? 'all' : (+v); }
+function setDvrParam(dvr){ var u=new URL(location.href); if(dvr==='all') u.searchParams.delete('dvr'); else u.searchParams.set('dvr', dvr); history.replaceState(history.state, '', u.pathname+u.search); }
 function dvrName(a, id){ var d=(a.dvrs||[]).filter(function(x){return x.id===id;})[0]; return d? d.name : ('DVR '+id); }
 function streamsForView(a){
   if(selDvr==='all') return a.streams;
@@ -142,6 +146,8 @@ function renderDvrChips(a){
   var dvrs=a.dvrs||[];
   // only worth showing when the agent has more than one device
   if(dvrs.length<=1){ bar.style.display='none'; bar.innerHTML=''; selDvr='all'; return; }
+  // stale ?dvr= (device removed/renamed away) -> fall back to 전체 and clean the URL
+  if(selDvr!=='all' && !dvrs.some(function(d){return d.id===selDvr;})){ selDvr='all'; setDvrParam('all'); }
   bar.style.display='';
   var html='<button class="dvr-chip'+(selDvr==='all'?' on':'')+'" data-dvr="all">전체 <span class="n">'+activeStreams(a).length+'</span></button>';
   dvrs.forEach(function(d){
@@ -234,7 +240,7 @@ function navTo(target){
   }
   $('#manage-view').classList.remove('active');
   selected = (target==='overview')? null : target;
-  selDvr='all'; liveEditing=false; var _eb=$('#liveEditBtn'); if(_eb){ _eb.textContent='편집'; _eb.classList.remove('on'); } // reset device filter + edit mode on switch
+  selDvr=dvrParam(); liveEditing=false; var _eb=$('#liveEditBtn'); if(_eb){ _eb.textContent='편집'; _eb.classList.remove('on'); } // restore device filter from URL (?dvr=) on reload; in-app nav has no query -> 'all'
   $('#sidebar').classList.remove('open');
   stopLiveGrid(); // tear down any playing videos before switching context
   if(selected===null){
@@ -306,6 +312,7 @@ $$('#agent-view .tab').forEach(function(b){ b.addEventListener('click', function
 $('#dvrChips').addEventListener('click', function(e){
   var b=e.target.closest('.dvr-chip'); if(!b || !selected) return;
   selDvr = b.dataset.dvr==='all' ? 'all' : +b.dataset.dvr;
+  setDvrParam(selDvr);
   var a=agentById(selected); if(!a) return;
   renderDvrChips(a); renderStreams(a);
   if(curTab==='live') renderGrid(a);
@@ -1177,7 +1184,33 @@ function wireLiveEdit(a){
   var dragging = null;
   grid.addEventListener('dragstart', function(e){ var c=e.target.closest('.cell'); if(c){ dragging=c; c.classList.add('drag'); } });
   grid.addEventListener('dragend', function(){ if(dragging){ dragging.classList.remove('drag'); dragging=null; saveLiveOrder(a); } });
-  grid.addEventListener('dragover', function(e){ e.preventDefault(); if(!dragging) return; var after=cellAfter(grid, e.clientX, e.clientY); if(after==null) grid.appendChild(dragging); else grid.insertBefore(dragging, after); });
+  grid.addEventListener('dragover', function(e){ e.preventDefault(); if(!dragging) return;
+    var after=cellAfter(grid, e.clientX, e.clientY);
+    // only reflow when the insertion point actually changes (avoids restarting the
+    // slide animation on every mousemove)
+    if(after===dragging) return;
+    if(after==null){ if(grid.lastElementChild===dragging) return; }
+    else if(after===dragging.nextElementSibling) return;
+    flipMove(grid, dragging, function(){ if(after==null) grid.appendChild(dragging); else grid.insertBefore(dragging, after); });
+  });
+}
+// FLIP: animate the non-dragged cells sliding to their new grid slots when the
+// drag reorders the DOM, instead of snapping. Preserves the live <video>s (we move
+// nodes, never rebuild).
+function flipMove(grid, dragging, mutate){
+  var first=[];
+  [].slice.call(grid.querySelectorAll('.cell')).forEach(function(c){ if(c!==dragging) first.push([c, c.getBoundingClientRect()]); });
+  mutate();
+  first.forEach(function(p){
+    var c=p[0], f=p[1], l=c.getBoundingClientRect(), dx=f.left-l.left, dy=f.top-l.top;
+    if(dx||dy){
+      c.style.transition='none';
+      c.style.transform='translate('+dx+'px,'+dy+'px)';
+      c.getBoundingClientRect(); // force reflow so the inverted start is applied
+      c.style.transition='transform .2s cubic-bezier(.2,.8,.2,1)';
+      c.style.transform='';
+    }
+  });
 }
 function cellAfter(grid, x, y){
   var cells=[].slice.call(grid.querySelectorAll('.cell:not(.drag)'));

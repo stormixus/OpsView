@@ -110,6 +110,16 @@ func (sp *SurvProxy) HandleSurvConfig(payload []byte) {
 				name:    ch.Name,
 				rtspURL: survRTSPURLForChannel(dvr, ch),
 			})
+		} else {
+			// Stream already running: refresh its display name so a rename in a
+			// re-sent config takes effect live. Without this the name was frozen at
+			// stream creation, and a rename only appeared after a relay restart /
+			// stream recreation.
+			sp.mu.Lock()
+			if e, ok := sp.streams[chID]; ok && e.name != ch.Name {
+				e.name = ch.Name
+			}
+			sp.mu.Unlock()
 		}
 	}
 

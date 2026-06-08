@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/opsview/opsview/proto"
@@ -85,6 +86,40 @@ func streamIDFor(dvrID int64, chNum int) string {
 	return fmt.Sprintf("dvr%d_ch%d", dvrID, chNum)
 }
 
+// orderStreams sorts streams in place into a stable display order: grouped by
+// DVR, then by each channel's configured display order, then channel number.
+// Streams with no matching channel sort last (by ID). Without this the grid
+// order came straight from Go's randomized map iteration in StreamStats and
+// reshuffled on every poll/reload, so reorder edits never "stuck".
+func orderStreams(streams []streamState, channels []proto.ChannelInfo) {
+	type okey struct {
+		dvr   int64
+		order int
+		ch    int
+		has   bool
+	}
+	keyOf := make(map[string]okey, len(channels))
+	for _, c := range channels {
+		keyOf[streamIDFor(c.DVRID, c.ChNum)] = okey{dvr: c.DVRID, order: c.Order, ch: c.ChNum, has: true}
+	}
+	sort.SliceStable(streams, func(i, j int) bool {
+		ki, kj := keyOf[streams[i].ID], keyOf[streams[j].ID]
+		if ki.has != kj.has {
+			return ki.has // configured channels first
+		}
+		if ki.dvr != kj.dvr {
+			return ki.dvr < kj.dvr
+		}
+		if ki.order != kj.order {
+			return ki.order < kj.order
+		}
+		if ki.ch != kj.ch {
+			return ki.ch < kj.ch
+		}
+		return streams[i].ID < streams[j].ID
+	})
+}
+
 func msToRFC3339(ms int64) string {
 	if ms <= 0 {
 		return ""
@@ -144,6 +179,7 @@ func (h *Hub) buildDashboardState() dashboardState {
 				for _, d := range cfg.DVRs {
 					dvrs = append(dvrs, dvrSummary{ID: d.ID, Name: d.Name, Channels: counts[d.ID]})
 				}
+				orderStreams(streams, cfg.Channels)
 			}
 		}
 

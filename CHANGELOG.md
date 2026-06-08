@@ -4,6 +4,31 @@ All notable changes to OpsView are documented here.
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-06-08
+
+### Fixed
+
+- **Live grid channel order is now deterministic and reflects reorder edits.** The
+  dashboard built its live grid straight from `StreamStats()`, which ranges a Go
+  map — so the order was randomized on every poll/reload and a reorder edit never
+  "stuck" (it reshuffled on the next refresh). `buildDashboardState` now sorts
+  streams by DVR, then configured display order, then channel number. Relay-only.
+- **Channel renames now appear live on the dashboard (no relay restart).** A
+  stream's display name was frozen at stream creation; the reconcile loop skipped
+  already-running streams entirely, so a rename in a re-sent config only showed
+  after a relay restart recreated the stream. The reconcile now refreshes an
+  existing stream's name when the config changes. Relay-only.
+- **The selected DVR filter survives a page reload.** The device-filter chip
+  selection lived only in JS state with no route, so a reload snapped back to 전체.
+  It is now encoded in the URL (`?dvr=<id>`) and restored on load (and cleaned up
+  if the device is gone). Relay-only.
+
+### Changed
+
+- **Reordering channels animates.** Dragging a cell in the live-grid editor now
+  slides the other cells to their new slots (FLIP), instead of snapping — the live
+  video streams are preserved (nodes are moved, not rebuilt). Relay-only.
+
 ## [0.8.4] - 2026-06-08
 
 ### Added
