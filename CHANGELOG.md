@@ -4,6 +4,18 @@ All notable changes to OpsView are documented here.
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-06-08
+
+### Added
+
+- **(internal/diagnostic) ONVIF Events capability probe — Phase 0 of motion/event
+  detection.** During DVR discovery, agents now resolve each ONVIF DVR's Events
+  service and log whether it is present and which event topics it advertises
+  (`[onvif-events]` log lines). This is diagnostic only — no behavior change — and
+  exists to confirm, on real hardware, whether the DVR exposes ONVIF Events
+  (motion / smart events) before the detection pipeline is built. The wire message
+  type `MsgSurvEvent` is reserved in the protocol but not yet emitted or consumed.
+
 ## [0.8.3] - 2026-06-07
 
 ### Changed
