@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os/exec"
 	"strconv"
@@ -84,7 +85,12 @@ func (h *Hub) HandleDashboardRecThumb(w http.ResponseWriter, r *http.Request) {
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil || out.Len() == 0 {
-		http.Error(w, "thumb failed", http.StatusInternalServerError)
+		// The currently-recording segment has no finalized moov yet, so ffmpeg can't
+		// read it — expected for events in the active (last ≤ segment-length) window.
+		// Report "no thumbnail" (not an error) so the dashboard shows a clean
+		// placeholder; it resolves once the segment closes and the day is reloaded.
+		log.Printf("[rec-thumb] %s @%d: extract failed (likely active segment): %v", stream, t, err)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 

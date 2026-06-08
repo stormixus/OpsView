@@ -721,6 +721,11 @@ function recRenderEventList(){
       '<span class="ev-chip ev-'+escAttr(ev.kind||'motion')+'">'+kindLabel+'</span></div>'+
       '<span class="ev-time">'+pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds())+'</span></div></div>';
   }).join('');
+  // No thumbnail yet (event in the still-recording segment -> 204) -> show a clean
+  // dark placeholder instead of the browser's broken-image icon.
+  list.querySelectorAll('.ev-thumb').forEach(function(img){
+    img.addEventListener('error', function(){ this.onerror=null; this.classList.add('ev-thumb-na'); this.removeAttribute('src'); });
+  });
 }
 $('#recEventFilters').addEventListener('click', function(e){
   var b=e.target.closest('[data-kind]'); if(!b) return;

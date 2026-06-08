@@ -39,6 +39,7 @@ type Agent struct {
 	cfg         AgentConfig
 	conn        *websocket.Conn
 	connMu      sync.Mutex
+	writeMu     sync.Mutex // serializes all WriteMessage calls (gorilla allows only one concurrent writer)
 	seq         atomic.Uint32
 	profile     atomic.Int32
 	capturer    Capturer
@@ -104,6 +105,16 @@ func (a *Agent) Stop() {
 	})
 }
 
+// wsWrite serializes all writes to the relay websocket. gorilla/websocket permits
+// only one concurrent writer; the frame/heartbeat/snapshot/survConfig/survEvent
+// goroutines all write, so without this lock concurrent writes panic the process
+// ("concurrent write to websocket connection").
+func (a *Agent) wsWrite(conn *websocket.Conn, msg []byte) error {
+	a.writeMu.Lock()
+	defer a.writeMu.Unlock()
+	return conn.WriteMessage(websocket.BinaryMessage, msg)
+}
+
 func (a *Agent) connect() error {
 	log.Printf("[agent] connecting to %s", a.cfg.RelayURL)
 	if isPlaintextPublicRelay(a.cfg.RelayURL) {
@@ -130,7 +141,7 @@ func (a *Agent) connect() error {
 
 	helloPayload, _ := json.Marshal(hello)
 	helloMsg := proto.MarshalMessage(proto.MsgHello, helloPayload)
-	if err := conn.WriteMessage(websocket.BinaryMessage, helloMsg); err != nil {
+	if err := a.wsWrite(conn, helloMsg); err != nil {
 		conn.Close()
 		return err
 	}
@@ -140,7 +151,7 @@ func (a *Agent) connect() error {
 	auth := proto.Auth{Token: a.cfg.PublisherToken, PIN: a.cfg.PIN}
 	authPayload, _ := json.Marshal(auth)
 	authMsg := proto.MarshalMessage(proto.MsgAuth, authPayload)
-	if err := conn.WriteMessage(websocket.BinaryMessage, authMsg); err != nil {
+	if err := a.wsWrite(conn, authMsg); err != nil {
 		conn.Close()
 		return err
 	}
@@ -261,7 +272,7 @@ func (a *Agent) handleSnapshotRequest(payload []byte) {
 	conn := a.conn
 	a.connMu.Unlock()
 	if conn != nil {
-		if err := conn.WriteMessage(websocket.BinaryMessage, msg); err != nil {
+		if err := a.wsWrite(conn, msg); err != nil {
 			log.Printf("[agent] snapshot response send error: %v", err)
 		}
 	}
@@ -308,7 +319,7 @@ func (a *Agent) sendSurvConfig() {
 	conn := a.conn
 	a.connMu.Unlock()
 	if conn != nil {
-		if err := conn.WriteMessage(websocket.BinaryMessage, msg); err != nil {
+		if err := a.wsWrite(conn, msg); err != nil {
 			log.Printf("[agent] sendSurvConfig send error: %v", err)
 		} else {
 			log.Printf("[agent] sent surveillance config: %d DVRs, %d channels", len(cfg.DVRs), len(cfg.Channels))
@@ -327,7 +338,7 @@ func (a *Agent) sendSurvEvent(chID, kind string, active bool, tsMs int64) {
 	if conn == nil {
 		return
 	}
-	if err := conn.WriteMessage(websocket.BinaryMessage, msg); err != nil {
+	if err := a.wsWrite(conn, msg); err != nil {
 		log.Printf("[agent] sendSurvEvent send error: %v", err)
 	}
 }
@@ -524,7 +535,7 @@ func (a *Agent) captureLoop() {
 				return
 			}
 
-			if err := conn.WriteMessage(websocket.BinaryMessage, msg); err != nil {
+			if err := a.wsWrite(conn, msg); err != nil {
 				log.Printf("[agent] send error: %v", err)
 				return // Will reconnect in Run() loop
 			}
@@ -540,7 +551,7 @@ func (a *Agent) sendHeartbeat() {
 		return
 	}
 	msg := proto.MarshalMessage(proto.MsgHeartbeat, nil)
-	_ = conn.WriteMessage(websocket.BinaryMessage, msg)
+	_ = a.wsWrite(conn, msg)
 }
 
 func (a *Agent) closeConn() {

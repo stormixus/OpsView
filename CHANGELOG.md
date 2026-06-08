@@ -4,6 +4,8 @@ All notable changes to OpsView are documented here.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-06-08
+
 ### Added
 
 - **Event list (Frigate-style).** The recording tab now shows the day's detected
@@ -15,6 +17,23 @@ All notable changes to OpsView are documented here.
 - **Event thumbnail on hover.** Hovering a motion-event band on the recording
   timeline now previews that event's frame (reusing the scrub thumbnail), clamped
   to within the event and labeled with the event kind + time. Relay-only.
+
+### Fixed
+
+- **Agent could crash under event load (concurrent websocket write).** The new
+  per-DVR event emitters wrote to the relay websocket from multiple goroutines with
+  no serialization; gorilla/websocket allows only one concurrent writer, so frequent
+  motion events could panic the agent ("concurrent write to websocket connection").
+  All writes now go through a single write mutex. **Update the agent.**
+- **Event thumbnails degrade gracefully.** A thumbnail for an event still inside the
+  currently-recording 5-min segment can't be extracted (no finalized moov yet); the
+  relay now returns "no content" instead of a 500, and the dashboard shows a clean
+  dark placeholder instead of a broken-image icon. Thumbnails appear once the segment
+  closes (and for any event older than the active window). Relay-only.
+- **Event-card click reliably jumps to the event.** Clicking a card for another
+  camera switched channel then seeked on a fixed 500 ms timer that raced the async
+  load and often dropped the jump; the seek now fires when the day's segments finish
+  loading. Relay-only.
 
 ## [0.9.0] - 2026-06-08
 
