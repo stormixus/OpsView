@@ -624,7 +624,7 @@ modalCell.addEventListener('change', function(e){ if(e.target.classList.contains
 modalCell.addEventListener('keydown', function(e){ if(e.target.classList.contains('ipname-in') && e.key==='Enter'){ e.preventDefault(); e.target.blur(); } });
 
 /* ============================================================ RECORDINGS (녹화) */
-var recCtx = { mode:1, streams:[], stream:null, day:null, dayStart:0, segs:[], cur:null, cells:[], master:0, playing:false, range:null, events:[] };
+var recCtx = { mode:1, streams:[], stream:null, day:null, dayStart:0, segs:[], cur:null, cells:[], master:0, playing:false, range:null, events:[], eventList:[], eventFilter:'all' };
 var recVideo = $('#recVideo');
 function pad2(n){ return (n<10?'0':'')+n; }
 function recDayStr(d){ return ''+d.getFullYear()+pad2(d.getMonth()+1)+pad2(d.getDate()); }
@@ -680,15 +680,67 @@ function recLoadDay(){
   if(recCtx.mode>1){ recLoadDayGrid(); return; }
   Promise.all([
     fetch(BASE+'/api/rec?stream='+encodeURIComponent(recCtx.stream)+'&day='+day).then(function(r){return r.ok?r.json():null;}),
-    loadRecEvents(recCtx.stream, day)
+    loadRecEvents(recCtx.stream, day),
+    loadRecEventList(day)
   ]).then(function(results){
-    var d=results[0]; recCtx.segs=(d&&d.segments)||[]; recCtx.events=results[1]||[];
+    var d=results[0]; recCtx.segs=(d&&d.segments)||[]; recCtx.events=results[1]||[]; recCtx.eventList=results[2]||[];
     recRenderTimeline(recCtx.segs);
+    recRenderEventList();
     if(recCtx.segs.length){ $('#recEmpty').style.display='none'; } else { recRenderEmpty('이 날짜 녹화 없음'); }
   }).catch(function(){ recRenderEmpty('불러오기 실패'); });
 }
+function loadRecEventList(day){
+  if(!selected) return Promise.resolve([]);
+  return fetch(BASE+'/api/rec-events-list?agent='+encodeURIComponent(selected)+'&day='+day, {credentials:'same-origin'})
+    .then(function(r){ return r.ok? r.json() : null; })
+    .then(function(j){ return (j&&Array.isArray(j.events)) ? j.events : []; })
+    .catch(function(){ return []; });
+}
+function recRenderEventList(){
+  var list=$('#recEventList'), filtersEl=$('#recEventFilters');
+  if(!list || !filtersEl) return;
+  var events=recCtx.eventList||[];
+  if(!events.length){ list.innerHTML='<div class="rec-events-empty">이벤트 없음</div>'; filtersEl.innerHTML=''; return; }
+  var kinds={};
+  events.forEach(function(ev){ kinds[ev.kind||'motion']=true; });
+  var kindNames={person:'사람',vehicle:'차량',motion:'모션',linecross:'라인',intrusion:'침입'};
+  var filters=['<button class="ev-filter-chip'+(recCtx.eventFilter==='all'?' on':'')+'" data-kind="all">전체</button>'];
+  ['person','vehicle','motion','linecross','intrusion'].forEach(function(k){
+    if(kinds[k]) filters.push('<button class="ev-filter-chip'+(recCtx.eventFilter===k?' on':'')+'" data-kind="'+k+'">'+(kindNames[k]||k)+'</button>');
+  });
+  filtersEl.innerHTML=filters.join('');
+  var filtered = recCtx.eventFilter==='all' ? events : events.filter(function(ev){ return (ev.kind||'motion')===recCtx.eventFilter; });
+  if(!filtered.length){ list.innerHTML='<div class="rec-events-empty">선택한 종류 이벤트 없음</div>'; return; }
+  list.innerHTML = filtered.map(function(ev){
+    var d=new Date(ev.start*1000), kindLabel=kindNames[ev.kind||'motion']||(ev.kind||'motion');
+    var thumbUrl=BASE+'/api/rec-thumb?stream='+encodeURIComponent(ev.stream)+'&t='+ev.start;
+    return '<div class="ev-card" data-stream="'+escAttr(ev.stream)+'" data-start="'+ev.start+'">'+
+      '<img class="ev-thumb" loading="lazy" src="'+escAttr(thumbUrl)+'" alt="'+kindLabel+'">'+
+      '<div class="ev-meta"><div class="ev-header"><span class="ev-name">'+escHtml(ev.name)+' · CH'+ev.ch+'</span>'+
+      '<span class="ev-chip ev-'+escAttr(ev.kind||'motion')+'">'+kindLabel+'</span></div>'+
+      '<span class="ev-time">'+pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds())+'</span></div></div>';
+  }).join('');
+}
+$('#recEventFilters').addEventListener('click', function(e){
+  var b=e.target.closest('[data-kind]'); if(!b) return;
+  recCtx.eventFilter=b.dataset.kind;
+  recRenderEventList();
+});
+$('#recEventList').addEventListener('click', function(e){
+  var card=e.target.closest('.ev-card'); if(!card) return;
+  var evStream=card.dataset.stream, evStart=+card.dataset.start;
+  var sel=$('#recChannel');
+  if(sel && evStream && evStream!==recCtx.stream){
+    sel.value=evStream; recCtx.stream=evStream;
+    recLoadDays();
+    setTimeout(function(){ if(recCtx.mode>1) recSeekAll(evStart); else recPlayAt(evStart); }, 500);
+  } else {
+    if(recCtx.mode>1){ recPlayAll(true); recSeekAll(evStart); } else { if(recCtx.segs.length) recPlayAt(evStart); }
+  }
+});
 function recLoadDayGrid(){
   var day=recCtx.day, pending=recCtx.cells.length; if(!pending){ recRenderTimeline([]); return; }
+  loadRecEventList(day).then(function(list){ recCtx.eventList=list||[]; recRenderEventList(); });
   recCtx.cells.forEach(function(c){
     fetch(BASE+'/api/rec?stream='+encodeURIComponent(c.stream)+'&day='+day).then(function(r){return r.ok?r.json():null;}).then(function(d){
       c.segs=(d&&d.segments)||[]; c.cur=null;
