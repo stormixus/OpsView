@@ -697,11 +697,20 @@ function loadRecEventList(day){
     .then(function(j){ return (j&&Array.isArray(j.events)) ? j.events : []; })
     .catch(function(){ return []; });
 }
+// ----- vertical time<->pixel mapping for the rail -----
+// The rail body is a fixed-height canvas (REC_PXH px per hour -> 24h tall). Newest
+// time sits at the TOP (y=0 == end of day / 24:00), earliest at the BOTTOM, matching
+// UniFi Protect. frac = (sec-dayStart)/86400 in [0,1]; topPx = (1-frac)*bodyH.
+var REC_PXH = 64;
+function recBodyH(){ return 24*REC_PXH; }
+function recTopForSec(sec){ var frac=(sec-recCtx.dayStart)/86400; return (1-frac)*recBodyH(); }
+function recSecForTop(top){ var frac=1-(top/recBodyH()); return recCtx.dayStart + Math.max(0,Math.min(1,frac))*86400; }
 function recRenderEventList(){
-  var list=$('#recEventList'), filtersEl=$('#recEventFilters');
+  var list=$('#recEventList'), filtersEl=$('#recEventFilters'), body=$('#recRailBody');
   if(!list || !filtersEl) return;
+  if(body){ body.style.height=recBodyH()+'px'; }
+  recRenderAxis();
   var events=recCtx.eventList||[];
-  if(!events.length){ list.innerHTML='<div class="rec-events-empty">이벤트 없음</div>'; filtersEl.innerHTML=''; return; }
   var kinds={};
   events.forEach(function(ev){ kinds[ev.kind||'motion']=true; });
   var kindNames={person:'사람',vehicle:'차량',motion:'모션',linecross:'라인',intrusion:'침입'};
@@ -710,15 +719,16 @@ function recRenderEventList(){
     if(kinds[k]) filters.push('<button class="ev-filter-chip'+(recCtx.eventFilter===k?' on':'')+'" data-kind="'+k+'">'+(kindNames[k]||k)+'</button>');
   });
   filtersEl.innerHTML=filters.join('');
+  if(!events.length){ list.innerHTML='<div class="rec-events-empty">이벤트 없음</div>'; return; }
   var filtered = recCtx.eventFilter==='all' ? events : events.filter(function(ev){ return (ev.kind||'motion')===recCtx.eventFilter; });
   if(!filtered.length){ list.innerHTML='<div class="rec-events-empty">선택한 종류 이벤트 없음</div>'; return; }
   list.innerHTML = filtered.map(function(ev){
-    var d=new Date(ev.start*1000), kindLabel=kindNames[ev.kind||'motion']||(ev.kind||'motion');
+    var d=new Date(ev.start*1000), kind=ev.kind||'motion', kindLabel=kindNames[kind]||kind;
     var thumbUrl=BASE+'/api/rec-thumb?stream='+encodeURIComponent(ev.stream)+'&t='+ev.start;
-    return '<div class="ev-card" data-stream="'+escAttr(ev.stream)+'" data-start="'+ev.start+'">'+
+    return '<div class="ev-card ev-k-'+escAttr(kind)+'" style="top:'+recTopForSec(ev.start)+'px" data-stream="'+escAttr(ev.stream)+'" data-start="'+ev.start+'">'+
       '<img class="ev-thumb" loading="lazy" src="'+escAttr(thumbUrl)+'" alt="'+kindLabel+'">'+
       '<div class="ev-meta"><div class="ev-header"><span class="ev-name">'+escHtml(ev.name)+' · CH'+ev.ch+'</span>'+
-      '<span class="ev-chip ev-'+escAttr(ev.kind||'motion')+'">'+kindLabel+'</span></div>'+
+      '<span class="ev-chip ev-'+escAttr(kind)+'">'+kindLabel+'</span></div>'+
       '<span class="ev-time">'+pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds())+'</span></div></div>';
   }).join('');
   // No thumbnail yet (event in the still-recording segment -> 204) -> show a clean
@@ -726,6 +736,13 @@ function recRenderEventList(){
   list.querySelectorAll('.ev-thumb').forEach(function(img){
     img.addEventListener('error', function(){ this.onerror=null; this.classList.add('ev-thumb-na'); this.removeAttribute('src'); });
   });
+}
+// hour labels down the axis (24:00 at top -> 00:00 at bottom)
+function recRenderAxis(){
+  var ax=$('#recAxis'); if(!ax) return;
+  var h='';
+  for(var i=0;i<=24;i+=2){ h+='<span style="top:'+((1-i/24)*recBodyH())+'px">'+pad2(i%24)+':00</span>'; }
+  ax.innerHTML=h;
 }
 $('#recEventFilters').addEventListener('click', function(e){
   var b=e.target.closest('[data-kind]'); if(!b) return;
@@ -765,48 +782,23 @@ function recRenderEmpty(msg){
   try{ recVideo.removeAttribute('src'); recVideo.load(); }catch(x){}
   $('#recMeta').textContent=''; $('#recDownload').disabled=true; $('#recPlayhead').style.display='none';
 }
-function renderEventBands(container, events, dayStart){
-  if(!container || !events || !events.length) return;
-  events.forEach(function(ev){
-    var left = Math.max(0, (ev.start - dayStart) / 864);
-    var width = Math.max(0.3, (ev.end - ev.start) / 864);
-    var b = document.createElement('div');
-    b.className = 'rec-ev rec-ev-' + (ev.kind || 'motion');
-    b.style.left = left + '%';
-    b.style.width = width + '%';
-    var d = new Date(ev.start * 1000);
-    b.title = (ev.kind || 'motion') + ' · ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
-    b.addEventListener('click', function(e){
-      e.stopPropagation();
-      if(recCtx.mode>1){ recPlayAll(true); recSeekAll(ev.start); }
-      else { if(recCtx.segs.length) recPlayAt(ev.start); }
-    });
-    // Hover an event band -> preview the event frame (clamped to within the event),
-    // reusing the scrub thumbnail, and label it with the event kind + time. We take
-    // over the hover here (stopPropagation) so the preview snaps to the event.
-    b.addEventListener('mousemove', function(e){
-      e.stopPropagation();
-      var r=$('#recTimeline').getBoundingClientRect();
-      var frac=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));
-      var sec=recCtx.dayStart+frac*86400;
-      if(sec<ev.start) sec=ev.start; if(sec>ev.end) sec=ev.end;
-      var efrac=(sec-recCtx.dayStart)/86400;
-      recPreviewAt(efrac, sec);
-      var cur=$('#recCursor'); if(cur){ cur.style.display='block'; cur.style.left=(efrac*100)+'%'; }
-      var d=new Date(sec*1000), pt=$('#recPrevTime');
-      if(pt) pt.textContent=(ev.kind||'motion')+' · '+pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds());
-    });
-    container.appendChild(b);
-  });
-}
+// Draw the recorded-segment bar vertically on the rail axis (top=24:00, bottom=00:00).
 function recRenderTimeline(segs){
-  var hours=$('#recHours'); if(hours && !hours._done){ var h=''; for(var i=0;i<=24;i+=3){ h+='<span style="left:'+(i/24*100)+'%">'+pad2(i)+':00</span>'; } hours.innerHTML=h; hours._done=true; }
-  var track = $('#recTrack');
-  track.innerHTML = (segs||[]).map(function(s){
-    var left=(s.start-recCtx.dayStart)/86400*100, w=Math.max(0.12, s.dur/86400*100);
-    return '<span class="rec-seg" style="left:'+left+'%;width:'+w+'%"></span>';
-  }).join('');
-  renderEventBands(track, recCtx.events, recCtx.dayStart);
+  var body=$('#recRailBody'); if(body) body.style.height=recBodyH()+'px';
+  recRenderAxis();
+  var track = $('#recVTrack');
+  if(track){
+    track.innerHTML = (segs||[]).map(function(s){
+      var top=recTopForSec(s.start+s.dur), h=Math.max(2, (s.dur/86400)*recBodyH());
+      return '<span class="rec-vseg" style="top:'+top+'px;height:'+h+'px"></span>';
+    }).join('');
+  }
+  // live/현재 위치 marker: end of newest segment (top of the recorded range)
+  var live=$('#recLiveMark');
+  if(live){
+    if(segs && segs.length){ var last=segs[segs.length-1]; live.style.display='block'; live.style.top=recTopForSec(last.start+last.dur)+'px'; }
+    else live.style.display='none';
+  }
   var tot=(segs||[]).reduce(function(a,s){return a+s.dur;},0);
   $('#recMeta').textContent = (segs&&segs.length)? ((recCtx.mode>1? recCtx.cells.length+'채널 · ':'')+segs.length+'구간 · '+Math.round(tot/60)+'분') : '';
 }
@@ -829,7 +821,7 @@ function recSeekAll(sec){
   });
   recUpdatePlayhead(sec);
 }
-function recUpdatePlayhead(sec){ var ph=$('#recPlayhead'); ph.style.display='block'; ph.style.left=((sec-recCtx.dayStart)/86400*100)+'%'; }
+function recUpdatePlayhead(sec){ var ph=$('#recPlayhead'); if(!ph) return; ph.style.display='block'; ph.style.top=recTopForSec(sec)+'px'; }
 function recPlayAll(p){
   recCtx.playing=p; var b=$('#recPlayBtn'); if(b) b.textContent = p?'❚❚':'▶';
   recCtx.cells.forEach(function(c){ if(c.video){ if(p) c.video.play().catch(function(){}); else c.video.pause(); } });
@@ -840,37 +832,35 @@ $('#recLayout').addEventListener('click', function(e){
   $$('#recLayout button').forEach(function(x){ x.classList.toggle('active', x===b); });
   recPlayAll(false); recStop(); recCtx.mode=+b.dataset.cols; openRec();
 });
-// ----- drag a range to export, or click to play -----
-function recClearRange(){ recCtx.range=null; var b=$('#recRange'); if(b) b.style.display='none'; var x=$('#recExport'); if(x) x.style.display='none'; }
-function recPlayClick(frac){
-  var t=recCtx.dayStart + frac*86400;
-  if(recCtx.mode>1){ recPlayAll(true); recSeekAll(t); } else { if(recCtx.segs.length) recPlayAt(t); }
+// ----- drag a vertical range on the axis bar to export, or click to play -----
+function recClearRange(){ recCtx.range=null; var x=$('#recExport'); if(x) x.style.display='none'; }
+function recPlayClick(sec){
+  if(recCtx.mode>1){ recPlayAll(true); recSeekAll(sec); } else { if(recCtx.segs.length) recPlayAt(sec); }
 }
-var recDrag=null;
-$('#recTimeline').addEventListener('mousedown', function(e){
+var recDrag=null, recAxisBar=$('#recAxisBar');
+function recSecAtY(rect, clientY){
+  var top=Math.max(0,Math.min(rect.height,(clientY-rect.top)));
+  // rail body scroll offset already folded in: rect is the bar's own viewport rect,
+  // and the bar spans the whole body, so its top == body top in scroll space.
+  return recSecForTop(top);
+}
+if(recAxisBar) recAxisBar.addEventListener('mousedown', function(e){
   if(e.button!==0) return;
-  recDrag={ x0:e.clientX, rect:this.getBoundingClientRect(), moved:false };
+  recDrag={ y0:e.clientY, rect:this.getBoundingClientRect(), moved:false };
   e.preventDefault();
 });
 document.addEventListener('mousemove', function(e){
   if(!recDrag) return;
-  if(Math.abs(e.clientX-recDrag.x0)>4) recDrag.moved=true;
-  if(!recDrag.moved) return;
-  var rect=recDrag.rect;
-  var f0=Math.max(0,Math.min(1,(recDrag.x0-rect.left)/rect.width));
-  var f1=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
-  var a=Math.min(f0,f1), b=Math.max(f0,f1), band=$('#recRange');
-  band.style.display='block'; band.style.left=(a*100)+'%'; band.style.width=((b-a)*100)+'%';
+  if(Math.abs(e.clientY-recDrag.y0)>4) recDrag.moved=true;
 });
 document.addEventListener('mouseup', function(e){
   if(!recDrag) return; var rect=recDrag.rect, dr=recDrag; recDrag=null;
-  var frac=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
-  if(!dr.moved){ recClearRange(); recPlayClick(frac); return; }
-  var f0=Math.max(0,Math.min(1,(dr.x0-rect.left)/rect.width));
-  var a=Math.min(f0,frac), b=Math.max(f0,frac);
-  var s=Math.round(recCtx.dayStart+a*86400), en=Math.round(recCtx.dayStart+b*86400);
+  var sec=recSecAtY(rect, e.clientY);
+  if(!dr.moved){ recClearRange(); recPlayClick(sec); return; }
+  var s0=recSecAtY(rect, dr.y0);
+  var s=Math.round(Math.min(s0,sec)), en=Math.round(Math.max(s0,sec));
   if(en-s < 3){ recClearRange(); return; }
-  if(en-s > 3600){ en=s+3600; var band=$('#recRange'); band.style.width=((3600/86400)*100)+'%'; }
+  if(en-s > 3600){ en=s+3600; }
   recCtx.range={start:s, end:en};
   var d0=new Date(s*1000), d1=new Date(en*1000), ex=$('#recExport');
   ex.style.display=''; ex.textContent='구간 내보내기 '+pad2(d0.getHours())+':'+pad2(d0.getMinutes())+'~'+pad2(d1.getHours())+':'+pad2(d1.getMinutes());
@@ -881,15 +871,16 @@ $('#recExport').addEventListener('click', function(){
   if(!st) return;
   window.open(BASE+'/api/rec-export?stream='+encodeURIComponent(st)+'&start='+recCtx.range.start+'&end='+recCtx.range.end,'_blank');
 });
-// ----- hover scrub preview -----
+// ----- hover scrub preview (vertical: anchored to the rail, follows cursor Y) -----
 var recPrevVid=$('#recPrevVid');
-function recPreviewAt(frac, sec){
+function recPreviewAt(sec, clientY){
   var segs = recCtx.mode>1 ? ((recCtx.cells[0]&&recCtx.cells[0].segs)||[]) : recCtx.segs;
   var st = recCtx.mode>1 ? (recCtx.cells[0]&&recCtx.cells[0].stream) : recCtx.stream;
   var s = (st && segs.length) ? recSegAtIn(segs, sec) : null;
-  var pv=$('#recPreview');
+  var pv=$('#recPreview'); if(!pv) return;
   if(!s){ pv.style.display='none'; return; }
-  pv.style.display='block'; pv.style.left=(frac*100)+'%';
+  pv.style.display='block';
+  if(clientY!=null){ var rr=$('#recRail').getBoundingClientRect(); pv.style.top=(clientY-rr.top)+'px'; }
   var off=Math.max(0, sec-s.start), url=BASE+'/api/rec-file?stream='+encodeURIComponent(st)+'&name='+encodeURIComponent(s.name);
   if(recPrevVid.getAttribute('src')!==url){ recPrevVid._want=off; recPrevVid.src=url; recPrevVid.load(); recPrevVid.onloadedmetadata=function(){ try{recPrevVid.currentTime=recPrevVid._want;}catch(e){} }; }
   else if(!recPrevVid._busy && Math.abs(recPrevVid.currentTime-off)>1){ recPrevVid._busy=true; recPrevVid._want=off; try{recPrevVid.currentTime=off;}catch(e){} }
@@ -898,18 +889,16 @@ function recPreviewAt(frac, sec){
 }
 if(recPrevVid) recPrevVid.addEventListener('seeked', function(){ recPrevVid._busy=false; if(Math.abs(recPrevVid.currentTime-recPrevVid._want)>1){ recPrevVid._busy=true; try{recPrevVid.currentTime=recPrevVid._want;}catch(e){} } });
 var recHover=null, recHoverRAF=0;
-$('#recTimeline').addEventListener('mousemove', function(e){
-  recHover={ x:e.clientX, rect:this.getBoundingClientRect() };
+if(recAxisBar) recAxisBar.addEventListener('mousemove', function(e){
+  recHover={ y:e.clientY, rect:this.getBoundingClientRect() };
   if(recHoverRAF) return; // coalesce per-pixel events to one update per animation frame
   recHoverRAF=requestAnimationFrame(function(){
     recHoverRAF=0; if(!recHover) return;
-    var r=recHover.rect, frac=Math.max(0,Math.min(1,(recHover.x-r.left)/r.width));
-    var sec=recCtx.dayStart+frac*86400, d=new Date(sec*1000), cur=$('#recCursor');
-    cur.style.display='block'; cur.style.left=(frac*100)+'%'; cur.textContent=pad2(d.getHours())+':'+pad2(d.getMinutes());
-    recPreviewAt(frac, sec);
+    var sec=recSecAtY(recHover.rect, recHover.y);
+    recPreviewAt(sec, recHover.y);
   });
 });
-$('#recTimeline').addEventListener('mouseleave', function(){ if(recHoverRAF){ cancelAnimationFrame(recHoverRAF); recHoverRAF=0; } recHover=null; $('#recCursor').style.display='none'; $('#recPreview').style.display='none'; });
+if(recAxisBar) recAxisBar.addEventListener('mouseleave', function(){ if(recHoverRAF){ cancelAnimationFrame(recHoverRAF); recHoverRAF=0; } recHover=null; var pv=$('#recPreview'); if(pv) pv.style.display='none'; });
 function recNextSeg(segs, cur){
   if(!cur || !segs) return null;
   for(var i=0;i<segs.length;i++){ if(segs[i].start>cur.start) return segs[i]; }
