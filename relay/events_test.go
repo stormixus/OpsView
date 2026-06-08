@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -47,5 +48,17 @@ func TestStampSurvEventAgentID(t *testing.T) {
 	}
 	if stream != "acme/dvr1_ch2" {
 		t.Fatalf("streamPath = %q, want acme/dvr1_ch2", stream)
+	}
+}
+
+func TestEventsAPIShape(t *testing.T) {
+	es := newEventStore(t.TempDir())
+	es.add("dvr1_ch2", "motion", true, 1_000_000)
+	es.add("dvr1_ch2", "motion", false, 1_010_000)
+	ivals := es.eventsForDay("dvr1_ch2", dayKeyFromMs(1_000_000))
+	b, _ := json.Marshal(map[string]interface{}{"events": ivals})
+	s := string(b)
+	if indexOf(s, `"kind":"motion"`) < 0 || indexOf(s, `"start":1000`) < 0 {
+		t.Fatalf("payload shape wrong: %s", b)
 	}
 }

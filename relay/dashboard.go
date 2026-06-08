@@ -440,6 +440,7 @@ func (h *Hub) registerDashboard(mux *http.ServeMux) {
 	mux.HandleFunc("/dashboard/api/rec", h.HandleDashboardRecordings)
 	mux.HandleFunc("/dashboard/api/rec-file", h.HandleDashboardRecFile)
 	mux.HandleFunc("/dashboard/api/rec-export", h.HandleDashboardRecExport)
+	mux.HandleFunc("/dashboard/api/rec-events", h.HandleDashboardRecEvents)
 	mux.HandleFunc("/dashboard/api/agents", h.HandleDashboardAgents)
 	mux.HandleFunc("/dashboard/api/password", h.HandleDashboardPassword)
 	mux.HandleFunc("/dashboard", h.HandleDashboardStatic)

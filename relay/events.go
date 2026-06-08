@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -160,3 +161,31 @@ func daysSpanned(startSec, endSec int64) []string {
 	}
 	return []string{d1, d2}
 }
+
+// HandleDashboardRecEvents serves event-timeline markers for a stream+day.
+// Admin-gated, mirrors HandleDashboardRecordings.
+func (h *Hub) HandleDashboardRecEvents(w http.ResponseWriter, r *http.Request) {
+	if !h.authedDashboard(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.events == nil {
+		http.Error(w, "events disabled", http.StatusConflict)
+		return
+	}
+	stream := r.URL.Query().Get("stream")
+	day := r.URL.Query().Get("day")
+	w.Header().Set("Content-Type", "application/json")
+	if day == todayKey() {
+		w.Header().Set("Cache-Control", "no-store")
+	} else {
+		w.Header().Set("Cache-Control", "private, max-age=300")
+	}
+	ivals := []eventInterval{}
+	if stream != "" && len(day) == 8 {
+		ivals = h.events.eventsForDay(stream, day)
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"events": ivals})
+}
+
+func todayKey() string { return time.Now().In(time.Local).Format("20060102") }
