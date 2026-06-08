@@ -624,7 +624,7 @@ modalCell.addEventListener('change', function(e){ if(e.target.classList.contains
 modalCell.addEventListener('keydown', function(e){ if(e.target.classList.contains('ipname-in') && e.key==='Enter'){ e.preventDefault(); e.target.blur(); } });
 
 /* ============================================================ RECORDINGS (녹화) */
-var recCtx = { mode:1, streams:[], stream:null, day:null, dayStart:0, segs:[], cur:null, cells:[], master:0, playing:false, range:null };
+var recCtx = { mode:1, streams:[], stream:null, day:null, dayStart:0, segs:[], cur:null, cells:[], master:0, playing:false, range:null, events:[] };
 var recVideo = $('#recVideo');
 function pad2(n){ return (n<10?'0':'')+n; }
 function recDayStr(d){ return ''+d.getFullYear()+pad2(d.getMonth()+1)+pad2(d.getDate()); }
@@ -668,12 +668,22 @@ function recLoadDays(){
     recSetDateInput(want); recLoadDay();
   }).catch(function(){ recRenderEmpty('녹화 비활성/불러오기 실패'); });
 }
+function loadRecEvents(stream, day){
+  return fetch(BASE+'/api/rec-events?stream='+encodeURIComponent(stream)+'&day='+day, {credentials:'same-origin'})
+    .then(function(r){ return r.ok? r.json() : null; })
+    .then(function(j){ return (j&&Array.isArray(j.events)) ? j.events : []; })
+    .catch(function(){ return []; });
+}
 function recLoadDay(){
   var day=recDateInputVal(); if(!day) return;
   recCtx.day=day; recCtx.dayStart=recDayStartSec(day); recClearRange();
   if(recCtx.mode>1){ recLoadDayGrid(); return; }
-  fetch(BASE+'/api/rec?stream='+encodeURIComponent(recCtx.stream)+'&day='+day).then(function(r){return r.ok?r.json():null;}).then(function(d){
-    recCtx.segs=(d&&d.segments)||[]; recRenderTimeline(recCtx.segs);
+  Promise.all([
+    fetch(BASE+'/api/rec?stream='+encodeURIComponent(recCtx.stream)+'&day='+day).then(function(r){return r.ok?r.json():null;}),
+    loadRecEvents(recCtx.stream, day)
+  ]).then(function(results){
+    var d=results[0]; recCtx.segs=(d&&d.segments)||[]; recCtx.events=results[1]||[];
+    recRenderTimeline(recCtx.segs);
     if(recCtx.segs.length){ $('#recEmpty').style.display='none'; } else { recRenderEmpty('이 날짜 녹화 없음'); }
   }).catch(function(){ recRenderEmpty('불러오기 실패'); });
 }
@@ -693,12 +703,33 @@ function recRenderEmpty(msg){
   try{ recVideo.removeAttribute('src'); recVideo.load(); }catch(x){}
   $('#recMeta').textContent=''; $('#recDownload').disabled=true; $('#recPlayhead').style.display='none';
 }
+function renderEventBands(container, events, dayStart){
+  if(!container || !events || !events.length) return;
+  events.forEach(function(ev){
+    var left = Math.max(0, (ev.start - dayStart) / 864);
+    var width = Math.max(0.3, (ev.end - ev.start) / 864);
+    var b = document.createElement('div');
+    b.className = 'rec-ev rec-ev-' + (ev.kind || 'motion');
+    b.style.left = left + '%';
+    b.style.width = width + '%';
+    var d = new Date(ev.start * 1000);
+    b.title = (ev.kind || 'motion') + ' · ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+    b.addEventListener('click', function(e){
+      e.stopPropagation();
+      if(recCtx.mode>1){ recPlayAll(true); recSeekAll(ev.start); }
+      else { if(recCtx.segs.length) recPlayAt(ev.start); }
+    });
+    container.appendChild(b);
+  });
+}
 function recRenderTimeline(segs){
   var hours=$('#recHours'); if(hours && !hours._done){ var h=''; for(var i=0;i<=24;i+=3){ h+='<span style="left:'+(i/24*100)+'%">'+pad2(i)+':00</span>'; } hours.innerHTML=h; hours._done=true; }
-  $('#recTrack').innerHTML = (segs||[]).map(function(s){
+  var track = $('#recTrack');
+  track.innerHTML = (segs||[]).map(function(s){
     var left=(s.start-recCtx.dayStart)/86400*100, w=Math.max(0.12, s.dur/86400*100);
     return '<span class="rec-seg" style="left:'+left+'%;width:'+w+'%"></span>';
   }).join('');
+  renderEventBands(track, recCtx.events, recCtx.dayStart);
   var tot=(segs||[]).reduce(function(a,s){return a+s.dur;},0);
   $('#recMeta').textContent = (segs&&segs.length)? ((recCtx.mode>1? recCtx.cells.length+'채널 · ':'')+segs.length+'구간 · '+Math.round(tot/60)+'분') : '';
 }

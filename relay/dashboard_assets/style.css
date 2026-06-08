@@ -573,6 +573,13 @@ button{font-family:inherit; cursor:pointer;}
 .rec-track{position:absolute; inset:0; border-radius:11px; overflow:hidden;}
 .rec-seg{position:absolute; top:10px; bottom:10px; border-radius:3px; background:linear-gradient(180deg, color-mix(in srgb,var(--accent-2) 92%, transparent), color-mix(in srgb,var(--accent) 78%, transparent)); box-shadow:0 1px 5px color-mix(in srgb,var(--accent) 38%, transparent);}
 .rec-timeline:hover .rec-seg{filter:brightness(1.13);}
+.rec-ev{position:absolute; top:0; bottom:0; background:var(--warn); opacity:.55; pointer-events:auto; cursor:pointer; border-radius:1px; z-index:3;}
+.rec-ev:hover{opacity:.85;}
+.rec-ev-motion{background:var(--warn);}
+.rec-ev-person{background:var(--warn);}
+.rec-ev-vehicle{background:var(--warn);}
+.rec-ev-linecross{background:var(--warn);}
+.rec-ev-intrusion{background:var(--warn);}
 .rec-range{position:absolute; top:0; bottom:0; background:color-mix(in srgb,var(--accent) 22%, transparent); border-left:2px solid var(--accent); border-right:2px solid var(--accent); display:none; pointer-events:none; z-index:2;}
 .rec-playhead{position:absolute; top:-4px; bottom:-4px; width:2px; background:#fff; box-shadow:0 0 10px rgba(255,255,255,.8); display:none; pointer-events:none; z-index:3; border-radius:2px;}
 .rec-playhead::before{content:""; position:absolute; top:-5px; left:50%; transform:translateX(-50%); width:11px; height:11px; border-radius:50%; background:#fff; box-shadow:0 0 8px rgba(255,255,255,.7);}
