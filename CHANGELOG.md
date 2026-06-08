@@ -4,6 +4,17 @@ All notable changes to OpsView are documented here.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-06-08
+
+### Changed
+
+- **Agent is now panic-resilient (keep-moving-zombie).** Every long-running agent
+  goroutine — capture loop, relay read-pump, DVR self-heal, per-DVR event consumers,
+  snapshot / agent-control handlers — runs under a recover guard, and the lifetime
+  subsystems are supervised: a panic anywhere logs a stack trace and only that one
+  subsystem restarts (after a short backoff) instead of taking the whole process
+  down. The agent keeps monitoring even if a single part fails. **Update the agent.**
+
 ## [0.9.1] - 2026-06-08
 
 ### Added

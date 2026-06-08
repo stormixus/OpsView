@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/url"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -60,8 +61,8 @@ func NewAgent(cfg AgentConfig) *Agent {
 }
 
 func (a *Agent) Run() {
-	go a.selfHealLoop()    // lifetime DVR self-recovery (independent of the connect loop)
-	go a.runEventManager() // ISAPI DVR event consumers (lifetime-scoped, independent of connect loop)
+	a.superviseLoop("selfHealLoop", a.selfHealLoop)    // lifetime DVR self-recovery (independent of the connect loop)
+	go a.runGuarded("eventManager", a.runEventManager) // ISAPI DVR event consumers (lifetime-scoped, independent of connect loop)
 	for {
 		select {
 		case <-a.stopped:
@@ -89,8 +90,8 @@ func (a *Agent) Run() {
 		}
 		a.capturer = cap
 
-		// 3) Capture loop
-		a.captureLoop()
+		// 3) Capture loop (guarded: a capture/encode panic reconnects instead of crashing)
+		a.runGuarded("captureLoop", a.captureLoop)
 
 		// Cleanup
 		a.capturer.Close()
@@ -103,6 +104,38 @@ func (a *Agent) Stop() {
 		close(a.stopped)
 		a.closeConn()
 	})
+}
+
+// runGuarded runs fn, recovering and logging any panic — so one failing subsystem
+// can't take down the whole agent (keep-moving-zombie: a dead head, not a dead body).
+func (a *Agent) runGuarded(name string, fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[agent] recovered panic in %s: %v\n%s", name, r, debug.Stack())
+		}
+	}()
+	fn()
+}
+
+// superviseLoop runs fn in a goroutine, restarting it (after a short backoff) if it
+// returns or panics, until the agent stops — for lifetime subsystems that must stay
+// alive (event consumers, DVR self-heal).
+func (a *Agent) superviseLoop(name string, fn func()) {
+	go func() {
+		for {
+			select {
+			case <-a.stopped:
+				return
+			default:
+			}
+			a.runGuarded(name, fn)
+			select {
+			case <-a.stopped:
+				return
+			case <-time.After(3 * time.Second):
+			}
+		}
+	}()
 }
 
 // wsWrite serializes all writes to the relay websocket. gorilla/websocket permits
@@ -185,7 +218,7 @@ func (a *Agent) connect() error {
 	a.sendSurvConfig()
 
 	// Start reading control messages in background
-	go a.readPump(conn)
+	go a.runGuarded("readPump", func() { a.readPump(conn) })
 
 	return nil
 }
@@ -232,7 +265,7 @@ func (a *Agent) readPump(conn *websocket.Conn) {
 			case a.snapshotSem <- struct{}{}:
 				go func() {
 					defer func() { <-a.snapshotSem }()
-					a.handleSnapshotRequest(payload)
+					a.runGuarded("snapshot", func() { a.handleSnapshotRequest(payload) })
 				}()
 			default:
 				log.Printf("[agent] snapshot request dropped (too many in flight)")
@@ -355,9 +388,11 @@ func (a *Agent) runEventManager() {
 	for _, ed := range dvrs {
 		ed := ed
 		log.Printf("[isapi-events] starting consumer for DVR %d (%s), %d channels", ed.dvr.ID, ed.dvr.Name, len(ed.chNums))
-		go isapiAlertLoop(a.survMgr.client, ed.dvr, ed.chNums, a.stopped, func(e alertEvent) {
-			chID := fmt.Sprintf("dvr%d_ch%d", ed.dvr.ID, e.chNum)
-			a.sendSurvEvent(chID, e.kind, e.active, e.tsMs)
+		a.superviseLoop(fmt.Sprintf("isapi-events-dvr%d", ed.dvr.ID), func() {
+			isapiAlertLoop(a.survMgr.client, ed.dvr, ed.chNums, a.stopped, func(e alertEvent) {
+				chID := fmt.Sprintf("dvr%d_ch%d", ed.dvr.ID, e.chNum)
+				a.sendSurvEvent(chID, e.kind, e.active, e.tsMs)
+			})
 		})
 	}
 }
@@ -372,7 +407,7 @@ func (a *Agent) handleAgentControl(payload []byte) {
 	switch ctrl.Action {
 	case "reconnect", "rediscover":
 		log.Printf("[agent] agent-control: %s — re-discovering all DVRs", ctrl.Action)
-		go a.reconnectAllDVRs()
+		go a.runGuarded("reconnectAllDVRs", a.reconnectAllDVRs)
 	default:
 		log.Printf("[agent] agent-control: unknown action %q", ctrl.Action)
 	}
