@@ -6,6 +6,12 @@ All notable changes to OpsView are documented here.
 
 ### Added
 
+- **Event list (Frigate-style).** The recording tab now shows the day's detected
+  events as a scrollable card list — each with a thumbnail, camera, event-kind chip
+  (motion / person / vehicle / line-cross / intrusion) and time — with kind filter
+  chips; clicking a card jumps playback to that event on that camera. Backed by an
+  aggregated event-list API and an on-demand recording-thumbnail endpoint (ffmpeg
+  extracts one frame per event, cached). Relay-only.
 - **Event thumbnail on hover.** Hovering a motion-event band on the recording
   timeline now previews that event's frame (reusing the scrub thumbnail), clamped
   to within the event and labeled with the event kind + time. Relay-only.
