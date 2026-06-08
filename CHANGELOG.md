@@ -4,6 +4,12 @@ All notable changes to OpsView are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Event thumbnail on hover.** Hovering a motion-event band on the recording
+  timeline now previews that event's frame (reusing the scrub thumbnail), clamped
+  to within the event and labeled with the event kind + time. Relay-only.
+
 ## [0.9.0] - 2026-06-08
 
 ### Added

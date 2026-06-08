@@ -719,6 +719,21 @@ function renderEventBands(container, events, dayStart){
       if(recCtx.mode>1){ recPlayAll(true); recSeekAll(ev.start); }
       else { if(recCtx.segs.length) recPlayAt(ev.start); }
     });
+    // Hover an event band -> preview the event frame (clamped to within the event),
+    // reusing the scrub thumbnail, and label it with the event kind + time. We take
+    // over the hover here (stopPropagation) so the preview snaps to the event.
+    b.addEventListener('mousemove', function(e){
+      e.stopPropagation();
+      var r=$('#recTimeline').getBoundingClientRect();
+      var frac=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));
+      var sec=recCtx.dayStart+frac*86400;
+      if(sec<ev.start) sec=ev.start; if(sec>ev.end) sec=ev.end;
+      var efrac=(sec-recCtx.dayStart)/86400;
+      recPreviewAt(efrac, sec);
+      var cur=$('#recCursor'); if(cur){ cur.style.display='block'; cur.style.left=(efrac*100)+'%'; }
+      var d=new Date(sec*1000), pt=$('#recPrevTime');
+      if(pt) pt.textContent=(ev.kind||'motion')+' · '+pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds());
+    });
     container.appendChild(b);
   });
 }
