@@ -21,7 +21,7 @@
 html[data-theme="dark"]{
   --bg:#0d1014; --bg-grid:#0a0c10; --panel:#161b22; --panel-2:#1c2230;
   --border:#262d38; --border-strong:#323b48;
-  --text:#e6edf3; --text-muted:#9aa5b1; --text-faint:#697384;
+  --text:#e6edf3; --text-muted:#9aa5b1; --text-faint:#7d8794; /* AA-contrast on panels */
   --shadow:0 1px 0 rgba(255,255,255,.02), 0 8px 24px rgba(0,0,0,.35);
   --inset:inset 0 1px 0 rgba(255,255,255,.03);
   --field:#0d1117; --sidebar:#10141a;
@@ -37,7 +37,7 @@ html[data-theme="light"]{
   --ok:#1f9b41;
   color-scheme:light;
 }
-html[data-accent="green"]  { --accent:#2ea043; --accent-2:#3fb950; --on-accent:#ffffff; }
+html[data-accent="green"]  { --accent:#268038; --accent-2:#3fb950; --on-accent:#ffffff; } /* --accent darkened so white-on-accent buttons pass WCAG AA */
 html[data-accent="amber"]  { --accent:#d29922; --accent-2:#e0b341; --on-accent:#1a1404; }
 html[data-accent="blue"]   { --accent:#2f74e0; --accent-2:#549bff; --on-accent:#ffffff; }
 html[data-accent="purple"] { --accent:#8957e5; --accent-2:#a371f7; --on-accent:#ffffff; }
@@ -575,11 +575,13 @@ button{font-family:inherit; cursor:pointer;}
 .rec-timeline:hover .rec-seg{filter:brightness(1.13);}
 .rec-ev{position:absolute; top:0; bottom:0; background:var(--warn); opacity:.55; pointer-events:auto; cursor:pointer; border-radius:1px; z-index:3;}
 .rec-ev:hover{opacity:.85;}
+/* Timeline band hues match the event-list chip colors so a "person" event reads
+   the same in both places. */
 .rec-ev-motion{background:var(--warn);}
-.rec-ev-person{background:var(--warn);}
-.rec-ev-vehicle{background:var(--warn);}
-.rec-ev-linecross{background:var(--warn);}
-.rec-ev-intrusion{background:var(--warn);}
+.rec-ev-person{background:#79b8ff;}
+.rec-ev-vehicle{background:#c8a6ff;}
+.rec-ev-linecross{background:#79b8ff;}
+.rec-ev-intrusion{background:#f87171;}
 .rec-range{position:absolute; top:0; bottom:0; background:color-mix(in srgb,var(--accent) 22%, transparent); border-left:2px solid var(--accent); border-right:2px solid var(--accent); display:none; pointer-events:none; z-index:2;}
 .rec-playhead{position:absolute; top:-4px; bottom:-4px; width:2px; background:#fff; box-shadow:0 0 10px rgba(255,255,255,.8); display:none; pointer-events:none; z-index:3; border-radius:2px;}
 .rec-playhead::before{content:""; position:absolute; top:-5px; left:50%; transform:translateX(-50%); width:11px; height:11px; border-radius:50%; background:#fff; box-shadow:0 0 8px rgba(255,255,255,.7);}
@@ -701,3 +703,21 @@ button{font-family:inherit; cursor:pointer;}
   .mgc-actions{gap:5px;}
   .mgc-actions button{flex:1 1 auto; text-align:center;}
 }
+
+/* Keyboard focus ring — app-wide. Buttons/chips/tabs/inputs had no visible focus
+   state (only .brand-home did), so keyboard operators were lost. */
+:where(button, select, input, [tabindex], a, summary):focus-visible{
+  outline:2px solid var(--accent-2); outline-offset:2px; border-radius:var(--r-sm);
+}
+
+/* In-app confirm dialog (replaces native confirm() for destructive actions). */
+.cmodal{position:fixed; inset:0; z-index:60; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.55); backdrop-filter:blur(2px); padding:20px;}
+.cmodal.show{display:flex;}
+.cmodal-box{width:100%; max-width:380px; background:var(--panel); border:1px solid var(--border-strong); border-radius:var(--r-lg); box-shadow:var(--shadow); padding:20px;}
+.cmodal-title{font-size:16px; font-weight:700; color:var(--text); margin-bottom:8px;}
+.cmodal-msg{font-size:13.5px; line-height:1.55; color:var(--text-muted); margin-bottom:18px;}
+.cmodal-actions{display:flex; justify-content:flex-end; gap:8px;}
+.cmodal-actions button{padding:8px 16px; border-radius:var(--r-sm); font-size:13.5px; font-weight:600; cursor:pointer; border:1px solid var(--border-strong); background:var(--panel-2); color:var(--text);}
+.cm-cancel:hover{border-color:var(--text-faint);}
+.cm-ok{background:var(--accent); color:var(--on-accent); border-color:var(--accent);}
+.cm-ok.danger{background:var(--bad); border-color:var(--bad); color:#fff;}

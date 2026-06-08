@@ -4,6 +4,22 @@ All notable changes to OpsView are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **Dashboard design + UX pass (from a design/UX review).** Relay-only:
+  - Keyboard focus ring app-wide (`:focus-visible`) — every button/chip/tab/input
+    was previously unfocusable for keyboard operators.
+  - Contrast fixes for WCAG AA: `--text-faint` darkened (it was used on real labels
+    at ~3.6:1), and the green accent used for primary-button fills darkened so
+    white-on-green passes.
+  - Timeline event bands now use the same per-kind colors as the event-list chips
+    (person/vehicle/etc.), instead of all-amber.
+  - A 지점 now opens on the **라이브** tab by default (was the engineer 상태 pane) —
+    owners want cameras first.
+  - Destructive actions (delete 지점, reissue connection code) use a dark-themed
+    in-app confirm dialog showing the store's friendly name, instead of a native
+    `confirm()` popup with a raw ID.
+
 ## [0.10.0] - 2026-06-08
 
 ### Added

@@ -197,7 +197,7 @@ fetch('/dashboard/api/state').then(function(r){
 
 /* ============================================================ NAVIGATION */
 var selected=null;   // null = overview ; else agent id
-var curTab=LS.getItem('opsview.tab')||'status';
+var curTab=LS.getItem('opsview.tab')||'live'; // owners want cameras first, not the engineer status pane
 
 function deskMiniHTML(){
   return '<div class="desk"><div class="wall"></div>'+
@@ -1205,8 +1205,8 @@ function wireBranchCards(){
         .finally(function(){ setTimeout(function(){ btn.disabled=false; btn.textContent=o; }, 3000); }); }
     else if(act==='hide'){ hideAgent(id,true); }
     else if(act==='rename'){ startRename(card,id,token,name); }
-    else if(act==='regen'){ if(confirm('토큰을 새로 발급하면 이 지점 에이전트 설정의 토큰도 새 값으로 바꿔야 다시 연결됩니다. 계속할까요?')) upsertTenant(id,name,genTokenStr()); }
-    else if(act==='delete'){ if(confirm('지점 "'+id+'" 삭제? (그 매장 에이전트는 더 이상 연결 못 함)')) fetch('/dashboard/api/agents?id='+encodeURIComponent(id),{method:'DELETE'}).then(function(r){ tnMsg(r.ok?'삭제됨':'삭제 실패',!r.ok); loadBranches(); }); }
+    else if(act==='regen'){ uiConfirm({title:'새 연결 코드 발급', message:'"'+(name||id)+'"의 연결 코드를 새로 발급합니다. 이 매장 에이전트 설정에도 새 코드를 넣어야 다시 연결됩니다.', okLabel:'재발급', danger:true}).then(function(ok){ if(ok) upsertTenant(id,name,genTokenStr()); }); }
+    else if(act==='delete'){ uiConfirm({title:'지점 삭제', message:'"'+(name||id)+'"을(를) 삭제합니다. 이 매장 에이전트는 더 이상 연결할 수 없습니다. (대신 "숨기기"는 되돌릴 수 있어요.)', okLabel:'삭제', danger:true}).then(function(ok){ if(ok) fetch('/dashboard/api/agents?id='+encodeURIComponent(id),{method:'DELETE'}).then(function(r){ tnMsg(r.ok?'삭제됨':'삭제 실패',!r.ok); loadBranches(); }); }); }
   };
 }
 if($('#tn-gen')) $('#tn-gen').addEventListener('click', function(){ $('#tn-token').value=genTokenStr(); });
@@ -1271,6 +1271,25 @@ if($('#tn-add')) $('#tn-add').addEventListener('click', function(){
 /* ============================================================ LIVE INLINE EDIT */
 function escHtml(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function escAttr(s){ return escHtml(s).replace(/"/g,'&quot;'); }
+// In-app confirm dialog → Promise<bool>. Replaces native confirm() for destructive
+// actions so they're dark-themed, show the friendly name, and aren't a jarring OS popup.
+function uiConfirm(opts){
+  opts=opts||{};
+  return new Promise(function(resolve){
+    var m=$('#confirmModal'); if(!m){ resolve(window.confirm(opts.message||'')); return; }
+    var ok=$('#confirmOk'), cancel=$('#confirmCancel');
+    $('#confirmTitle').textContent=opts.title||'확인';
+    $('#confirmMsg').textContent=opts.message||'';
+    ok.textContent=opts.okLabel||'확인'; ok.classList.toggle('danger', !!opts.danger);
+    function done(v){ m.classList.remove('show'); ok.onclick=null; cancel.onclick=null; m.onclick=null; document.removeEventListener('keydown', esc); resolve(v); }
+    function esc(e){ if(e.key==='Escape') done(false); else if(e.key==='Enter') done(true); }
+    ok.onclick=function(){ done(true); };
+    cancel.onclick=function(){ done(false); };
+    m.onclick=function(e){ if(e.target===m) done(false); };
+    document.addEventListener('keydown', esc);
+    m.classList.add('show'); ok.focus();
+  });
+}
 
 var liveEditing = false;
 if ($('#liveEditBtn')) $('#liveEditBtn').addEventListener('click', function(){
