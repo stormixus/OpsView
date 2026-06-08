@@ -63,6 +63,7 @@ func NewAgent(cfg AgentConfig) *Agent {
 func (a *Agent) Run() {
 	a.superviseLoop("selfHealLoop", a.selfHealLoop)    // lifetime DVR self-recovery (independent of the connect loop)
 	go a.runGuarded("eventManager", a.runEventManager) // ISAPI DVR event consumers (lifetime-scoped, independent of connect loop)
+	go a.runGuarded("autoUpdate", func() { AutoUpdateLoop(a.stopped) })
 	for {
 		select {
 		case <-a.stopped:
