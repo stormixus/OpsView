@@ -6,8 +6,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
+
+	"github.com/opsview/opsview/proto"
 )
 
 // eventInterval is one paired event on the recording timeline (unix SECONDS, to
@@ -201,3 +204,77 @@ func (h *Hub) HandleDashboardRecEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func todayKey() string { return time.Now().In(time.Local).Format("20060102") }
+
+// recEventItem is a single event entry in the aggregated event-list API response.
+type recEventItem struct {
+	Stream string `json:"stream"`
+	Ch     int    `json:"ch"`
+	Name   string `json:"name"`
+	Kind   string `json:"kind"`
+	Start  int64  `json:"start"` // unix seconds
+	End    int64  `json:"end"`   // unix seconds
+}
+
+// HandleDashboardRecEventsList aggregates event intervals across all enabled
+// channels in an agent session for a given day, sorted newest-first.
+// Admin-gated. ?agent=<id>&day=YYYYMMDD.
+func (h *Hub) HandleDashboardRecEventsList(w http.ResponseWriter, r *http.Request) {
+	if !h.authedDashboard(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.events == nil {
+		http.Error(w, "events disabled", http.StatusConflict)
+		return
+	}
+	q := r.URL.Query()
+	agentID := q.Get("agent")
+	day := q.Get("day")
+
+	sess := h.sessionByID(agentID)
+	if sess == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"events": []recEventItem{}})
+		return
+	}
+
+	sess.survConfigMu.RLock()
+	raw := sess.survConfig
+	sess.survConfigMu.RUnlock()
+
+	var items []recEventItem
+	if len(raw) > proto.HeaderSize {
+		var cfg proto.SurvConfig
+		if json.Unmarshal(raw[proto.HeaderSize:], &cfg) == nil {
+			for _, ch := range cfg.Channels {
+				if !ch.Enabled {
+					continue
+				}
+				stream := streamPath(sess.id, streamIDFor(ch.DVRID, ch.ChNum))
+				for _, iv := range h.events.eventsForDay(stream, day) {
+					items = append(items, recEventItem{
+						Stream: stream,
+						Ch:     ch.ChNum,
+						Name:   ch.Name,
+						Kind:   iv.Kind,
+						Start:  iv.Start,
+						End:    iv.End,
+					})
+				}
+			}
+		}
+	}
+
+	// sort newest first
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Start > items[j].Start
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	if day == todayKey() {
+		w.Header().Set("Cache-Control", "no-store")
+	} else {
+		w.Header().Set("Cache-Control", "private, max-age=60")
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"events": items})
+}

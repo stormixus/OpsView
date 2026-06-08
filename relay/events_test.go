@@ -120,3 +120,18 @@ func TestJanitorCapIsHardCeiling(t *testing.T) {
 		t.Fatalf("expected oldest keep-all 'old' evicted to honor the cap, got %+v", order)
 	}
 }
+
+func TestRecEventListJSONShape(t *testing.T) {
+	// verify the event-list response struct marshals to the expected shape
+	items := []recEventItem{
+		{Stream: "default/dvr1_ch2", Ch: 2, Name: "Camera 2", Kind: "motion", Start: 2000, End: 2030},
+		{Stream: "default/dvr1_ch1", Ch: 1, Name: "Camera 1", Kind: "motion", Start: 1000, End: 1030},
+	}
+	b, _ := json.Marshal(map[string]interface{}{"events": items})
+	s := string(b)
+	// verify expected keys present
+	if indexOf(s, `"stream"`) < 0 || indexOf(s, `"ch"`) < 0 || indexOf(s, `"name"`) < 0 ||
+		indexOf(s, `"kind":"motion"`) < 0 || indexOf(s, `"start":`) < 0 || indexOf(s, `"end":`) < 0 {
+		t.Fatalf("event-list payload shape wrong: %s", b)
+	}
+}
