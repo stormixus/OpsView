@@ -59,7 +59,8 @@ type Hub struct {
 	hiddenMu     sync.RWMutex
 	hiddenAgents map[string]bool // operator-hidden agent ids (excluded from dashboard)
 
-	rec *Recorder // NVR recorder (nil when recording is disabled)
+	rec    *Recorder   // NVR recorder (nil when recording is disabled)
+	events *eventStore // event timeline store (nil when recording is disabled)
 }
 
 // effectiveDashToken returns the active dashboard password: the DB-stored value
@@ -376,6 +377,15 @@ func (h *Hub) HandlePublish(w http.ResponseWriter, r *http.Request) {
 			// Start RTSP→HLS proxy streams off the read loop (blocking DVR connects
 			// must not stall publisher frame ingestion). cfgCopy is a private copy.
 			go sess.survProxy.HandleSurvConfig(cfgCopy[proto.HeaderSize:])
+
+		case proto.MsgSurvEvent:
+			if h.events != nil {
+				var ev proto.SurvEvent
+				if json.Unmarshal(data[proto.HeaderSize:], &ev) == nil {
+					stream := streamPath(sess.id, ev.ChID)
+					h.events.add(stream, ev.Kind, ev.Active, ev.TS)
+				}
+			}
 
 		case proto.MsgSurvSnapshot:
 			if len(data) > proto.HeaderSize {

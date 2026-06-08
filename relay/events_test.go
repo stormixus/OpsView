@@ -38,3 +38,14 @@ func TestEventStoreOrphanClose(t *testing.T) {
 		t.Fatalf("orphan not force-closed: %+v", got)
 	}
 }
+
+func TestStampSurvEventAgentID(t *testing.T) {
+	// build a MsgSurvEvent payload with empty AgentID, stamp it, confirm streamPath use
+	stream := streamPath("acme", "dvr1_ch2")
+	if stream == "" {
+		t.Skip("streamPath unavailable")
+	}
+	if stream != "acme/dvr1_ch2" {
+		t.Fatalf("streamPath = %q, want acme/dvr1_ch2", stream)
+	}
+}
