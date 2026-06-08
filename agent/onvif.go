@@ -304,6 +304,7 @@ func parseOnvifMediaUri(data []byte) (string, error) {
 const (
 	onvifNSDevice = "http://www.onvif.org/ver10/device/wsdl"
 	onvifNSMedia  = "http://www.onvif.org/ver10/media/wsdl"
+	onvifNSEvents = "http://www.onvif.org/ver10/events/wsdl"
 )
 
 func onvifDeviceURL(addr string, port int) string {
@@ -398,6 +399,107 @@ func (c *onvifClient) mediaXAddr(deviceURL string) (string, error) {
 		return "http://" + dialed.Host + "/onvif/media_service", nil
 	}
 	return "", fmt.Errorf("onvif: media service not found")
+}
+
+// eventsXAddr resolves the Events service URL via GetServices/GetCapabilities,
+// rewriting the advertised host to the one we dialed. Returns "" if the device
+// exposes no Events service.
+func (c *onvifClient) eventsXAddr(deviceURL string) string {
+	dialed, _ := url.Parse(deviceURL)
+	rewrite := func(xaddr string) string {
+		if u, err := url.Parse(xaddr); err == nil && dialed != nil {
+			u.Host = dialed.Host
+			return u.String()
+		}
+		return xaddr
+	}
+	if resp, err := c.call(deviceURL, onvifNSDevice+"/GetServices",
+		`<tds:GetServices xmlns:tds="`+onvifNSDevice+`"><tds:IncludeCapability>false</tds:IncludeCapability></tds:GetServices>`); err == nil {
+		var env struct {
+			Services []struct {
+				Namespace string `xml:"Namespace"`
+				XAddr     string `xml:"XAddr"`
+			} `xml:"Body>GetServicesResponse>Service"`
+		}
+		if xml.Unmarshal(resp, &env) == nil {
+			for _, s := range env.Services {
+				if strings.Contains(s.Namespace, "/events") && s.XAddr != "" {
+					return rewrite(s.XAddr)
+				}
+			}
+		}
+	}
+	if resp, err := c.call(deviceURL, onvifNSDevice+"/GetCapabilities",
+		`<tds:GetCapabilities xmlns:tds="`+onvifNSDevice+`"><tds:Category>All</tds:Category></tds:GetCapabilities>`); err == nil {
+		var env struct {
+			XAddr string `xml:"Body>GetCapabilitiesResponse>Capabilities>Events>XAddr"`
+		}
+		if xml.Unmarshal(resp, &env) == nil && env.XAddr != "" {
+			return rewrite(env.XAddr)
+		}
+	}
+	return ""
+}
+
+// getEventProperties asks the Events service which topics it supports.
+func (c *onvifClient) getEventProperties(eventsURL string) ([]string, error) {
+	resp, err := c.call(eventsURL, onvifNSEvents+"/GetEventProperties",
+		`<tev:GetEventProperties xmlns:tev="`+onvifNSEvents+`"/>`)
+	if err != nil {
+		return nil, err
+	}
+	return parseEventTopics(resp), nil
+}
+
+// parseEventTopics flattens a GetEventPropertiesResponse TopicSet into leaf topic
+// path strings (e.g. "VideoSource/MotionAlarm"). Lenient: vendors structure the
+// TopicSet differently, so walk the token stream and record paths whose leaf
+// carries topic="true".
+func parseEventTopics(data []byte) []string {
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	var path []string
+	inTopicSet := false
+	var topics []string
+	seen := map[string]bool{}
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Local == "TopicSet" {
+				inTopicSet = true
+				path = path[:0]
+				continue
+			}
+			if inTopicSet {
+				path = append(path, t.Name.Local)
+				isTopic := false
+				for _, a := range t.Attr {
+					if a.Name.Local == "topic" && a.Value == "true" {
+						isTopic = true
+					}
+				}
+				if isTopic {
+					p := strings.Join(path, "/")
+					if !seen[p] {
+						seen[p] = true
+						topics = append(topics, p)
+					}
+				}
+			}
+		case xml.EndElement:
+			if t.Name.Local == "TopicSet" {
+				inTopicSet = false
+				continue
+			}
+			if inTopicSet && len(path) > 0 {
+				path = path[:len(path)-1]
+			}
+		}
+	}
+	return topics
 }
 
 type onvifChannel struct {

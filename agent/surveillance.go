@@ -853,7 +853,27 @@ func (m *SurveillanceManager) discoverFromDVROnvif(dvr DVRConfig) ([]ChannelConf
 			Width: ch.Width, Height: ch.Height, RtspURI: ch.RTSPURI, SnapshotURI: ch.SnapshotURI,
 		})
 	}
+	m.probeDVROnvifEvents(dvr)
 	return out, nil
+}
+
+// probeDVROnvifEvents logs whether a DVR exposes ONVIF Events and which topics —
+// the Phase 0 gate for motion/event detection. Best-effort; never fails discovery.
+func (m *SurveillanceManager) probeDVROnvifEvents(dvr DVRConfig) {
+	c := newOnvifClient(dvr.Username, dvr.Password, 6*time.Second)
+	c.http = m.client
+	devURL := onvifDeviceURL(dvr.Addr, dvr.Port)
+	evURL := c.eventsXAddr(devURL)
+	if evURL == "" {
+		log.Printf("[onvif-events] DVR %d (%s): NO Events service advertised", dvr.ID, dvr.Name)
+		return
+	}
+	topics, err := c.getEventProperties(evURL)
+	if err != nil {
+		log.Printf("[onvif-events] DVR %d (%s): Events at %s but GetEventProperties failed: %v", dvr.ID, dvr.Name, evURL, err)
+		return
+	}
+	log.Printf("[onvif-events] DVR %d (%s): Events at %s — %d topics: %v", dvr.ID, dvr.Name, evURL, len(topics), topics)
 }
 
 func probeRTSPChannel(rtspURL string) bool {
