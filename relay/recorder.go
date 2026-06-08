@@ -206,12 +206,15 @@ func janitorDeleteOrder(segs []janSeg, cap, total int64, p janPolicy) []janSeg {
 		return nil
 	}
 	// Deletion tiers, sacrificed in order: (1) non-event old, (3) old event past
-	// keep-event, (2) event within keep-event (last resort). keep-all is never added.
-	var tier1, tier2, tier3 []janSeg
+	// keep-event, (2) event within keep-event, then (last resort) keep-all recent
+	// footage. The disk cap is a HARD ceiling — we prefer to keep recent and
+	// event-tagged footage, but if sacrificing everything else still leaves us over
+	// cap we evict even keep-all segments (oldest-first) so the cap is honored.
+	var tier1, tier2, tier3, keepAll []janSeg
 	for _, s := range segs {
 		switch {
 		case s.startSec >= p.keepAllCutoff:
-			continue // protected
+			keepAll = append(keepAll, s) // prefer to keep; deletable only as last resort
 		case !s.event:
 			tier1 = append(tier1, s)
 		case s.startSec < p.keepEventCutoff:
@@ -223,10 +226,11 @@ func janitorDeleteOrder(segs []janSeg, cap, total int64, p janPolicy) []janSeg {
 	sortByStart(tier1)
 	sortByStart(tier2)
 	sortByStart(tier3)
+	sortByStart(keepAll)
 
 	var out []janSeg
 	freed := int64(0)
-	for _, group := range [][]janSeg{tier1, tier3, tier2} {
+	for _, group := range [][]janSeg{tier1, tier3, tier2, keepAll} {
 		for _, s := range group {
 			if total-freed <= cap {
 				return out

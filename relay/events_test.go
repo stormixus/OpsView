@@ -5,7 +5,28 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+// An event straddling local midnight must be filed under both days.
+func TestEventStoreCrossMidnight(t *testing.T) {
+	es := newEventStore("")
+	mid := time.Date(2026, 6, 8, 0, 0, 0, 0, time.Local)
+	startMs := mid.Add(-2 * time.Minute).UnixMilli() // 2026-06-07 23:58 local
+	endMs := mid.Add(2 * time.Minute).UnixMilli()    // 2026-06-08 00:02 local
+	d1, d2 := dayKeyFromMs(startMs), dayKeyFromMs(endMs)
+	if d1 == d2 {
+		t.Skipf("timestamps did not straddle midnight in TZ %s", time.Local)
+	}
+	es.add("dvr1_ch1", "motion", true, startMs)
+	es.add("dvr1_ch1", "motion", false, endMs)
+	if got := es.eventsForDay("dvr1_ch1", d1); len(got) != 1 {
+		t.Fatalf("start day %s: got %d intervals, want 1", d1, len(got))
+	}
+	if got := es.eventsForDay("dvr1_ch1", d2); len(got) != 1 {
+		t.Fatalf("end day %s: got %d intervals, want 1", d2, len(got))
+	}
+}
 
 func TestEventStorePairing(t *testing.T) {
 	dir := t.TempDir()
@@ -79,7 +100,23 @@ func TestJanitorPrefersNonEvent(t *testing.T) {
 	}
 	for _, s := range order {
 		if s.path == "c" {
-			t.Fatal("keep-all segment c must never be deleted")
+			t.Fatal("keep-all segment c must not be deleted when the cap is reachable without it")
 		}
+	}
+}
+
+// The disk cap is a HARD ceiling: when only keep-all (recent) footage exists and it
+// exceeds the cap, the janitor must still evict the oldest keep-all segments rather
+// than let the disk overflow.
+func TestJanitorCapIsHardCeiling(t *testing.T) {
+	segs := []janSeg{
+		{path: "new", size: 100, startSec: 9_000_002, durSec: 300, event: true},
+		{path: "old", size: 100, startSec: 9_000_000, durSec: 300, event: false},
+		{path: "mid", size: 100, startSec: 9_000_001, durSec: 300, event: true},
+	}
+	// all are within the keep-all window; total 300 > cap 200 -> must drop the oldest
+	order := janitorDeleteOrder(segs, 200, 300, janPolicy{keepAllCutoff: 8_000_000, keepEventCutoff: 0})
+	if len(order) != 1 || order[0].path != "old" {
+		t.Fatalf("expected oldest keep-all 'old' evicted to honor the cap, got %+v", order)
 	}
 }

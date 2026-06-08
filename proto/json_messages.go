@@ -118,5 +118,5 @@ type SurvEvent struct {
 	ChID    string `json:"ch_id"`  // "dvr1_ch2" — matches the stream/segment path
 	Kind    string `json:"kind"`   // "motion" | "linecross" | "person" | "vehicle" | ...
 	Active  bool   `json:"active"` // true = event started, false = ended
-	TS      int64  `json:"ts"`     // event time, UTC unix milliseconds
+	TS      int64  `json:"ts"`     // event time, unix milliseconds (from the source's local wall-clock)
 }

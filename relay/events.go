@@ -83,7 +83,19 @@ func (e *eventStore) add(stream, kind string, active bool, tsMs int64) {
 // closeLocked appends a finished interval (caller holds e.mu).
 func (e *eventStore) closeLocked(stream, kind string, startMs, endMs int64) {
 	iv := eventInterval{Start: startMs / 1000, End: endMs / 1000, Kind: kind}
-	day := dayKeyFromMs(startMs)
+	startDay := dayKeyFromMs(startMs)
+	e.fileIntervalLocked(stream, startDay, iv)
+	// An event straddling local midnight must be findable on BOTH days, else the
+	// next day's marker view misses it and the janitor could delete a post-midnight
+	// segment it overlaps (overlaps() only queries the segment's own day).
+	if endDay := dayKeyFromMs(endMs); endDay != startDay {
+		e.fileIntervalLocked(stream, endDay, iv)
+	}
+}
+
+// fileIntervalLocked appends a closed interval to one day's JSONL (and the
+// in-memory cache when recDir==""), invalidating that day's cache. Caller holds e.mu.
+func (e *eventStore) fileIntervalLocked(stream, day string, iv eventInterval) {
 	if e.recDir != "" {
 		dir := filepath.Join(e.recDir, filepath.FromSlash(stream), ".events")
 		if err := os.MkdirAll(dir, 0o755); err == nil {
