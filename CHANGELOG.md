@@ -4,6 +4,31 @@ All notable changes to OpsView are documented here.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-08
+
+### Added
+
+- **Motion / event detection on the recording timeline.** OpsView now surfaces DVR
+  motion (and AcuSense smart) events: the agent subscribes to each Hikvision DVR's
+  ISAPI alertStream, the relay pairs the events into intervals and the dashboard
+  draws them as clickable bands on the 24h recording timeline (click an event to
+  seek playback to it). Reuses the DVR's own detection — the relay never decodes
+  video.
+  - **Auto-setup:** the agent idempotently enables the `center` (Notify
+    Surveillance Center) linkage on each channel's motion trigger via ISAPI, so the
+    DVR pushes events to the network — the existing recording linkage is preserved.
+    No per-channel fiddling in the DVR menu.
+  - **Smart classification, free:** AcuSense DVRs tag events `human` / `vehicle`,
+    carried through as the event `kind` (person/vehicle/motion/line-cross/intrusion)
+    — the data model is ready for per-type filtering (a later UI step).
+  - **Event-differentiated retention:** when a disk cap (`RELAY_REC_MAX`) is set,
+    the recorder keeps recent footage (`RELAY_REC_KEEP_ALL_HOURS`, default 72h) and
+    prefers deleting idle footage before event footage (`RELAY_REC_KEEP_EVENT_DAYS`,
+    default 30d) — while still honoring the cap as a hard ceiling.
+  - New wire message `MsgSurvEvent`; event intervals persist alongside recordings
+    (`<rec>/<stream>/.events/`); marker API `GET /dashboard/api/rec-events`.
+  - Spans agent (event source) + relay (store/markers/retention) — update both.
+
 ## [0.8.5] - 2026-06-08
 
 ### Fixed
