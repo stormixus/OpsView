@@ -59,7 +59,8 @@ func NewAgent(cfg AgentConfig) *Agent {
 }
 
 func (a *Agent) Run() {
-	go a.selfHealLoop() // lifetime DVR self-recovery (independent of the connect loop)
+	go a.selfHealLoop()    // lifetime DVR self-recovery (independent of the connect loop)
+	go a.runEventManager() // ISAPI DVR event consumers (lifetime-scoped, independent of connect loop)
 	for {
 		select {
 		case <-a.stopped:
@@ -312,6 +313,41 @@ func (a *Agent) sendSurvConfig() {
 		} else {
 			log.Printf("[agent] sent surveillance config: %d DVRs, %d channels", len(cfg.DVRs), len(cfg.Channels))
 		}
+	}
+}
+
+// sendSurvEvent forwards one DVR event edge to the relay. AgentID is left empty;
+// the relay stamps it (mirroring SurvConfig). No-op while disconnected.
+func (a *Agent) sendSurvEvent(chID, kind string, active bool, tsMs int64) {
+	payload, _ := json.Marshal(proto.SurvEvent{ChID: chID, Kind: kind, Active: active, TS: tsMs})
+	msg := proto.MarshalMessage(proto.MsgSurvEvent, payload)
+	a.connMu.Lock()
+	conn := a.conn
+	a.connMu.Unlock()
+	if conn == nil {
+		return
+	}
+	if err := conn.WriteMessage(websocket.BinaryMessage, msg); err != nil {
+		log.Printf("[agent] sendSurvEvent send error: %v", err)
+	}
+}
+
+// runEventManager starts one ISAPI alertStream consumer per ISAPI DVR for the
+// agent's lifetime; each emits event edges to the relay via sendSurvEvent. The
+// consumers talk to the DVRs (not the relay), so they persist across relay
+// reconnects. Runs until a.stopped is closed.
+func (a *Agent) runEventManager() {
+	if a.survMgr == nil {
+		return
+	}
+	dvrs := a.survMgr.ISAPIEventDVRs()
+	for _, ed := range dvrs {
+		ed := ed
+		log.Printf("[isapi-events] starting consumer for DVR %d (%s), %d channels", ed.dvr.ID, ed.dvr.Name, len(ed.chNums))
+		go isapiAlertLoop(a.survMgr.client, ed.dvr, ed.chNums, a.stopped, func(e alertEvent) {
+			chID := fmt.Sprintf("dvr%d_ch%d", ed.dvr.ID, e.chNum)
+			a.sendSurvEvent(chID, e.kind, e.active, e.tsMs)
+		})
 	}
 }
 

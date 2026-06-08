@@ -1033,6 +1033,42 @@ func normalizeChannelDiscovery(channels []ChannelConfig) []ChannelConfig {
 	return channels
 }
 
+// --- Event management ---
+
+// isapiEventDVR is a DVR whose events we consume over Hikvision ISAPI alertStream.
+type isapiEventDVR struct {
+	dvr    DVRConfig
+	chNums []int
+}
+
+// ISAPIEventDVRs returns the ISAPI-protocol DVRs plus each one's channel numbers,
+// for the agent's ISAPI event consumers.
+func (m *SurveillanceManager) ISAPIEventDVRs() []isapiEventDVR {
+	dvrs, err := m.ListDVRs()
+	if err != nil {
+		return nil
+	}
+	var out []isapiEventDVR
+	for _, d := range dvrs {
+		if !strings.EqualFold(d.Protocol, "isapi") {
+			continue
+		}
+		chs, err := m.ListChannels(d.ID)
+		if err != nil {
+			continue
+		}
+		var nums []int
+		for _, ch := range chs {
+			nums = append(nums, ch.ChNum)
+		}
+		if len(nums) == 0 {
+			continue
+		}
+		out = append(out, isapiEventDVR{dvr: d, chNums: nums})
+	}
+	return out
+}
+
 // --- Helpers ---
 
 func (m *SurveillanceManager) getDVR(id int64) (DVRConfig, error) {
