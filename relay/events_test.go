@@ -62,3 +62,24 @@ func TestEventsAPIShape(t *testing.T) {
 		t.Fatalf("payload shape wrong: %s", b)
 	}
 }
+
+func TestJanitorPrefersNonEvent(t *testing.T) {
+	segs := []janSeg{
+		{path: "a", size: 100, startSec: 1000, durSec: 300, event: false},      // old, no event
+		{path: "b", size: 100, startSec: 1300, durSec: 300, event: true},       // old, event
+		{path: "c", size: 100, startSec: 9_000_000, durSec: 300, event: false}, // within keep-all
+	}
+	// cap forces dropping 100 bytes; keep-all protects c; non-event old (a) goes first
+	order := janitorDeleteOrder(segs, 200 /*cap*/, 300 /*total*/, janPolicy{
+		keepAllCutoff:   8_000_000,
+		keepEventCutoff: 0,
+	})
+	if len(order) == 0 || order[0].path != "a" {
+		t.Fatalf("expected 'a' (non-event, old) deleted first, got %+v", order)
+	}
+	for _, s := range order {
+		if s.path == "c" {
+			t.Fatal("keep-all segment c must never be deleted")
+		}
+	}
+}
