@@ -4,6 +4,19 @@ All notable changes to OpsView are documented here.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-06-08
+
+### Added
+
+- **Agent silent auto-update ("ghost update").** The agent now checks GitHub
+  Releases on its own (≈1 min after start, then every 6h) and, when a newer
+  validly-**signed** release exists, downloads it, verifies its Ed25519 signature
+  (fail-closed — a missing/forged signature is refused), and installs it silently:
+  it closes, replaces and relaunches itself with no user action. Reuses the same
+  signing key + proven verification as the viewer; the agent installer now supports
+  a silent close→reinstall→relaunch. **This version must be installed once manually;
+  every update after it is automatic.**
+
 ## [0.9.2] - 2026-06-08
 
 ### Changed
