@@ -35,7 +35,7 @@ func runServer() (stop func()) {
 	if rec := newRecorder(hub, cfg.Port); rec != nil {
 		hub.rec = rec
 		hub.events = newEventStore(os.Getenv("RELAY_REC_DIR")) // event timeline store (same root as recordings)
-		go rec.Run() // NVR: record active streams to RELAY_REC_DIR (opt-in)
+		go rec.Run()                                           // NVR: record active streams to RELAY_REC_DIR (opt-in)
 	}
 
 	mux := http.NewServeMux()
