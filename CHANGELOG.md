@@ -4,6 +4,11 @@ All notable changes to OpsView are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- 통합 플레이어: 라이브 그리드 셀 클릭 → 풀블리드 플레이어. 우측 줌-타임라인(녹화 커버리지 + 사람/차량/모션 이벤트 아이콘)을 휠로 스크럽해 라이브↔녹화를 매끄럽게 이동, 호버 스크럽 미리보기.
+- relay `/api/rec-timeline` — 시각 범위 단위 녹화 커버리지 + 클러스터링된 이벤트.
+
 ## [0.11.0] - 2026-06-09
 
 ### Added

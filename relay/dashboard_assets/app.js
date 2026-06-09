@@ -919,6 +919,7 @@ function upStartLive(){
 }
 function upStopVideo(){
   if(up.player){ try{ up.player.close&&up.player.close(); }catch(e){} up.player=null; }
+  upVideo.onended=null; upVideo.onloadedmetadata=null;
   try{ upVideo.pause(); upVideo.removeAttribute('src'); upVideo.load(); }catch(e){}
 }
 
@@ -926,6 +927,7 @@ function upStopVideo(){
 // coarse window bucket so panning/zoom doesn't refetch on every frame.
 up._tlCache={};
 up._tlTimer=null;
+up._seekSeq=0;
 function upFetchTimeline(){
   if(!up.stream) return;
   var pad=Math.round((up.t1-up.t0)*0.5); // fetch a little beyond the window
@@ -1022,13 +1024,21 @@ function upSeekTo(t){
   $('#upLiveBadge').style.display='none'; $('#upState').textContent='';
   up.cursorT=t;
   upStopVideo();
-  var seg=up.segs[i];
-  // rec-timeline segments carry start/dur but not the file name; resolve it via /api/rec day list.
+  var seg=up.segs[i], seq=++up._seekSeq;
   upResolveSegName(seg.start).then(function(name){
+    if(seq!==up._seekSeq || !up.open) return; // superseded by a newer seek (rapid scrub/wheel)
     if(!name){ upGap(t); return; }
+    if(up.codec==='h265' && !upVideo.canPlayType('video/mp4; codecs="hvc1"')){
+      $('#upState').textContent='이 브라우저는 H.265 녹화 재생을 지원하지 않습니다 (라이브만 가능)';
+    }
     upVideo.src=BASE+'/api/rec-file?stream='+encodeURIComponent(up.path)+'&name='+encodeURIComponent(name);
     upVideo.currentTime=0;
     upVideo.onloadedmetadata=function(){ try{ upVideo.currentTime=Math.max(0,t-seg.start); }catch(e){} upVideo.play().catch(function(){}); };
+    upVideo.onended=function(){ // truncated/short segment: advance to the next contiguous one
+      if(!up.open || up.mode!=='rec' || !up._curSeg) return;
+      var nx=segmentAt(up.segs, up._curSeg.start+up._curSeg.dur+1);
+      if(nx>=0) upSeekTo(up.segs[nx].start+0.1);
+    };
     up._curSeg={start:seg.start, dur:seg.dur, name:name};
     upStartRecLoop();
   });
