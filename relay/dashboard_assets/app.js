@@ -915,7 +915,7 @@ function upStartLive(){
   var wsUrl=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/surv/ws/'+up.path;
   var hlsUrl=location.origin+'/surv/'+up.path+'/index.m3u8';
   up.player=playWS(upVideo, wsUrl, function(){ playHLS(upVideo, hlsUrl); });
-  upSyncLiveWindow(); upScheduleTimeline(); clearTimeout(up._liveTimer); upLiveTick();
+  upSyncLiveWindow(); upEnsureTimeline(true); clearTimeout(up._liveTimer); upLiveTick();
 }
 function upStopVideo(){
   if(up.player){ try{ up.player.close&&up.player.close(); }catch(e){} up.player=null; }
@@ -923,36 +923,45 @@ function upStopVideo(){
   try{ upVideo.pause(); upVideo.removeAttribute('src'); upVideo.load(); }catch(e){}
 }
 
-// fetch coverage+events for the current window (debounced). Cache by stream + a
-// coarse window bucket so panning/zoom doesn't refetch on every frame.
-up._tlCache={};
-up._tlTimer=null;
+// Keep the visible window's coverage+events loaded as the user pans/scrubs. Load a
+// band wider than the window and only refetch when the window drifts toward the
+// loaded edge (or on zoom/force) — self-limiting, so it follows continuous motion
+// without a debounce that never settles.
+up._loaded=null;     // {from,to} unix-sec range currently held in up.segs/up.events
+up._fetching=false;
 up._seekSeq=0;
-function upFetchTimeline(){
-  if(!up.stream) return;
-  var pad=Math.round((up.t1-up.t0)*0.5); // fetch a little beyond the window
-  var qs=up.t0-pad, qe=up.t1+pad;
-  var key=up.path+'|'+Math.floor(qs/300)+'|'+Math.floor(qe/300);
-  if(up._tlCache[key]){ up.segs=up._tlCache[key].segments; up.events=up._tlCache[key].events; upRenderRail(); return; }
-  fetch(BASE+'/api/rec-timeline?stream='+encodeURIComponent(up.path)+'&start='+qs+'&end='+qe,{credentials:'same-origin'})
-    .then(function(r){ return r.ok? r.json() : {segments:[],events:[]}; })
-    .then(function(d){
-      up._tlCache[key]=d; up.segs=d.segments||[]; up.events=d.events||[];
-      upRenderRail();
-    }).catch(function(){ up.segs=[]; up.events=[]; upRenderRail(); });
+function upLoadTimeline(qs,qe){
+  return fetch(BASE+'/api/rec-timeline?stream='+encodeURIComponent(up.path)+'&start='+Math.round(qs)+'&end='+Math.round(qe),{credentials:'same-origin'})
+    .then(function(r){ return r.ok? r.json() : null; });
 }
-function upScheduleTimeline(){ clearTimeout(up._tlTimer); up._tlTimer=setTimeout(upFetchTimeline,150); }
+function upEnsureTimeline(force){
+  if(!up.stream || up._fetching) return;
+  var span=Math.max(60, up.t1-up.t0);
+  if(!force && up._loaded && up._loaded.from <= up.t0-span*0.4 && up._loaded.to >= up.t1+span*0.4) return;
+  var qs=up.t0-span, qe=up.t1+span; // one extra span of margin on each side
+  up._fetching=true;
+  upLoadTimeline(qs,qe).then(function(d){
+    up._fetching=false;
+    if(!d) return;
+    up.segs=d.segments||[]; up.events=d.events||[]; up._loaded={from:qs,to:qe};
+    if(up.open) upRenderRail();
+  }).catch(function(){ up._fetching=false; });
+}
 
 var upRail=$('#upRail');
 var upPrev=$('#upPreview'), upPrevImg=$('#upPreviewImg');
+// vertical breathing room so the LIVE/now anchor isn't flush against the top edge
+// (clear of the close button) and the oldest edge isn't jammed at the very bottom.
+var UP_PAD_TOP=58, UP_PAD_BOT=28;
 function upRailH(){ return upRail.clientHeight || 600; }
-// position mapping: NEWEST (t1/now) at TOP (y=0), OLDEST (t0) at BOTTOM (y=H).
-function upYat(t,H){ return H - timeToY(t, up.t0, up.t1, H); }
-function upTat(y,H){ return yToTime(H-y, up.t0, up.t1, H); }
-// recompute the LIVE window so t1=now and the rail height maps to a time span.
+function upTrackH(){ return Math.max(40, upRailH()-UP_PAD_TOP-UP_PAD_BOT); }
+// position mapping over the inset track: NEWEST (t1/now) at TOP, OLDEST (t0) at BOTTOM.
+function upYat(t,H){ var th=upTrackH(); return UP_PAD_TOP + (th - timeToY(t, up.t0, up.t1, th)); }
+function upTat(y,H){ var th=upTrackH(); return yToTime(th-(y-UP_PAD_TOP), up.t0, up.t1, th); }
+// recompute the LIVE window so t1=now and the track height maps to a time span.
 function upSyncLiveWindow(){
   var now=Math.floor(Date.now()/1000);
-  var span=Math.round(upRailH()/up.pxPerSec);
+  var span=Math.round(upTrackH()/up.pxPerSec);
   up.t1=now; up.t0=now-span;
 }
 // two layers inside the rail: a reconciled thumbnail filmstrip (NOT rebuilt each
@@ -1029,7 +1038,7 @@ upEl.addEventListener('mouseleave', function(){ if(up.mode!=='rec') upRail.class
 // LIVE 모드에서 1초마다 윈도우를 now에 맞춰 재렌더
 function upLiveTick(){
   if(!up.open || up.mode!=='live') return;
-  upSyncLiveWindow(); upRenderRail();
+  upSyncLiveWindow(); upEnsureTimeline(); upRenderRail();
   up._liveTimer=setTimeout(upLiveTick,1000);
 }
 
@@ -1038,18 +1047,30 @@ function closePlayer(){
   up.open=false; upStopVideo();
   upEl.classList.remove('show'); upEl.setAttribute('aria-hidden','true');
   if(up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
-  clearTimeout(up._liveTimer); clearTimeout(up._tlTimer);
+  clearTimeout(up._liveTimer);
   up.mode='live'; upEl.classList.remove('up-rec'); upRail.classList.remove('show');
-  upPrev.hidden=true; up._curSeg=null; up._tlCache={}; upResetThumbs();
+  upPrev.hidden=true; up._curSeg=null; up._loaded=null; up._fetching=false; upResetThumbs();
 }
 $('#uplayerClose').addEventListener('click', closePlayer);
 upEl.addEventListener('click', function(e){ if(e.target===upEl) closePlayer(); });
 document.addEventListener('keydown', function(e){ if(e.key==='Escape' && up.open) closePlayer(); });
 
 // enter REC at unix-second time t: find the covering segment and seek into it.
-function upSeekTo(t){
+function upSeekTo(t,_retried){
   var i=segmentAt(up.segs, t);
-  if(i<0){ upGap(t); return; }
+  if(i<0){
+    // panned/clicked into a range we haven't loaded yet — fetch around t, then retry once
+    if(!_retried && (!up._loaded || t<up._loaded.from || t>up._loaded.to)){
+      var lspan=Math.max(60, up.t1-up.t0);
+      up._fetching=false;
+      upLoadTimeline(t-lspan, t+lspan).then(function(d){
+        if(d){ up.segs=d.segments||[]; up.events=d.events||[]; up._loaded={from:t-lspan,to:t+lspan}; }
+        upSeekTo(t, true);
+      });
+      return;
+    }
+    upGap(t); return;
+  }
   up.mode='rec'; upEl.classList.add('up-rec'); upRail.classList.add('show');
   $('#upLiveBadge').style.display='none'; $('#upState').textContent='';
   clearTimeout(up._liveTimer); // stop the 1s LIVE re-render so it can't fight the REC rAF over t0/t1
@@ -1105,10 +1126,11 @@ function upStartRecLoop(){
 }
 // keep the cursor comfortably in view as REC plays (cursor ~40% down from top).
 function upSyncRecWindow(){
-  var H=upRailH(), span=Math.round(H/up.pxPerSec);
+  var span=Math.round(upTrackH()/up.pxPerSec);
   up.t1=up.cursorT + span*0.4; up.t0=up.t1-span;
   var now=Math.floor(Date.now()/1000);
   var c=clampWindow(up.t0,up.t1,now); up.t0=c.t0; up.t1=c.t1;
+  upEnsureTimeline(); // keep coverage/events/thumbs loaded as the window scrubs
 }
 function upGap(t){
   up.mode='gap'; up.cursorT=t; $('#upState').textContent='이 시각 녹화 없음';
@@ -1137,7 +1159,7 @@ function upOnWheel(e){
     var factor=e.deltaY>0?1/1.15:1.15;
     up.pxPerSec=Math.max(0.02, Math.min(8, up.pxPerSec*factor)); // 8s/px .. 0.125s/px
     if(up.mode==='live'){ upSyncLiveWindow(); } else { upSyncRecWindow(); }
-    upRenderRail(); upScheduleTimeline();
+    upEnsureTimeline(true); upRenderRail();
     return;
   }
   // pan: now is at TOP, past below — scrolling DOWN (deltaY>0) = into the past.
