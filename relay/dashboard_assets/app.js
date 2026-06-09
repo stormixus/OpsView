@@ -971,7 +971,6 @@ function upSkipSec(delta){
   var base=up.mode==='live'? now : (up.cursorT||now);
   var t=Math.round(base+delta);
   if(t>=now-2){ upStartLive(); return; }
-  upPaused=false; upUpdatePauseBtn();
   upSeekTo(t);
 }
 function upStartLive(){
@@ -1125,8 +1124,9 @@ function upRenderPlayhead(H, now){
   if(showNow){
     upRail._nowEl.style.top=ny+'px';
     upRail._nowPill.style.top=ny+'px';
-    upRail._nowPill.textContent=up.mode==='live'?'LIVE':'지금';
-    upRail._nowPill.className='up-nowpill'+(up.mode==='live'?' live':'');
+    upRail._nowPill.textContent='';
+    upRail._nowPill.className='up-nowpill live';
+    upRail._nowPill.setAttribute('aria-label', up.mode==='live'?'라이브':'지금');
   }
   var showCur=up.mode==='rec'||up._scrubbing;
   if(showCur){
@@ -1135,6 +1135,7 @@ function upRenderPlayhead(H, now){
     upRail._curPill.style.display=ok?'block':'none';
     if(ok){
       upRail._cursorEl.style.top=cy+'px';
+      upRail._curPill.style.top=cy+'px';
       upRail._curPill.className='up-curpill'+(up._scrubbing?' scrub':'');
       upRail._curPill.textContent=up._scrubbing? upClockPrecise(up.cursorT) : upClock(up.cursorT);
     }
@@ -1218,8 +1219,16 @@ function upFmtFull(t){ var d=new Date(t*1000); return d.getFullYear()+'-'+pad2(d
 function upSetBigClock(now){
   var bc=$('#upBigClock'); if(!bc) return;
   var live=up.mode==='live', t=live? now : up.cursorT;
-  bc.textContent=(live?'LIVE · ':'녹화 · ')+upFmtFull(t);
-  bc.className='up-bigclock'+(live?' live':'');
+  var dot=bc.querySelector('.up-status-dot'), timeEl=bc.querySelector('.up-bigclock-time');
+  if(!dot){
+    bc.innerHTML='<span class="up-status-dot" aria-hidden="true"></span><span class="up-bigclock-time"></span>';
+    dot=bc.querySelector('.up-status-dot');
+    timeEl=bc.querySelector('.up-bigclock-time');
+  }
+  bc.className='up-bigclock'+(live?' live':' rec');
+  dot.className='up-status-dot'+(live?' live':' rec');
+  timeEl.textContent=upFmtFull(t);
+  bc.setAttribute('aria-label', (live?'라이브':'녹화')+' '+upFmtFull(t));
 }
 
 // the timeline is a hover-reveal OVERLAY on top of the full-bleed video — it never
@@ -1271,7 +1280,6 @@ function upSeekTo(t,_retried){
   $('#upLiveBadge').style.display='none'; $('#upState').textContent='';
   clearTimeout(up._liveTimer); // stop the 1s LIVE re-render so it can't fight the REC rAF over t0/t1
   up.cursorT=t;
-  upPaused=false; upUpdatePauseBtn();
   upStopVideo();
   var seg=up.segs[i], seq=++up._seekSeq;
   upResolveSegName(seg.start).then(function(name){
@@ -1282,14 +1290,30 @@ function upSeekTo(t,_retried){
     }
     upVideo.src=BASE+'/api/rec-file?stream='+encodeURIComponent(up.path)+'&name='+encodeURIComponent(name);
     upVideo.currentTime=0;
-    upVideo.onloadedmetadata=function(){ try{ upVideo.currentTime=Math.max(0,t-seg.start); }catch(e){} upVideo.play().catch(function(){}); };
+    upVideo.onloadedmetadata=function(){
+      try{ upVideo.currentTime=Math.max(0,t-seg.start); }catch(e){}
+      if(upPaused){
+        try{ upVideo.pause(); }catch(e){}
+        if(up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
+        upSyncRecWindow(); upRenderRail();
+      } else {
+        upVideo.play().catch(function(){});
+      }
+      upUpdatePauseBtn();
+    };
     upVideo.onended=function(){ // truncated/short segment: advance to the next contiguous one
-      if(!up.open || up.mode!=='rec' || !up._curSeg) return;
+      if(!up.open || up.mode!=='rec' || !up._curSeg || upPaused) return;
       var nx=segmentAt(up.segs, up._curSeg.start+up._curSeg.dur+1);
       if(nx>=0) upSeekTo(up.segs[nx].start+0.1);
     };
     up._curSeg={start:seg.start, dur:seg.dur, name:name};
-    upStartRecLoop();
+    if(upPaused){
+      if(up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
+      upSyncRecWindow(); upRenderRail();
+    } else {
+      upStartRecLoop();
+    }
+    upUpdatePauseBtn();
   });
 }
 
@@ -1305,7 +1329,7 @@ function upResolveSegName(segStart){
 function upStartRecLoop(){
   if(up._raf) cancelAnimationFrame(up._raf);
   function loop(){
-    if(!up.open || up.mode!=='rec'){ up._raf=null; return; }
+    if(!up.open || up.mode!=='rec' || upPaused){ up._raf=null; return; }
     if(up._curSeg){
       up.cursorT=up._curSeg.start + (upVideo.currentTime||0);
       // reached the live edge? hand back to LIVE.
@@ -1367,8 +1391,8 @@ upRail.addEventListener('mousedown', function(e){
   e.preventDefault();
   upDrag={ y0:e.clientY, moved:false };
   upRail.classList.add('scrubbing');
-  if(up.mode==='rec' && upVideo && !upVideo.paused){ upVideo.pause(); upDrag.wasPlaying=true; }
-  else upDrag.wasPlaying=false;
+  upDrag.wasPlaying=up.mode==='rec' && !upPaused && upVideo && !upVideo.paused;
+  if(upDrag.wasPlaying){ try{ upVideo.pause(); }catch(e){} }
   upScrubToClientY(e.clientY);
 });
 document.addEventListener('mousemove', function(e){
@@ -1391,7 +1415,6 @@ document.addEventListener('mouseup', function(){
   var t=Math.round(up.cursorT);
   var now=Math.floor(Date.now()/1000);
   if(t>=now-2){ upStartLive(); return; }
-  upPaused=false; upUpdatePauseBtn();
   upSeekTo(t);
 });
 upRail.addEventListener('click', function(e){
