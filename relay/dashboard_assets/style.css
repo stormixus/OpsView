@@ -698,3 +698,25 @@ button{font-family:inherit; cursor:pointer;}
 .cm-cancel:hover{border-color:var(--text-faint);}
 .cm-ok{background:var(--accent); color:var(--on-accent); border-color:var(--accent);}
 .cm-ok.danger{background:var(--bad); border-color:var(--bad); color:#fff;}
+
+/* ============================ unified player (통합 플레이어) ============================ */
+.uplayer{position:fixed; inset:0; z-index:80; display:none; background:rgba(2,4,7,.92); backdrop-filter:blur(4px);}
+.uplayer.show{display:flex;}
+.up-stage{position:relative; flex:1; min-width:0; display:flex; align-items:center; justify-content:center; background:#05070a;}
+.up-video{width:100%; height:100%; object-fit:contain; background:#000;}
+.up-toplabel{position:absolute; left:18px; top:14px; display:flex; flex-direction:column; gap:2px; text-shadow:0 1px 6px #000; pointer-events:none;}
+.up-toplabel #upTitle{color:#e6edf3; font-size:15px; font-weight:700;}
+.up-toplabel .up-sub{color:#9aa6b4; font-size:12px;}
+.up-livebadge{position:absolute; left:18px; bottom:16px; display:flex; align-items:center; gap:6px; color:#fff; font-size:12px; font-weight:700; background:rgba(0,0,0,.45); padding:5px 11px; border-radius:999px;}
+.uplayer.up-rec .up-livebadge{display:none;}
+.up-state{position:absolute; left:50%; bottom:16px; transform:translateX(-50%); color:#cdd6e0; font-size:12.5px; font-weight:600; background:rgba(0,0,0,.5); padding:4px 10px; border-radius:8px;}
+.up-state:empty{display:none;}
+.uplayer-close{position:absolute; right:16px; top:14px; z-index:2; width:40px; height:40px; border:0; border-radius:10px; background:rgba(17,24,32,.7); color:#e6edf3; cursor:pointer; display:flex; align-items:center; justify-content:center;}
+.uplayer-close svg{width:22px; height:22px;}
+.uplayer-close:hover{background:rgba(40,52,66,.9);}
+.up-preview{position:absolute; pointer-events:none; width:160px; background:#0c1118; border:1px solid #2a3442; border-radius:8px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.6);}
+.up-preview img{display:block; width:100%; height:90px; object-fit:cover; background:#05070a;}
+.up-previewtime{display:block; text-align:center; font-size:11px; font-weight:700; color:#e6edf3; padding:3px 0; font-family:var(--font-mono);}
+/* rail filled in Task 4 */
+.up-rail{position:relative; width:14px; background:linear-gradient(90deg,transparent,rgba(8,12,18,.7)); border-left:1px solid rgba(255,255,255,.08); transition:width .14s ease; flex:none;}
+.up-rail.expanded{width:132px;}

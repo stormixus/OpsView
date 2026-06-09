@@ -539,7 +539,7 @@ function renderGrid(a){
   if(liveEditing) wireLiveEdit(a);
   updateCellClocks();
 }
-$('#grid').addEventListener('click', function(e){ if(liveEditing) return; var c=e.target.closest('.cell'); if(c) openModal(c.dataset.id); });
+$('#grid').addEventListener('click', function(e){ if(liveEditing) return; var c=e.target.closest('.cell'); if(c) openPlayer(c.dataset.id); });
 function updateCellClocks(){ var ts=fmtTs(new Date()); $$('.cellts').forEach(function(e){ e.textContent=ts; }); }
 
 /* modal */
@@ -885,6 +885,49 @@ document.addEventListener('keydown', function(e){ if(e.key==='Escape' && recCalO
 // No live playback on this tab; recStop tears down only the event modal video.
 var recModalVideo=null;
 function recStop(){ if(recModalVideo){ try{ recModalVideo.pause(); recModalVideo.removeAttribute('src'); recModalVideo.load(); }catch(e){} recModalVideo=null; } }
+/* ============================================================ UNIFIED PLAYER (통합 플레이어) */
+var up = {
+  open:false, stream:null, name:'', sub:'', codec:'h264', path:'',
+  mode:'live',            // 'live' | 'rec' | 'gap'
+  player:null,            // live WS/HLS handle (has .close)
+  t0:0, t1:0, pxPerSec:0.25, // timeline window (unix sec): t0=top(past), t1=bottom(now). default 4s/px
+  segs:[], events:[],     // from rec-timeline
+  cursorT:0,
+};
+var upEl=$('#uplayer'), upVideo=$('#upVideo');
+
+function openPlayer(stream, opts){
+  opts=opts||{};
+  if(selected===null) return; var a=agentById(selected); if(!a) return;
+  var s=a.streams.filter(function(x){return x.id===stream || x.path===stream;})[0]; if(!s) return;
+  up.open=true; up.stream=s.id; up.path=s.path; up.codec=s.codec; up.name=s.name; up.sub=a.name;
+  up.mode='live';
+  $('#upTitle').textContent=s.name; $('#upSub').textContent=a.name+' · CH'+s.ch;
+  upEl.classList.add('show'); upEl.setAttribute('aria-hidden','false');
+  upStartLive();
+}
+function upStartLive(){
+  upStopVideo();
+  up.mode='live'; upEl.classList.remove('up-rec'); $('#upLiveBadge').style.display='';
+  $('#upState').textContent='';
+  if(!up.path){ return; }
+  var wsUrl=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/surv/ws/'+up.path;
+  var hlsUrl=location.origin+'/surv/'+up.path+'/index.m3u8';
+  up.player=playWS(upVideo, wsUrl, function(){ playHLS(upVideo, hlsUrl); });
+}
+function upStopVideo(){
+  if(up.player){ try{ up.player.close&&up.player.close(); }catch(e){} up.player=null; }
+  try{ upVideo.pause(); upVideo.removeAttribute('src'); upVideo.load(); }catch(e){}
+}
+function closePlayer(){
+  if(!up.open) return;
+  up.open=false; upStopVideo();
+  upEl.classList.remove('show'); upEl.setAttribute('aria-hidden','true');
+  if(up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
+}
+$('#uplayerClose').addEventListener('click', closePlayer);
+upEl.addEventListener('click', function(e){ if(e.target===upEl) closePlayer(); });
+document.addEventListener('keydown', function(e){ if(e.key==='Escape' && up.open) closePlayer(); });
 /* ============================================================ RELAY / CONN */
 var relayDownAt=Date.now();
 function renderConn(){

@@ -299,6 +299,19 @@
   <div class="modal-cell" id="modalCell"></div>
 </div>
 
+<!-- unified player (라이브 셀 클릭 → 풀블리드 라이브+타임라인 스크럽) -->
+<div class="uplayer" id="uplayer" aria-hidden="true">
+  <button class="uplayer-close" id="uplayerClose" title="닫기 (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+  <div class="up-stage" id="upStage">
+    <video class="up-video" id="upVideo" muted autoplay playsinline></video>
+    <div class="up-toplabel"><span id="upTitle">—</span><span class="up-sub" id="upSub"></span></div>
+    <div class="up-livebadge" id="upLiveBadge"><span class="dot live"></span>LIVE</div>
+    <div class="up-state" id="upState"></div>
+    <div class="up-preview" id="upPreview" hidden><img id="upPreviewImg" alt=""><span id="upPreviewTime" class="up-previewtime"></span></div>
+  </div>
+  <div class="up-rail" id="upRail" aria-label="타임라인 (휠=시간이동, 우측 호버=확장)"></div>
+</div>
+
 <!-- in-app confirm dialog (destructive actions) -->
 <div class="cmodal" id="confirmModal">
   <div class="cmodal-box" role="alertdialog" aria-modal="true">
@@ -322,6 +335,7 @@
   </div>
   <div class="drawer-note">화면 설정은 이 브라우저에 저장됩니다. 지점·알림·보안은 상단 <b>관리</b>에서 설정하세요.</div>
 </aside>
+<script src="/dashboard/assets/timeline_math.js"></script>
 <script src="/dashboard/assets/app.js"></script>
 </body>
 </html>
