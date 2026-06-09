@@ -305,7 +305,23 @@
   <div class="up-stage" id="upStage">
     <video class="up-video" id="upVideo" muted autoplay playsinline></video>
     <div class="up-toplabel"><span id="upTitle">—</span><span class="up-sub" id="upSub"></span><span class="up-bigclock" id="upBigClock"></span></div>
-    <div class="up-livebadge" id="upLiveBadge"><span class="dot live"></span>LIVE</div>
+    <div class="up-bottomleft" id="upBottomLeft">
+      <div class="up-livebadge" id="upLiveBadge"><span class="dot live"></span>LIVE</div>
+      <div class="up-transport" id="upTransport" aria-label="재생 컨트롤">
+        <button type="button" class="up-tr-btn" id="upBack10" title="10초 뒤" aria-label="10초 뒤">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 17l-5-5 5-5"/><path d="M18 17l-5-5 5-5"/></svg>
+          <span>10s</span>
+        </button>
+        <button type="button" class="up-tr-btn" id="upPause" title="일시정지" aria-label="일시정지">
+          <svg class="up-tr-ico-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+          <svg class="up-tr-ico-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <button type="button" class="up-tr-btn" id="upFwd10" title="10초 앞" aria-label="10초 앞">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M13 17l5-5-5-5"/><path d="M6 17l5-5-5-5"/></svg>
+          <span>10s</span>
+        </button>
+      </div>
+    </div>
     <div class="up-state" id="upState"></div>
     <div class="up-preview" id="upPreview" hidden><img id="upPreviewImg" alt=""><span id="upPreviewTime" class="up-previewtime"></span></div>
   </div>

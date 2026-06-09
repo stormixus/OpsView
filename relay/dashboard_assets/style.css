@@ -710,8 +710,22 @@ button{font-family:inherit; cursor:pointer;}
 .up-toplabel .up-sub{color:#9aa6b4; font-size:12px;}
 .up-bigclock{margin-top:6px; align-self:flex-start; font-family:var(--font-mono); font-size:14px; font-weight:800; letter-spacing:.3px; color:#e6edf3; background:rgba(8,12,18,.62); border:1px solid rgba(255,255,255,.1); padding:3px 9px; border-radius:8px;}
 .up-bigclock.live{color:#fff; border-color:rgba(42,157,74,.6); box-shadow:0 0 0 1px rgba(42,157,74,.35) inset;}
-.up-livebadge{position:absolute; left:18px; bottom:16px; z-index:3; display:flex; align-items:center; gap:6px; color:#fff; font-size:12px; font-weight:700; background:rgba(0,0,0,.45); padding:5px 11px; border-radius:999px;}
+.up-bottomleft{position:absolute; left:0; bottom:0; z-index:5; padding:16px 18px; display:flex; flex-direction:column; align-items:flex-start; gap:8px;}
+.up-livebadge{display:flex; align-items:center; gap:6px; color:#fff; font-size:12px; font-weight:700; background:rgba(0,0,0,.45); padding:5px 11px; border-radius:999px; transition:opacity .14s ease;}
 .uplayer.up-rec .up-livebadge{display:none;}
+.up-transport{display:flex; align-items:center; gap:6px; opacity:0; pointer-events:none; transform:translateY(6px); transition:opacity .14s ease, transform .14s ease;}
+.up-bottomleft:hover .up-transport,
+.up-bottomleft:focus-within .up-transport{opacity:1; pointer-events:auto; transform:none;}
+.up-bottomleft:hover .up-livebadge,
+.uplayer.up-rec .up-bottomleft:hover .up-livebadge{opacity:0; pointer-events:none;}
+.uplayer.up-rec .up-bottomleft:hover .up-transport{opacity:1; pointer-events:auto;}
+.up-tr-btn{display:inline-flex; align-items:center; justify-content:center; gap:4px; min-width:40px; height:40px; padding:0 10px; border:1px solid rgba(255,255,255,.14); border-radius:10px; background:rgba(12,18,26,.78); color:#e6edf3; cursor:pointer; font-size:11px; font-weight:700; font-family:var(--font-mono);}
+.up-tr-btn svg{width:18px; height:18px; flex:none;}
+.up-tr-btn span{line-height:1;}
+.up-tr-btn:hover{background:rgba(32,44,58,.92); border-color:rgba(255,255,255,.22);}
+.up-tr-btn:active{transform:scale(.96);}
+.up-tr-btn.paused .up-tr-ico-pause{display:none;}
+.up-tr-btn:not(.paused) .up-tr-ico-play{display:none;}
 .up-state{position:absolute; left:50%; bottom:16px; z-index:3; transform:translateX(-50%); color:#cdd6e0; font-size:12.5px; font-weight:600; background:rgba(0,0,0,.5); padding:4px 10px; border-radius:8px;}
 .up-state:empty{display:none;}
 .uplayer-close{position:absolute; right:16px; top:14px; z-index:6; width:40px; height:40px; border:0; border-radius:10px; background:rgba(17,24,32,.7); color:#e6edf3; cursor:pointer; display:flex; align-items:center; justify-content:center;}
@@ -720,32 +734,36 @@ button{font-family:inherit; cursor:pointer;}
 .up-preview{display:none;} /* replaced by the inline filmstrip */
 
 /* timeline = hover-reveal OVERLAY on the right, floating on top of the full-bleed video */
-.up-rail{position:absolute; right:0; top:0; bottom:0; width:188px; z-index:4; opacity:0; pointer-events:none; transform:translateX(14px); transition:opacity .16s ease, transform .16s ease; background:linear-gradient(90deg, rgba(5,7,10,0), rgba(5,7,10,.80) 36%, rgba(5,7,10,.93));}
-.up-rail.show{opacity:1; pointer-events:auto; transform:none;}
-.up-thumbs, .up-axis{position:absolute; inset:0;}
-/* inline thumbnail filmstrip down the left of the rail */
-.up-thumb{position:absolute; left:6px; width:92px; height:54px; object-fit:cover; border-radius:5px; border:1px solid rgba(255,255,255,.12); background:#0a0f15; box-shadow:0 2px 8px rgba(0,0,0,.5);}
-.up-thumb.na{visibility:hidden;}
-/* right axis: coverage track + ticks + time labels */
-.up-cov{position:absolute; right:48px; width:3px; border-radius:2px; background:rgba(55,211,103,.55);}
-.up-tick{position:absolute; right:40px; width:10px; height:1px; background:rgba(255,255,255,.28);}
-.up-tlabel{position:absolute; right:8px; transform:translateY(-50%); font-size:10.5px; color:#aeb8c4; font-family:var(--font-mono); white-space:nowrap;}
-/* event markers (kind icon + colored dot) on the axis */
-.up-ev{position:absolute; right:56px; height:16px; border:0; background:transparent; padding:0; cursor:pointer; display:flex; align-items:center; gap:4px; transform:translateY(-50%);}
-.up-ev-ic{flex:none; width:14px; height:14px;}
-.up-ev-ic svg{width:14px; height:14px; display:block;}
-.up-ev-dot{flex:none; width:7px; height:7px; border-radius:50%; box-shadow:0 0 0 2px rgba(0,0,0,.45);}
-.up-ev:hover .up-ev-ic{transform:scale(1.18);}
-.up-ev.ev-person .up-ev-dot,.up-ev.ev-linecross .up-ev-dot{background:#79b8ff;} .up-ev.ev-person .up-ev-ic,.up-ev.ev-linecross .up-ev-ic{color:#79b8ff;}
-.up-ev.ev-vehicle .up-ev-dot{background:#c8a6ff;} .up-ev.ev-vehicle .up-ev-ic{color:#c8a6ff;}
-.up-ev.ev-motion .up-ev-dot{background:#e8c25a;} .up-ev.ev-motion .up-ev-ic{color:#e8c25a;}
-.up-ev.ev-intrusion .up-ev-dot{background:#f87171;} .up-ev.ev-intrusion .up-ev-ic{color:#f87171;}
+.up-rail{position:absolute; right:0; top:0; bottom:0; width:188px; z-index:4; opacity:0; pointer-events:none; transform:translateX(14px); transition:opacity .16s ease, transform .16s ease; background:linear-gradient(90deg, rgba(5,7,10,0), rgba(5,7,10,.80) 36%, rgba(5,7,10,.93)); cursor:default;}
+.up-rail.show{opacity:1; pointer-events:auto; transform:none; cursor:grab;}
+.up-rail.scrubbing{cursor:grabbing;}
+.up-rail.show .up-axis{cursor:grab;}
+.up-rail.scrubbing .up-axis{cursor:grabbing;}
+.up-thumbs, .up-axis, .up-playhead{position:absolute; inset:0;}
+.up-thumbs{z-index:0;}
+.up-axis{z-index:1;}
+.up-playhead{z-index:2; pointer-events:none;}
+/* inline thumbnail filmstrip — kept in DOM while panning; fade in when loaded */
+.up-thumb{position:absolute; left:6px; width:92px; height:54px; object-fit:cover; border-radius:5px; border:1px solid rgba(255,255,255,.12); background:linear-gradient(145deg, rgba(16,24,34,.96), rgba(26,38,50,.92)); box-shadow:0 2px 8px rgba(0,0,0,.45); opacity:0; transition:opacity .22s ease, top .06s linear; will-change:top, opacity;}
+.up-thumb.ready:not(.na){opacity:1;}
+.up-thumb.na{opacity:0; visibility:hidden;}
+/* gray recording rail + blue motion/event marks (Scrypted-style) */
+.up-cov{position:absolute; right:20px; width:12px; border-radius:6px; background:linear-gradient(180deg, #7d848d 0%, #636a73 100%); box-shadow:inset 0 0 0 1px rgba(255,255,255,.07), 0 0 0 1px rgba(0,0,0,.35);}
+.up-tick{position:absolute; right:34px; width:8px; height:1px; background:rgba(255,255,255,.16);}
+.up-tlabel{position:absolute; right:2px; transform:translateY(-50%); font-size:9.5px; color:#7a8490; font-family:var(--font-mono); white-space:nowrap; opacity:.92;}
+.up-mark{position:absolute; right:20px; width:12px; border:0; padding:0; margin:0; cursor:pointer; z-index:2; background:#5eb0ff; transition:filter .12s ease, transform .12s ease;}
+.up-mark.dot{height:6px; border-radius:50%; transform:translateY(-50%); box-shadow:0 0 7px rgba(94,176,255,.9);}
+.up-mark.burst{height:11px; border-radius:50%; transform:translateY(-50%); box-shadow:0 0 9px rgba(94,176,255,.95);}
+.up-mark.span{border-radius:6px; min-height:6px; box-shadow:0 0 10px rgba(94,176,255,.8);}
+.up-mark:hover{filter:brightness(1.12);}
+.up-mark.dot:hover,.up-mark.burst:hover{transform:translateY(-50%) scale(1.15);}
 /* now line + pill at TOP */
 .up-now{position:absolute; left:0; right:0; height:2px; background:#37d367; box-shadow:0 0 8px rgba(55,211,103,.7);}
 .up-nowpill{position:absolute; right:8px; transform:translateY(-50%); font-size:10px; font-weight:800; color:#0a0f15; background:#aeb8c4; padding:2px 7px; border-radius:999px; font-family:var(--font-mono);}
 .up-nowpill.live{color:#fff; background:#2a9d4a;}
 .up-cursor{position:absolute; left:0; right:0; height:0; border-top:2px solid #4aa3ff;}
-.up-curpill{position:absolute; right:8px; transform:translateY(-50%); font-size:10px; font-weight:800; color:#fff; background:#2f6fed; padding:2px 7px; border-radius:999px; font-family:var(--font-mono); box-shadow:0 1px 6px rgba(47,111,237,.55);}
+.up-curpill{position:absolute; right:8px; top:58px; transform:none; font-size:10px; font-weight:800; color:#fff; background:#2f6fed; padding:2px 7px; border-radius:999px; font-family:var(--font-mono); box-shadow:0 1px 6px rgba(47,111,237,.55);}
+.up-curpill.scrub{font-size:10.5px; letter-spacing:.2px;}
 
 /* license plate badge */
 .ev-plate-badge {

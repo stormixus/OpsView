@@ -96,10 +96,32 @@ func (h *Hub) runLPR(stream string, tsMs int64, jpeg []byte) {
 	if res.Plate == "" {
 		return
 	}
-	log.Printf("[lpr] recognized plate: %s (confidence: %.2f) for stream: %s", res.Plate, res.Confidence, stream)
-	if h.events != nil {
-		h.events.updateOpenPlate(stream, tsMs, res.Plate)
+	
+	// Keep only the last 4 digits of the recognized plate number
+	plate4 := extractLast4Digits(res.Plate)
+	if plate4 == "" {
+		log.Printf("[lpr] recognized plate %q, but could not extract last 4 digits", res.Plate)
+		return
 	}
+
+	log.Printf("[lpr] recognized plate: %s (last 4: %s, confidence: %.2f) for stream: %s", res.Plate, plate4, res.Confidence, stream)
+	if h.events != nil {
+		h.events.updateOpenPlate(stream, tsMs, plate4)
+	}
+}
+
+// extractLast4Digits filters non-digits and returns the last 4 digits of the string.
+func extractLast4Digits(s string) string {
+	var digits []rune
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			digits = append(digits, r)
+		}
+	}
+	if len(digits) < 4 {
+		return ""
+	}
+	return string(digits[len(digits)-4:])
 }
 
 var (

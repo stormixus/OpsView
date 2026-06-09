@@ -914,6 +914,7 @@ var up = {
   segs:[], events:[],     // from rec-timeline
   cursorT:0,
 };
+var upPaused=false, upDrag=null;
 var upEl=$('#uplayer'), upVideo=$('#upVideo');
 
 // open the unified player. opts.mode==='rec' with opts.t (unix sec) opens straight
@@ -933,6 +934,7 @@ function openPlayer(stream, opts){
   up.pxPerSec=0.08; // reset to the default zoom on every open
   $('#upTitle').textContent=s.name; $('#upSub').textContent=a.name+' · CH'+s.ch;
   upEl.classList.add('show'); upEl.setAttribute('aria-hidden','false');
+  upPaused=false; upUpdatePauseBtn();
   if(rec){
     up.mode='rec'; upEl.classList.add('up-rec'); upRail.classList.add('show');
     $('#upLiveBadge').style.display='none';
@@ -942,9 +944,40 @@ function openPlayer(stream, opts){
     up.mode='live'; upStartLive();
   }
 }
+function upUpdatePauseBtn(){
+  var btn=$('#upPause'); if(!btn) return;
+  btn.classList.toggle('paused', upPaused);
+  btn.title=upPaused?'재생':'일시정지';
+  btn.setAttribute('aria-label', upPaused?'재생':'일시정지');
+}
+function upSetPaused(p){
+  if(!up.open) return;
+  upPaused=!!p;
+  if(upVideo){
+    if(p){ try{ upVideo.pause(); }catch(e){} }
+    else { upVideo.play().catch(function(){}); }
+  }
+  if(p && up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
+  else if(!p && up.mode==='rec' && up._curSeg && !up._raf){ upStartRecLoop(); }
+  upUpdatePauseBtn();
+}
+function upTogglePause(){
+  if(!up.open || up.mode==='gap') return;
+  upSetPaused(!upPaused);
+}
+function upSkipSec(delta){
+  if(!up.open) return;
+  var now=Math.floor(Date.now()/1000);
+  var base=up.mode==='live'? now : (up.cursorT||now);
+  var t=Math.round(base+delta);
+  if(t>=now-2){ upStartLive(); return; }
+  upPaused=false; upUpdatePauseBtn();
+  upSeekTo(t);
+}
 function upStartLive(){
   upStopVideo();
   if(up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
+  upPaused=false; upUpdatePauseBtn();
   up.mode='live'; upEl.classList.remove('up-rec'); $('#upLiveBadge').style.display='';
   $('#upState').textContent='';
   if(!up.path){ return; }
@@ -1000,64 +1033,170 @@ function upSyncLiveWindow(){
   var span=Math.round(upTrackH()/up.pxPerSec);
   up.t1=now; up.t0=now-span;
 }
-// two layers inside the rail: a reconciled thumbnail filmstrip (NOT rebuilt each
-// frame, so images don't re-fetch) + a cheap axis layer rebuilt every render.
+// Rail layers: persistent thumb filmstrip + axis (rebuilt occasionally) + playhead overlay.
+var UP_THUMB_STEPS=[15,30,60,120,300,600,900,1800,3600];
 function upRailLayers(){
   if(!upRail._axis){
     upRail.innerHTML='<div class="up-thumbs" id="upRailThumbs"></div><div class="up-axis" id="upRailAxis"></div>';
     upRail._thumbs=$('#upRailThumbs'); upRail._axis=$('#upRailAxis'); upRail._thumbMap={};
+    upRail._playhead=null;
   }
 }
-function upResetThumbs(){ if(upRail._thumbs){ upRail._thumbs.innerHTML=''; upRail._thumbMap={}; } }
-// reconcile inline thumbnails at tick positions where recording exists (reuse <img>
-// elements by time key so the per-frame re-render never re-fetches).
-function upRenderThumbs(H, interval, now){
+function upResetRailLayers(){
+  if(upRail._thumbs){ upRail._thumbs.innerHTML=''; upRail._thumbMap={}; }
+  if(upRail._playhead){ upRail._playhead.remove(); upRail._playhead=null; }
+  if(upRail._axis){ upRail._axis.innerHTML=''; }
+  up._thumbStep=null; up._thumbStepSpan=0;
+}
+function upResetThumbs(){ upResetRailLayers(); }
+function upPickThumbStep(span){
+  var ideal=span/9;
+  for(var i=0;i<UP_THUMB_STEPS.length;i++) if(UP_THUMB_STEPS[i]>=ideal) return UP_THUMB_STEPS[i];
+  return UP_THUMB_STEPS[UP_THUMB_STEPS.length-1];
+}
+// Stable thumb grid (decoupled from tick labels) so panning doesn't churn <img> keys.
+function upThumbStep(){
+  var span=Math.max(60, up.t1-up.t0);
+  if(!up._thumbStep || !up._thumbStepSpan || Math.abs(span-up._thumbStepSpan)>up._thumbStepSpan*0.38){
+    up._thumbStepSpan=span;
+    up._thumbStep=upPickThumbStep(span);
+  }
+  return up._thumbStep;
+}
+function upMarkThumbReady(img){
+  if(img.complete && img.naturalWidth>0) img.classList.add('ready');
+}
+// Reconcile thumbnails: reuse by unix time, hide off-screen, prune only outside loaded band.
+function upRenderThumbs(H, step, now){
   var layer=upRail._thumbs, map=upRail._thumbMap, keep={};
-  for(var tt=Math.ceil(up.t0/interval)*interval; tt<=up.t1; tt+=interval){
-    if(tt>now || segmentAt(up.segs,tt)<0) continue;
-    var y=upYat(tt,H); if(y<-40||y>H+40) continue;
+  var span=Math.max(60, up.t1-up.t0);
+  var pruneLo=(up._loaded?up._loaded.from:up.t0)-span*1.5;
+  var pruneHi=(up._loaded?up._loaded.to:up.t1)+span*1.5;
+  var tStart=Math.ceil(up.t0/step)*step, tEnd=up.t1+step*2;
+  for(var tt=tStart; tt<=tEnd; tt+=step){
+    if(tt>now+step || segmentAt(up.segs,tt)<0) continue;
     keep[tt]=1;
+    var y=upYat(tt,H), visible=y>=-60&&y<=H+60;
     var img=map[tt];
     if(!img){
-      img=document.createElement('img'); img.className='up-thumb'; img.loading='lazy';
+      img=document.createElement('img');
+      img.className='up-thumb';
+      img.decoding='async';
+      img.alt='';
+      img.onload=function(){ this.classList.add('ready'); };
       img.onerror=function(){ this.classList.add('na'); };
       img.src=BASE+'/api/rec-thumb?stream='+encodeURIComponent(up.path)+'&t='+tt;
-      layer.appendChild(img); map[tt]=img;
+      layer.appendChild(img);
+      map[tt]=img;
+      upMarkThumbReady(img);
     }
     img.style.top=(y-27)+'px';
+    img.style.visibility=visible?'visible':'hidden';
   }
-  for(var k in map){ if(!keep[k]){ if(map[k].parentNode) layer.removeChild(map[k]); delete map[k]; } }
+  for(var k in map){
+    if(keep[k]) continue;
+    var tk=+k;
+    if(tk<pruneLo || tk>pruneHi){
+      if(map[k].parentNode) layer.removeChild(map[k]);
+      delete map[k];
+    } else {
+      map[k].style.visibility='hidden';
+    }
+  }
 }
-function upRenderRail(){
+function upEnsurePlayhead(){
   upRailLayers();
-  var H=upRailH(), now=Math.floor(Date.now()/1000), html='';
-  var interval=niceTickInterval(up.t1-up.t0,6);
-  upRenderThumbs(H, interval, now);
-  // recording coverage track (recorded vs gap)
+  if(upRail._playhead) return;
+  var el=document.createElement('div');
+  el.className='up-playhead';
+  el.innerHTML='<div class="up-now"></div><div class="up-nowpill"></div><div class="up-cursor"></div><div class="up-curpill"></div>';
+  upRail.appendChild(el);
+  upRail._playhead=el;
+  upRail._nowEl=el.querySelector('.up-now');
+  upRail._nowPill=el.querySelector('.up-nowpill');
+  upRail._cursorEl=el.querySelector('.up-cursor');
+  upRail._curPill=el.querySelector('.up-curpill');
+}
+function upRenderPlayhead(H, now){
+  upEnsurePlayhead();
+  var ny=upYat(now,H), showNow=ny>=0&&ny<=H;
+  upRail._nowEl.style.display=showNow?'block':'none';
+  upRail._nowPill.style.display=showNow?'block':'none';
+  if(showNow){
+    upRail._nowEl.style.top=ny+'px';
+    upRail._nowPill.style.top=ny+'px';
+    upRail._nowPill.textContent=up.mode==='live'?'LIVE':'지금';
+    upRail._nowPill.className='up-nowpill'+(up.mode==='live'?' live':'');
+  }
+  var showCur=up.mode==='rec'||up._scrubbing;
+  if(showCur){
+    var cy=upYat(up.cursorT,H), ok=cy>=0&&cy<=H;
+    upRail._cursorEl.style.display=ok?'block':'none';
+    upRail._curPill.style.display=ok?'block':'none';
+    if(ok){
+      upRail._cursorEl.style.top=cy+'px';
+      upRail._curPill.className='up-curpill'+(up._scrubbing?' scrub':'');
+      upRail._curPill.textContent=up._scrubbing? upClockPrecise(up.cursorT) : upClock(up.cursorT);
+    }
+  } else {
+    upRail._cursorEl.style.display='none';
+    upRail._curPill.style.display='none';
+  }
+}
+function upEventMarkTitle(ev){
+  var k=ev.kind||'motion', end=ev.end||ev.start;
+  var t=(REC_KIND_NAMES[k]||k)+' '+upClock(ev.start);
+  if(end>ev.start+1) t+=' – '+upClock(end);
+  return t;
+}
+function upRenderRailAxis(H){
+  var interval=niceTickInterval(up.t1-up.t0,6), html='';
   up.segs.forEach(function(s){
     var yA=upYat(s.start,H), yB=upYat(s.start+s.dur,H);
     var top=Math.max(0,Math.min(yA,yB)), h=Math.abs(yB-yA);
     if(top+h<0||top>H) return;
     html+='<div class="up-cov" style="top:'+top+'px;height:'+h+'px"></div>';
   });
-  // ticks + time labels
   for(var tt=Math.ceil(up.t0/interval)*interval; tt<=up.t1; tt+=interval){
     var y=upYat(tt,H); if(y<0||y>H) continue;
     html+='<div class="up-tick" style="top:'+y+'px"></div><div class="up-tlabel" style="top:'+y+'px">'+upFmtTick(tt,interval)+'</div>';
   }
-  // event markers: kind icon + colored dot
+  var spans=[], bursts=[], dots=[];
   up.events.forEach(function(ev){
-    var y=upYat(ev.start,H); if(y<0||y>H) return;
-    var k=ev.kind||'motion';
-    html+='<button class="up-ev ev-'+escAttr(k)+'" data-t="'+ev.start+'" style="top:'+y+'px" title="'+escAttr((REC_KIND_NAMES[k]||k)+' '+upClock(ev.start))+'"><span class="up-ev-ic">'+(REC_KIND_ICONS[k]||'')+'</span><span class="up-ev-dot"></span></button>';
+    var end=ev.end||ev.start;
+    if(end<up.t0 || ev.start>up.t1) return;
+    var yA=upYat(ev.start,H), yB=upYat(end,H), h=Math.abs(yB-yA), mid=(yA+yB)/2;
+    if(h>=12) spans.push({ev:ev, top:Math.min(yA,yB), h:Math.max(6,h)});
+    else if(h>=4) bursts.push({ev:ev, y:mid});
+    else dots.push({ev:ev, y:yA});
   });
-  // now line + pill at TOP (LIVE pill in live mode, else 지금)
-  var ny=upYat(now,H);
-  if(ny>=0&&ny<=H){ html+='<div class="up-now" style="top:'+ny+'px"></div><div class="up-nowpill'+(up.mode==='live'?' live':'')+'" style="top:'+ny+'px">'+(up.mode==='live'?'LIVE':'지금')+'</div>'; }
-  // REC playhead pill at the cursor
-  if(up.mode==='rec'){ var cy=upYat(up.cursorT,H); if(cy>=0&&cy<=H){ html+='<div class="up-cursor" style="top:'+cy+'px"></div><div class="up-curpill" style="top:'+cy+'px">'+upClock(up.cursorT)+'</div>'; } }
+  spans.forEach(function(m){
+    html+='<button type="button" class="up-mark span" data-t="'+m.ev.start+'" style="top:'+m.top+'px;height:'+m.h+'px" title="'+escAttr(upEventMarkTitle(m.ev))+'"></button>';
+  });
+  bursts.forEach(function(m){
+    html+='<button type="button" class="up-mark burst" data-t="'+m.ev.start+'" style="top:'+m.y+'px" title="'+escAttr(upEventMarkTitle(m.ev))+'"></button>';
+  });
+  dots.forEach(function(m){
+    html+='<button type="button" class="up-mark dot" data-t="'+m.ev.start+'" style="top:'+m.y+'px" title="'+escAttr(upEventMarkTitle(m.ev))+'"></button>';
+  });
   upRail._axis.innerHTML=html;
+}
+function upRenderRail(opts){
+  opts=opts||{};
+  upRailLayers();
+  var H=upRailH(), now=Math.floor(Date.now()/1000);
+  if(opts.thumbs!==false) upRenderThumbs(H, upThumbStep(), now);
+  if(opts.axis!==false) upRenderRailAxis(H);
+  upRenderPlayhead(H, now);
   upSetBigClock(now);
+}
+function upPaintScrub(){
+  if(up._scrubPaint) return;
+  up._scrubPaint=true;
+  requestAnimationFrame(function(){
+    up._scrubPaint=false;
+    upRenderRail();
+  });
 }
 function upFmtTick(t,interval){
   var d=new Date(t*1000);
@@ -1066,6 +1205,13 @@ function upFmtTick(t,interval){
   return pad2(d.getHours())+':'+pad2(d.getMinutes());
 }
 function upClock(t){ var d=new Date(t*1000); return pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds()); }
+function upClockPrecise(t){
+  var sec=Math.max(0, +t), whole=Math.floor(sec), d=new Date(whole*1000);
+  var base=pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds());
+  var frac=sec-whole;
+  if(frac<0.05) return base;
+  return base+'.'+Math.round(frac*10);
+}
 // authoritative date+time for the top-left readout (relay/segment time — independent
 // of the DVR's burned-in OSD clock, which can drift).
 function upFmtFull(t){ var d=new Date(t*1000); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+' '+pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds()); }
@@ -1096,8 +1242,12 @@ function closePlayer(){
   clearTimeout(up._liveTimer);
   up.mode='live'; upEl.classList.remove('up-rec'); upRail.classList.remove('show');
   upPrev.hidden=true; up._curSeg=null; up._loaded=null; up._fetching=false; upResetThumbs();
+  upPaused=false; up._scrubbing=false; upDrag=null; upRail.classList.remove('scrubbing'); upUpdatePauseBtn();
 }
 $('#uplayerClose').addEventListener('click', closePlayer);
+$('#upBack10').addEventListener('click', function(e){ e.stopPropagation(); upSkipSec(-10); });
+$('#upFwd10').addEventListener('click', function(e){ e.stopPropagation(); upSkipSec(10); });
+$('#upPause').addEventListener('click', function(e){ e.stopPropagation(); upTogglePause(); });
 upEl.addEventListener('click', function(e){ if(e.target===upEl) closePlayer(); });
 document.addEventListener('keydown', function(e){ if(e.key==='Escape' && up.open) closePlayer(); });
 
@@ -1121,6 +1271,7 @@ function upSeekTo(t,_retried){
   $('#upLiveBadge').style.display='none'; $('#upState').textContent='';
   clearTimeout(up._liveTimer); // stop the 1s LIVE re-render so it can't fight the REC rAF over t0/t1
   up.cursorT=t;
+  upPaused=false; upUpdatePauseBtn();
   upStopVideo();
   var seg=up.segs[i], seq=++up._seekSeq;
   upResolveSegName(seg.start).then(function(name){
@@ -1165,9 +1316,20 @@ function upStartRecLoop(){
         if(next>=0){ upSeekTo(up.segs[next].start+0.1); return; }
       }
     }
-    upSyncRecWindow(); upRenderRail();
+    upSyncRecWindow();
+    var H=upRailH(), now=Math.floor(Date.now()/1000);
+    upRenderPlayhead(H, now);
+    var ts=performance.now();
+    if(!up._railBodyTs || ts-up._railBodyTs>200){
+      up._railBodyTs=ts;
+      upRailLayers();
+      upRenderThumbs(H, upThumbStep(), now);
+      upRenderRailAxis(H);
+      upSetBigClock(now);
+    }
     up._raf=requestAnimationFrame(loop);
   }
+  up._railBodyTs=0;
   up._raf=requestAnimationFrame(loop);
 }
 // keep the cursor comfortably in view as REC plays (cursor ~40% down from top).
@@ -1186,9 +1348,55 @@ function upGap(t){
   if(best!=null){ setTimeout(function(){ if(up.mode==='gap') upSeekTo(best); }, 700); }
 }
 
+function upScrubToClientY(clientY){
+  if(!up.open) return;
+  var H=upRailH(), rect=upRail.getBoundingClientRect();
+  var y=clientY-rect.top;
+  var t=upTat(y, H);
+  var now=Date.now()/1000;
+  if(t>now) t=now;
+  up.mode='rec'; upEl.classList.add('up-rec'); $('#upLiveBadge').style.display='none';
+  up._scrubbing=true;
+  up.cursorT=t; upSyncRecWindow();
+  upRenderPlayhead(H, Math.floor(Date.now()/1000));
+  upPaintScrub();
+}
+upRail.addEventListener('mousedown', function(e){
+  if(!up.open || e.button!==0 || up._noClick) return;
+  if(e.target.closest('.up-mark')) return;
+  e.preventDefault();
+  upDrag={ y0:e.clientY, moved:false };
+  upRail.classList.add('scrubbing');
+  if(up.mode==='rec' && upVideo && !upVideo.paused){ upVideo.pause(); upDrag.wasPlaying=true; }
+  else upDrag.wasPlaying=false;
+  upScrubToClientY(e.clientY);
+});
+document.addEventListener('mousemove', function(e){
+  if(!upDrag) return;
+  if(Math.abs(e.clientY-upDrag.y0)>2) upDrag.moved=true;
+  upScrubToClientY(e.clientY);
+});
+document.addEventListener('mouseup', function(){
+  if(!upDrag) return;
+  upRail.classList.remove('scrubbing');
+  up._scrubbing=false;
+  upRenderRail();
+  var moved=upDrag.moved, wasPlaying=upDrag.wasPlaying;
+  upDrag=null;
+  if(!moved){
+    if(wasPlaying && up.mode==='rec' && !upPaused){ try{ upVideo.play().catch(function(){}); }catch(e){} }
+    return;
+  }
+  up._noClick=true; setTimeout(function(){ up._noClick=false; }, 450);
+  var t=Math.round(up.cursorT);
+  var now=Math.floor(Date.now()/1000);
+  if(t>=now-2){ upStartLive(); return; }
+  upPaused=false; upUpdatePauseBtn();
+  upSeekTo(t);
+});
 upRail.addEventListener('click', function(e){
-  if(up._noClick) return; // a swipe just ended — don't also seek to the release point
-  var evb=e.target.closest('.up-ev');
+  if(up._noClick) return; // a swipe/drag just ended — don't also seek to the release point
+  var evb=e.target.closest('.up-mark');
   if(evb){ upSeekTo(+evb.dataset.t); return; }
   var H=upRailH(), rect=upRail.getBoundingClientRect();
   var y=e.clientY-rect.top;
