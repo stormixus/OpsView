@@ -560,7 +560,7 @@ function openModal(id){
     }
   }
 }
-function closeModal(){ modal.classList.remove('show'); if(modalPlayer){try{modalPlayer.close&&modalPlayer.close();}catch(e){} modalPlayer=null;} modalCell.innerHTML=''; modalCell.classList.remove('bare'); if(opsModalTimer){clearInterval(opsModalTimer);opsModalTimer=null;} }
+function closeModal(){ modal.classList.remove('show'); if(modalPlayer){try{modalPlayer.close&&modalPlayer.close();}catch(e){} modalPlayer=null;} if(typeof recStop==='function') recStop(); modalCell.innerHTML=''; modalCell.classList.remove('bare'); if(opsModalTimer){clearInterval(opsModalTimer);opsModalTimer=null;} }
 $('#modalClose').addEventListener('click', closeModal);
 modal.addEventListener('click', function(e){ if(e.target===modal) closeModal(); });
 document.addEventListener('keydown', function(e){ if(e.key==='Escape'){ closeModal(); closeDrawer(); } });
@@ -625,72 +625,42 @@ function saveIPName(inp){
 modalCell.addEventListener('change', function(e){ if(e.target.classList.contains('ipname-in')) saveIPName(e.target); });
 modalCell.addEventListener('keydown', function(e){ if(e.target.classList.contains('ipname-in') && e.key==='Enter'){ e.preventDefault(); e.target.blur(); } });
 
-/* ============================================================ RECORDINGS (녹화) */
-var recCtx = { mode:1, streams:[], stream:null, day:null, dayStart:0, segs:[], cur:null, cells:[], master:0, playing:false, range:null, events:[], eventList:[], eventFilter:'all' };
-var recVideo = $('#recVideo');
+/* ============================================================ EVENTS (이벤트) — Protect-style thumbnail grid */
+// recCtx keeps the day + the agent-wide event list (newest-first from the API).
+// segCache memoizes per-stream segment lists for the day (used for modal playback).
+var recCtx = { day:null, eventList:[], eventFilter:'all', segCache:{} };
 function pad2(n){ return (n<10?'0':'')+n; }
 function recDayStr(d){ return ''+d.getFullYear()+pad2(d.getMonth()+1)+pad2(d.getDate()); }
 function recSetDateInput(ymd){ $('#recDate').value=ymd.slice(0,4)+'-'+ymd.slice(4,6)+'-'+ymd.slice(6,8); }
 function recDateInputVal(){ var v=$('#recDate').value; return v? v.replace(/-/g,'') : ''; }
-function recDayStartSec(ymd){ return Math.floor(new Date(+ymd.slice(0,4),+ymd.slice(4,6)-1,+ymd.slice(6,8),0,0,0).getTime()/1000); }
-function recSegAtIn(segs, sec){ for(var i=0;i<segs.length;i++){ var s=segs[i]; if(sec>=s.start && sec<s.start+s.dur+2) return s; } for(var j=0;j<segs.length;j++){ if(segs[j].start>=sec) return segs[j]; } return null; }
+function recSegAtIn(segs, sec){ for(var i=0;i<segs.length;i++){ var s=segs[i]; if(sec>=s.start && sec<s.start+s.dur+2) return s; } return null; }
 
 function openRec(){
   var a = selected!==null ? agentById(selected) : null; if(!a) return;
-  var src = (selDvr==='all') ? (a.streams||[]) : (a.streams||[]).filter(function(s){return s.dvrId===selDvr;});
-  recCtx.streams=src.slice().sort(function(x,y){return (x.ch||0)-(y.ch||0);});
-  var sel=$('#recChannel'), prev=sel.value;
-  sel.innerHTML = recCtx.streams.map(function(s){ return '<option value="'+escAttr(s.path)+'">'+escHtml(s.name)+' · CH'+s.ch+'</option>'; }).join('');
-  if(prev && recCtx.streams.some(function(s){return s.path===prev;})) sel.value=prev;
-  recApplyMode();
-}
-function recApplyMode(){
-  var grid = recCtx.mode>1;
-  $('#recStage').style.display = grid?'none':'';
-  $('#recGrid').style.display = grid?'':'none';
-  $('#recChannel').style.display = grid?'none':'';
-  $('#recPlayBtn').style.display = grid?'':'none';
-  if(grid){
-    var n=recCtx.mode*recCtx.mode;
-    recCtx.cells = recCtx.streams.slice(0,n).map(function(s){ return {stream:s.path, name:s.name, ch:s.ch, segs:[], cur:null, video:null}; });
-    var g=$('#recGrid'); g.style.setProperty('--rc', recCtx.mode);
-    g.innerHTML = recCtx.cells.map(function(c,i){ return '<div class="rec-cell"><video muted playsinline preload="auto" data-ci="'+i+'"></video><span class="rec-clabel">'+escHtml(c.name)+' · CH'+c.ch+'</span></div>'; }).join('');
-    recCtx.cells.forEach(function(c,i){ c.video=g.querySelector('video[data-ci="'+i+'"]'); });
-    recCtx.stream = recCtx.cells[0] ? recCtx.cells[0].stream : null;
-  } else {
-    recCtx.stream = $('#recChannel').value || (recCtx.streams[0] && recCtx.streams[0].path);
-  }
-  if(!recCtx.stream){ recRenderEmpty('채널 없음'); return; }
+  if(!recDateInputVal()) recSetDateInput(recDayStr(new Date()));
   recLoadDays();
 }
+// Pick a day that has events/recordings: probe the first stream's available days;
+// if today has nothing recorded, fall back to the newest recorded day.
 function recLoadDays(){
-  fetch(BASE+'/api/rec?stream='+encodeURIComponent(recCtx.stream)).then(function(r){return r.ok?r.json():null;}).then(function(d){
+  var a = selected!==null ? agentById(selected) : null;
+  var probe = a && a.streams && a.streams[0] ? a.streams[0].path : null;
+  if(!probe){ recLoadDay(); return; }
+  fetch(BASE+'/api/rec?stream='+encodeURIComponent(probe)).then(function(r){return r.ok?r.json():null;}).then(function(d){
     var days=(d&&d.days)||[], want=recDateInputVal();
-    if(!want || days.indexOf(want)<0) want = days[0] || recDayStr(new Date());
-    recSetDateInput(want); recLoadDay();
-  }).catch(function(){ recRenderEmpty('녹화 비활성/불러오기 실패'); });
-}
-function loadRecEvents(stream, day){
-  return fetch(BASE+'/api/rec-events?stream='+encodeURIComponent(stream)+'&day='+day, {credentials:'same-origin'})
-    .then(function(r){ return r.ok? r.json() : null; })
-    .then(function(j){ return (j&&Array.isArray(j.events)) ? j.events : []; })
-    .catch(function(){ return []; });
+    if((!want || days.indexOf(want)<0) && days.length) want=days[0];
+    if(want) recSetDateInput(want);
+    recLoadDay();
+  }).catch(function(){ recLoadDay(); });
 }
 function recLoadDay(){
   var day=recDateInputVal(); if(!day) return;
-  recCtx.day=day; recCtx.dayStart=recDayStartSec(day); recClearRange();
-  if(recCtx.mode>1){ recLoadDayGrid(); return; }
-  Promise.all([
-    fetch(BASE+'/api/rec?stream='+encodeURIComponent(recCtx.stream)+'&day='+day).then(function(r){return r.ok?r.json():null;}),
-    loadRecEvents(recCtx.stream, day),
-    loadRecEventList(day)
-  ]).then(function(results){
-    var d=results[0]; recCtx.segs=(d&&d.segments)||[]; recCtx.events=results[1]||[]; recCtx.eventList=results[2]||[];
-    recRenderTimeline(recCtx.segs);
+  recCtx.day=day; recCtx.segCache={};
+  loadRecEventList(day).then(function(list){
+    if(day!==recCtx.day) return; // a newer day was selected mid-flight
+    recCtx.eventList=list||[];
     recRenderEventList();
-    if(recCtx.segs.length){ $('#recEmpty').style.display='none'; } else { recRenderEmpty('이 날짜 녹화 없음'); }
-    if(recCtx.pendingSeek!=null){ var ps=recCtx.pendingSeek; recCtx.pendingSeek=null; if(recCtx.segs.length) recPlayAt(ps); }
-  }).catch(function(){ recRenderEmpty('불러오기 실패'); });
+  });
 }
 function loadRecEventList(day){
   if(!selected) return Promise.resolve([]);
@@ -699,258 +669,86 @@ function loadRecEventList(day){
     .then(function(j){ return (j&&Array.isArray(j.events)) ? j.events : []; })
     .catch(function(){ return []; });
 }
-// ----- vertical time<->pixel mapping for the rail -----
-// The rail body is a fixed-height canvas (REC_PXH px per hour -> 24h tall). Newest
-// time sits at the TOP (y=0 == end of day / 24:00), earliest at the BOTTOM, matching
-// UniFi Protect. frac = (sec-dayStart)/86400 in [0,1]; topPx = (1-frac)*bodyH.
-var REC_PXH = 64;
-function recBodyH(){ return 24*REC_PXH; }
-function recTopForSec(sec){ var frac=(sec-recCtx.dayStart)/86400; return (1-frac)*recBodyH(); }
-function recSecForTop(top){ var frac=1-(top/recBodyH()); return recCtx.dayStart + Math.max(0,Math.min(1,frac))*86400; }
+var REC_KIND_NAMES={person:'사람',vehicle:'차량',motion:'모션',linecross:'라인',intrusion:'침입'};
+// Render the Protect-style event thumbnail grid (newest-first, filtered by kind).
 function recRenderEventList(){
-  var list=$('#recEventList'), filtersEl=$('#recEventFilters'), body=$('#recRailBody');
-  if(!list || !filtersEl) return;
-  if(body){ body.style.height=recBodyH()+'px'; }
-  recRenderAxis();
+  var grid=$('#recEventGrid'), filtersEl=$('#recEventFilters'); if(!grid || !filtersEl) return;
   var events=recCtx.eventList||[];
-  var kinds={};
-  events.forEach(function(ev){ kinds[ev.kind||'motion']=true; });
-  var kindNames={person:'사람',vehicle:'차량',motion:'모션',linecross:'라인',intrusion:'침입'};
+  // filter chips: 전체 + every kind present in the day's events
+  var kinds={}; events.forEach(function(ev){ kinds[ev.kind||'motion']=true; });
   var filters=['<button class="ev-filter-chip'+(recCtx.eventFilter==='all'?' on':'')+'" data-kind="all">전체</button>'];
   ['person','vehicle','motion','linecross','intrusion'].forEach(function(k){
-    if(kinds[k]) filters.push('<button class="ev-filter-chip'+(recCtx.eventFilter===k?' on':'')+'" data-kind="'+k+'">'+(kindNames[k]||k)+'</button>');
+    if(kinds[k]) filters.push('<button class="ev-filter-chip'+(recCtx.eventFilter===k?' on':'')+'" data-kind="'+k+'">'+(REC_KIND_NAMES[k]||k)+'</button>');
   });
   filtersEl.innerHTML=filters.join('');
-  if(!events.length){ list.innerHTML='<div class="rec-events-empty">이벤트 없음</div>'; return; }
+  $('#recMeta').textContent = events.length ? (events.length+'건') : '';
+  if(!events.length){ grid.innerHTML='<div class="ev-grid-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg><b>이벤트 없음</b></div>'; return; }
   var filtered = recCtx.eventFilter==='all' ? events : events.filter(function(ev){ return (ev.kind||'motion')===recCtx.eventFilter; });
-  if(!filtered.length){ list.innerHTML='<div class="rec-events-empty">선택한 종류 이벤트 없음</div>'; return; }
-  list.innerHTML = filtered.map(function(ev){
-    var d=new Date(ev.start*1000), kind=ev.kind||'motion', kindLabel=kindNames[kind]||kind;
+  if(!filtered.length){ grid.innerHTML='<div class="ev-grid-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg><b>선택한 종류 이벤트 없음</b></div>'; return; }
+  grid.innerHTML = filtered.map(function(ev){
+    var d=new Date(ev.start*1000), kind=ev.kind||'motion', kindLabel=REC_KIND_NAMES[kind]||kind;
+    var when=(d.getMonth()+1)+'월 '+pad2(d.getDate())+', '+pad2(d.getHours())+':'+pad2(d.getMinutes());
     var thumbUrl=BASE+'/api/rec-thumb?stream='+encodeURIComponent(ev.stream)+'&t='+ev.start;
-    return '<div class="ev-card ev-k-'+escAttr(kind)+'" style="top:'+recTopForSec(ev.start)+'px" data-stream="'+escAttr(ev.stream)+'" data-start="'+ev.start+'">'+
-      '<img class="ev-thumb" loading="lazy" src="'+escAttr(thumbUrl)+'" alt="'+kindLabel+'">'+
-      '<div class="ev-meta"><div class="ev-header"><span class="ev-name">'+escHtml(ev.name)+' · CH'+ev.ch+'</span>'+
-      '<span class="ev-chip ev-'+escAttr(kind)+'">'+kindLabel+'</span></div>'+
-      '<span class="ev-time">'+pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds())+'</span></div></div>';
+    return '<button class="ev-cell ev-k-'+escAttr(kind)+'" data-stream="'+escAttr(ev.stream)+'" data-start="'+ev.start+'" data-ch="'+escAttr(''+ev.ch)+'">'+
+      '<img class="ev-cellimg" loading="lazy" src="'+escAttr(thumbUrl)+'" alt="'+escAttr(kindLabel)+'">'+
+      '<div class="ev-cellbar"><span class="ev-celltxt"><span class="ev-celltime">'+escHtml(when)+'</span>'+
+      '<span class="ev-cellcam">'+escHtml(ev.name)+' · CH'+escHtml(''+ev.ch)+'</span></span>'+
+      '<span class="ev-kicon ev-'+escAttr(kind)+'"></span></div></button>';
   }).join('');
-  // No thumbnail yet (event in the still-recording segment -> 204) -> show a clean
-  // dark placeholder instead of the browser's broken-image icon.
-  list.querySelectorAll('.ev-thumb').forEach(function(img){
+  // No thumbnail yet (event in the still-recording segment -> 204) -> clean dark placeholder.
+  grid.querySelectorAll('.ev-cellimg').forEach(function(img){
     img.addEventListener('error', function(){ this.onerror=null; this.classList.add('ev-thumb-na'); this.removeAttribute('src'); });
   });
-}
-// hour labels down the axis (24:00 at top -> 00:00 at bottom)
-function recRenderAxis(){
-  var ax=$('#recAxis'); if(!ax) return;
-  var h='';
-  for(var i=0;i<=24;i+=2){ h+='<span style="top:'+((1-i/24)*recBodyH())+'px">'+pad2(i%24)+':00</span>'; }
-  ax.innerHTML=h;
 }
 $('#recEventFilters').addEventListener('click', function(e){
   var b=e.target.closest('[data-kind]'); if(!b) return;
   recCtx.eventFilter=b.dataset.kind;
   recRenderEventList();
 });
-$('#recEventList').addEventListener('click', function(e){
-  var card=e.target.closest('.ev-card'); if(!card) return;
-  var evStream=card.dataset.stream, evStart=+card.dataset.start;
-  // Different camera (single mode): switch channel, then seek AFTER the day's
-  // segments actually load (recCtx.pendingSeek is consumed in recLoadDay/Grid) —
-  // a fixed delay raced the async load and silently dropped the jump.
-  if(recCtx.mode<=1 && evStream && evStream!==recCtx.stream){
-    var sel=$('#recChannel'); if(sel) sel.value=evStream;
-    recCtx.stream=evStream; recCtx.pendingSeek=evStart; recLoadDays();
-  } else if(recCtx.mode>1){
-    recPlayAll(true); recSeekAll(evStart);
-  } else if(recCtx.segs.length){
-    recPlayAt(evStart);
-  }
+// Click a card -> open the event in the modal video player at its timestamp.
+// The grid spans all cameras, so fetch the card's stream segments for the day
+// (memoized), find the segment containing the event time, and seek into it.
+$('#recEventGrid').addEventListener('click', function(e){
+  var card=e.target.closest('.ev-cell'); if(!card) return;
+  openEventModal(card.dataset.stream, +card.dataset.start, card.dataset.ch, card.querySelector('.ev-celltime'));
 });
-function recLoadDayGrid(){
-  var day=recCtx.day, pending=recCtx.cells.length; if(!pending){ recRenderTimeline([]); return; }
-  loadRecEventList(day).then(function(list){ recCtx.eventList=list||[]; recRenderEventList(); });
-  recCtx.cells.forEach(function(c){
-    fetch(BASE+'/api/rec?stream='+encodeURIComponent(c.stream)+'&day='+day).then(function(r){return r.ok?r.json():null;}).then(function(d){
-      c.segs=(d&&d.segments)||[]; c.cur=null;
-    }).catch(function(){ c.segs=[]; }).finally(function(){
-      if(--pending===0){ recRenderTimeline((recCtx.cells[0]&&recCtx.cells[0].segs)||[]); $('#recEmpty').style.display='none';
-        if(recCtx.pendingSeek!=null){ var ps=recCtx.pendingSeek; recCtx.pendingSeek=null; recPlayAll(true); recSeekAll(ps); } }
-    });
+function recSegsForDay(stream, day){
+  var key=stream+'|'+day;
+  if(recCtx.segCache[key]) return Promise.resolve(recCtx.segCache[key]);
+  return fetch(BASE+'/api/rec?stream='+encodeURIComponent(stream)+'&day='+day).then(function(r){return r.ok?r.json():null;})
+    .then(function(d){ var segs=(d&&d.segments)||[]; recCtx.segCache[key]=segs; return segs; })
+    .catch(function(){ return []; });
+}
+function openEventModal(stream, t, ch, timeEl){
+  if(!stream) return;
+  var day=recCtx.day;
+  modalCell.classList.add('bare');
+  modalCell.innerHTML='<div class="ev-modal-wrap"><div class="ev-modal-na">불러오는 중…</div></div>';
+  modal.classList.add('show');
+  recSegsForDay(stream, day).then(function(segs){
+    if(!modal.classList.contains('show')) return; // closed while loading
+    var s=recSegAtIn(segs, t);
+    var wrap=modalCell.querySelector('.ev-modal-wrap'); if(!wrap) return;
+    if(!s){ wrap.innerHTML='<div class="ev-modal-na">해당 시각 녹화 구간 없음</div>'; return; }
+    var offset=Math.max(0, t-s.start);
+    var url=BASE+'/api/rec-file?stream='+encodeURIComponent(stream)+'&name='+encodeURIComponent(s.name);
+    wrap.innerHTML='<video controls autoplay playsinline preload="auto"></video>';
+    var v=wrap.querySelector('video'); recModalVideo=v;
+    v.src=url; v.load();
+    v.onloadedmetadata=function(){ try{ v.currentTime=offset; }catch(e){} v.play().catch(function(){}); };
   });
 }
-function recRenderEmpty(msg){
-  recCtx.segs=[]; recCtx.cur=null; recRenderTimeline([]);
-  var e=$('#recEmpty'); if(e){ e.style.display='flex'; var b=e.querySelector('b'); if(b) b.textContent=msg||'녹화 없음'; }
-  try{ recVideo.removeAttribute('src'); recVideo.load(); }catch(x){}
-  $('#recMeta').textContent=''; $('#recDownload').disabled=true; $('#recPlayhead').style.display='none';
-}
-// Draw the recorded-segment bar vertically on the rail axis (top=24:00, bottom=00:00).
-function recRenderTimeline(segs){
-  var body=$('#recRailBody'); if(body) body.style.height=recBodyH()+'px';
-  recRenderAxis();
-  var track = $('#recVTrack');
-  if(track){
-    track.innerHTML = (segs||[]).map(function(s){
-      var top=recTopForSec(s.start+s.dur), h=Math.max(2, (s.dur/86400)*recBodyH());
-      return '<span class="rec-vseg" style="top:'+top+'px;height:'+h+'px"></span>';
-    }).join('');
-  }
-  // live/현재 위치 marker: end of newest segment (top of the recorded range)
-  var live=$('#recLiveMark');
-  if(live){
-    if(segs && segs.length){ var last=segs[segs.length-1]; live.style.display='block'; live.style.top=recTopForSec(last.start+last.dur)+'px'; }
-    else live.style.display='none';
-  }
-  var tot=(segs||[]).reduce(function(a,s){return a+s.dur;},0);
-  $('#recMeta').textContent = (segs&&segs.length)? ((recCtx.mode>1? recCtx.cells.length+'채널 · ':'')+segs.length+'구간 · '+Math.round(tot/60)+'분') : '';
-}
-function recPlayAt(sec){
-  var s=recSegAtIn(recCtx.segs, sec); if(!s) return;
-  var offset=Math.max(0, sec-s.start); recCtx.cur=s; $('#recDownload').disabled=false; $('#recEmpty').style.display='none';
-  var url=BASE+'/api/rec-file?stream='+encodeURIComponent(recCtx.stream)+'&name='+encodeURIComponent(s.name);
-  if(recVideo.getAttribute('src')!==url){ recVideo.src=url; recVideo.load(); recVideo.onloadedmetadata=function(){ try{recVideo.currentTime=offset;}catch(e){} recVideo.play().catch(function(){}); }; }
-  else { try{recVideo.currentTime=offset;}catch(e){} recVideo.play().catch(function(){}); }
-}
-function recSeekAll(sec){
-  recCtx.master=sec;
-  recCtx.cells.forEach(function(c){
-    var s=recSegAtIn(c.segs, sec), v=c.video; if(!v) return;
-    if(!s){ try{ v.removeAttribute('src'); v.load(); }catch(e){} c.cur=null; return; }
-    var offset=Math.max(0, sec-s.start); c.cur=s;
-    var url=BASE+'/api/rec-file?stream='+encodeURIComponent(c.stream)+'&name='+encodeURIComponent(s.name);
-    if(v.getAttribute('src')!==url){ v.src=url; v.load(); v.onloadedmetadata=function(){ try{v.currentTime=offset;}catch(e){} if(recCtx.playing) v.play().catch(function(){}); }; }
-    else { try{v.currentTime=offset;}catch(e){} if(recCtx.playing) v.play().catch(function(){}); }
-  });
-  recUpdatePlayhead(sec);
-}
-function recUpdatePlayhead(sec){ var ph=$('#recPlayhead'); if(!ph) return; ph.style.display='block'; ph.style.top=recTopForSec(sec)+'px'; }
-function recPlayAll(p){
-  recCtx.playing=p; var b=$('#recPlayBtn'); if(b) b.textContent = p?'❚❚':'▶';
-  recCtx.cells.forEach(function(c){ if(c.video){ if(p) c.video.play().catch(function(){}); else c.video.pause(); } });
-}
-if($('#recPlayBtn')) $('#recPlayBtn').addEventListener('click', function(){ recPlayAll(!recCtx.playing); });
-$('#recLayout').addEventListener('click', function(e){
-  var b=e.target.closest('[data-cols]'); if(!b) return;
-  $$('#recLayout button').forEach(function(x){ x.classList.toggle('active', x===b); });
-  recPlayAll(false); recStop(); recCtx.mode=+b.dataset.cols; openRec();
-});
-// ----- drag a vertical range on the axis bar to export, or click to play -----
-function recClearRange(){ recCtx.range=null; var x=$('#recExport'); if(x) x.style.display='none'; }
-function recPlayClick(sec){
-  if(recCtx.mode>1){ recPlayAll(true); recSeekAll(sec); } else { if(recCtx.segs.length) recPlayAt(sec); }
-}
-var recDrag=null, recAxisBar=$('#recAxisBar');
-function recSecAtY(rect, clientY){
-  var top=Math.max(0,Math.min(rect.height,(clientY-rect.top)));
-  // rail body scroll offset already folded in: rect is the bar's own viewport rect,
-  // and the bar spans the whole body, so its top == body top in scroll space.
-  return recSecForTop(top);
-}
-if(recAxisBar) recAxisBar.addEventListener('mousedown', function(e){
-  if(e.button!==0) return;
-  recDrag={ y0:e.clientY, rect:this.getBoundingClientRect(), moved:false };
-  e.preventDefault();
-});
-document.addEventListener('mousemove', function(e){
-  if(!recDrag) return;
-  if(Math.abs(e.clientY-recDrag.y0)>4) recDrag.moved=true;
-});
-document.addEventListener('mouseup', function(e){
-  if(!recDrag) return; var rect=recDrag.rect, dr=recDrag; recDrag=null;
-  var sec=recSecAtY(rect, e.clientY);
-  if(!dr.moved){ recClearRange(); recPlayClick(sec); return; }
-  var s0=recSecAtY(rect, dr.y0);
-  var s=Math.round(Math.min(s0,sec)), en=Math.round(Math.max(s0,sec));
-  if(en-s < 3){ recClearRange(); return; }
-  if(en-s > 3600){ en=s+3600; }
-  recCtx.range={start:s, end:en};
-  var d0=new Date(s*1000), d1=new Date(en*1000), ex=$('#recExport');
-  ex.style.display=''; ex.textContent='구간 내보내기 '+pad2(d0.getHours())+':'+pad2(d0.getMinutes())+'~'+pad2(d1.getHours())+':'+pad2(d1.getMinutes());
-});
-$('#recExport').addEventListener('click', function(){
-  if(!recCtx.range) return;
-  var st = recCtx.mode>1 ? (recCtx.cells[0]&&recCtx.cells[0].stream) : recCtx.stream;
-  if(!st) return;
-  window.open(BASE+'/api/rec-export?stream='+encodeURIComponent(st)+'&start='+recCtx.range.start+'&end='+recCtx.range.end,'_blank');
-});
-// ----- hover scrub preview (vertical: anchored to the rail, follows cursor Y) -----
-var recPrevVid=$('#recPrevVid');
-function recPreviewAt(sec, clientY){
-  var segs = recCtx.mode>1 ? ((recCtx.cells[0]&&recCtx.cells[0].segs)||[]) : recCtx.segs;
-  var st = recCtx.mode>1 ? (recCtx.cells[0]&&recCtx.cells[0].stream) : recCtx.stream;
-  var s = (st && segs.length) ? recSegAtIn(segs, sec) : null;
-  var pv=$('#recPreview'); if(!pv) return;
-  if(!s){ pv.style.display='none'; return; }
-  pv.style.display='block';
-  if(clientY!=null){ var rr=$('#recRail').getBoundingClientRect(); pv.style.top=(clientY-rr.top)+'px'; }
-  var off=Math.max(0, sec-s.start), url=BASE+'/api/rec-file?stream='+encodeURIComponent(st)+'&name='+encodeURIComponent(s.name);
-  if(recPrevVid.getAttribute('src')!==url){ recPrevVid._want=off; recPrevVid.src=url; recPrevVid.load(); recPrevVid.onloadedmetadata=function(){ try{recPrevVid.currentTime=recPrevVid._want;}catch(e){} }; }
-  else if(!recPrevVid._busy && Math.abs(recPrevVid.currentTime-off)>1){ recPrevVid._busy=true; recPrevVid._want=off; try{recPrevVid.currentTime=off;}catch(e){} }
-  else { recPrevVid._want=off; }
-  var d=new Date(sec*1000); $('#recPrevTime').textContent=pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds());
-}
-if(recPrevVid) recPrevVid.addEventListener('seeked', function(){ recPrevVid._busy=false; if(Math.abs(recPrevVid.currentTime-recPrevVid._want)>1){ recPrevVid._busy=true; try{recPrevVid.currentTime=recPrevVid._want;}catch(e){} } });
-var recHover=null, recHoverRAF=0;
-if(recAxisBar) recAxisBar.addEventListener('mousemove', function(e){
-  recHover={ y:e.clientY, rect:this.getBoundingClientRect() };
-  if(recHoverRAF) return; // coalesce per-pixel events to one update per animation frame
-  recHoverRAF=requestAnimationFrame(function(){
-    recHoverRAF=0; if(!recHover) return;
-    var sec=recSecAtY(recHover.rect, recHover.y);
-    recPreviewAt(sec, recHover.y);
-  });
-});
-if(recAxisBar) recAxisBar.addEventListener('mouseleave', function(){ if(recHoverRAF){ cancelAnimationFrame(recHoverRAF); recHoverRAF=0; } recHover=null; var pv=$('#recPreview'); if(pv) pv.style.display='none'; });
-function recNextSeg(segs, cur){
-  if(!cur || !segs) return null;
-  for(var i=0;i<segs.length;i++){ if(segs[i].start>cur.start) return segs[i]; }
-  return null;
-}
-function recFileURL(stream, name){ return BASE+'/api/rec-file?stream='+encodeURIComponent(stream)+'&name='+encodeURIComponent(name); }
-// Hidden double-buffer: warm the next segment into the HTTP cache near the segment
-// boundary so auto-advance (and the next click) hit cache instead of cold-opening.
-var recWarm=document.createElement('video'); recWarm.muted=true; recWarm.preload='auto';
-recWarm.style.cssText='position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;';
-var recWarmURL=null;
-function recWarmNext(url){ if(!url||url===recWarmURL) return; recWarmURL=url; try{ if(!recWarm.parentNode) document.body.appendChild(recWarm); recWarm.src=url; recWarm.load(); }catch(e){} }
-recVideo.addEventListener('timeupdate', function(){
-  if(recCtx.mode>1 || !recCtx.cur) return;
-  recUpdatePlayhead(recCtx.cur.start+recVideo.currentTime);
-  if(recCtx.cur.dur && recVideo.currentTime > recCtx.cur.dur-15){
-    // only warm a FINALIZED next segment — the live (still-recording) one is served
-    // no-cache so warming it caches nothing (matches server recFinalizeQuiesce=90s).
-    var nx=recNextSeg(recCtx.segs, recCtx.cur);
-    if(nx && Date.now()/1000 > nx.start+(nx.dur||300)+90) recWarmNext(recFileURL(recCtx.stream, nx.name));
-  }
-});
-recVideo.addEventListener('ended', function(){
-  if(recCtx.mode>1 || !recCtx.cur) return;
-  var next=recNextSeg(recCtx.segs, recCtx.cur);
-  if(next) recPlayAt(next.start);
-});
-setInterval(function(){
-  if(curTab!=='rec' || recCtx.mode<2 || !recCtx.playing) return;
-  var ref=recCtx.cells[0];
-  if(ref && ref.cur && ref.video && !ref.video.paused && ref.video.readyState>1){ recCtx.master = ref.cur.start + ref.video.currentTime; }
-  else { recCtx.master += 1; }
-  recUpdatePlayhead(recCtx.master);
-  recCtx.cells.forEach(function(c){
-    if(!c.video) return; var want=recCtx.master;
-    if(c.cur && want>=c.cur.start && want<c.cur.start+c.cur.dur+1){
-      if(Math.abs(c.video.currentTime-(want-c.cur.start))>(recCtx.mode>=3?0.7:0.4)){ try{c.video.currentTime=want-c.cur.start;}catch(e){} } // wider deadband on big grids avoids per-tick seek thrash on lagging cells
-    } else {
-      var s=recSegAtIn(c.segs, want);
-      if(s && (!c.cur || s.name!==c.cur.name)){ c.cur=s; var off=Math.max(0,want-s.start); c.video.src=BASE+'/api/rec-file?stream='+encodeURIComponent(c.stream)+'&name='+encodeURIComponent(s.name); c.video.load(); c.video.onloadedmetadata=(function(v,o){return function(){ try{v.currentTime=o;}catch(e){} if(recCtx.playing) v.play().catch(function(){}); };})(c.video,off); }
-    }
-  });
-}, 1000);
-function recStop(){ try{ recVideo.pause(); }catch(e){} recCtx.playing=false; (recCtx.cells||[]).forEach(function(c){ try{c.video&&c.video.pause();}catch(e){} }); }
-$('#recChannel').addEventListener('change', function(){ recCtx.stream=this.value; recLoadDays(); });
 $('#recDate').addEventListener('change', recLoadDay);
-function recShiftDay(delta){ var day=recDateInputVal(); if(!day) return; var d=new Date(recDayStartSec(day)*1000); d.setDate(d.getDate()+delta); recSetDateInput(recDayStr(d)); recLoadDay(); }
+function recShiftDay(delta){
+  var day=recDateInputVal(); if(!day) return;
+  var d=new Date(+day.slice(0,4), +day.slice(4,6)-1, +day.slice(6,8));
+  d.setDate(d.getDate()+delta); recSetDateInput(recDayStr(d)); recLoadDay();
+}
 $('#recPrevDay').addEventListener('click', function(){ recShiftDay(-1); });
 $('#recNextDay').addEventListener('click', function(){ recShiftDay(1); });
-$('#recDownload').addEventListener('click', function(){ if(recCtx.cur) window.open(BASE+'/api/rec-file?stream='+encodeURIComponent(recCtx.stream)+'&name='+encodeURIComponent(recCtx.cur.name)+'&dl=1','_blank'); });
+// No live playback on this tab; recStop tears down only the event modal video.
+var recModalVideo=null;
+function recStop(){ if(recModalVideo){ try{ recModalVideo.pause(); recModalVideo.removeAttribute('src'); recModalVideo.load(); }catch(e){} recModalVideo=null; } }
 /* ============================================================ RELAY / CONN */
 var relayDownAt=Date.now();
 function renderConn(){

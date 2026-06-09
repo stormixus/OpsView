@@ -115,7 +115,7 @@
         <nav class="tabs">
           <button class="tab active" data-tab="status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>상태</button>
           <button class="tab" data-tab="live"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M10 9.5l5 2.5-5 2.5z" fill="currentColor" stroke="none"/></svg>라이브</button>
-          <button class="tab" data-tab="rec"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg>녹화</button>
+          <button class="tab" data-tab="rec"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg>이벤트</button>
         </nav>
 
         <!-- DVR/NVR device selector (shown when an agent has more than one device) -->
@@ -210,60 +210,18 @@
           <div class="grid-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 5l20 14"/></svg><b>표시할 채널 없음</b><span>활성 CCTV 스트림이 없습니다</span></div>
         </section>
 
-        <!-- RECORDINGS PANE (Protect-style: video left, vertical event rail right) -->
+        <!-- EVENTS PANE (Protect-style: responsive event thumbnail grid) -->
         <section class="pane" id="rec-pane">
-          <div class="rec-bar">
-            <div class="rec-layout" id="recLayout">
-              <button data-cols="1" class="active">단일</button><button data-cols="2">2×2</button><button data-cols="3">3×3</button><button data-cols="4">4×4</button>
+          <div class="ev-bar">
+            <div class="ev-filters" id="recEventFilters"></div>
+            <div class="rec-datenav">
+              <button class="rec-nav" id="recPrevDay" title="이전 날">‹</button>
+              <input type="date" id="recDate" class="rec-date">
+              <button class="rec-nav" id="recNextDay" title="다음 날">›</button>
             </div>
-            <div class="rec-src">
-              <select id="recChannel" class="rec-sel" title="채널"></select>
-              <div class="rec-datenav">
-                <button class="rec-nav" id="recPrevDay" title="이전 날">‹</button>
-                <input type="date" id="recDate" class="rec-date">
-                <button class="rec-nav" id="recNextDay" title="다음 날">›</button>
-              </div>
-            </div>
-            <button class="rec-play" id="recPlayBtn" title="재생/일시정지" style="display:none;">▶</button>
             <span class="rec-meta" id="recMeta"></span>
-            <div class="rec-actions">
-              <button id="recExport" class="rec-dl rec-dl-go" style="display:none;">구간 내보내기</button>
-              <button id="recDownload" class="rec-dl" disabled>세그먼트 저장</button>
-            </div>
           </div>
-          <div class="rec-split">
-            <!-- LEFT: video + multicam grid -->
-            <div class="rec-left">
-              <div class="rec-stage" id="recStage">
-                <video id="recVideo" class="rec-video" controls playsinline preload="auto"></video>
-                <div class="rec-empty" id="recEmpty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg><b>이 날짜 녹화 없음</b><span>RELAY_REC_DIR 설정 + 다른 날짜 선택</span></div>
-              </div>
-              <div class="rec-grid" id="recGrid" style="display:none;"></div>
-            </div>
-            <!-- RIGHT: one vertical rail = time axis + recorded bar + event filmstrip -->
-            <div class="rec-rail" id="recRail">
-              <div class="rec-rail-head">
-                <h3>녹화 · 이벤트</h3>
-                <div class="rec-events-filters" id="recEventFilters"></div>
-              </div>
-              <div class="rec-rail-scroll" id="recRailScroll">
-                <div class="rec-rail-body" id="recRailBody">
-                  <!-- vertical time axis (hour labels) -->
-                  <div class="rec-axis" id="recAxis"></div>
-                  <!-- recorded-segment bar + playhead + live marker -->
-                  <div class="rec-axisbar" id="recAxisBar">
-                    <div class="rec-vtrack" id="recVTrack"></div>
-                    <div class="rec-vplayhead" id="recPlayhead"></div>
-                    <div class="rec-vlive" id="recLiveMark"></div>
-                  </div>
-                  <!-- event filmstrip rows positioned by time -->
-                  <div class="rec-strip" id="recEventList"></div>
-                </div>
-              </div>
-              <!-- hover scrub preview (anchored to rail) -->
-              <div class="rec-preview" id="recPreview"><video id="recPrevVid" muted playsinline preload="auto"></video><span id="recPrevTime"></span></div>
-            </div>
-          </div>
+          <div class="ev-grid" id="recEventGrid"></div>
         </section>
       </section>
 

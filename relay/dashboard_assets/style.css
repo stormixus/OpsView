@@ -525,115 +525,56 @@ button{font-family:inherit; cursor:pointer;}
 .tn-restore{padding:5px 11px; border-radius:7px; border:1px solid var(--border-strong); background:transparent; color:var(--accent-2); font-size:12px; font-weight:700; cursor:pointer;}
 .tn-restore:hover{background:color-mix(in srgb,var(--accent-2) 14%, transparent);}
 
-/* ============================ recordings (녹화) review ============================ */
-.rec-bar{display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;}
-/* segmented layout toggle */
-.rec-layout{display:inline-flex; background:var(--panel-2); border:1px solid var(--border); border-radius:10px; padding:3px; gap:2px;}
-.rec-layout button{border:0; background:transparent; color:var(--text-faint); font-size:12.5px; font-weight:700; padding:6px 12px; border-radius:7px; cursor:pointer; transition:background .12s ease, color .12s ease;}
-.rec-layout button:hover{color:var(--text);}
-.rec-layout button.active{background:var(--accent-2); color:var(--on-accent); box-shadow:0 1px 4px rgba(0,0,0,.18);}
-/* source: channel + date nav grouped */
-.rec-src{display:inline-flex; align-items:center; gap:8px;}
-.rec-sel{min-width:190px; background:var(--field); border:1px solid var(--border-strong); color:var(--text); border-radius:10px; padding:8px 12px; font-size:13px; font-weight:600; outline:none; cursor:pointer;}
-.rec-sel:focus{border-color:var(--accent-2);}
-.rec-datenav{display:inline-flex; align-items:center; background:var(--field); border:1px solid var(--border-strong); border-radius:10px; overflow:hidden;}
+/* ============================ events (이벤트) — Protect-style thumbnail grid ============================ */
+/* control row: filter chips + date nav + meta */
+.ev-bar{display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;}
+.ev-filters{display:flex; flex-wrap:wrap; gap:6px;}
+.ev-filter-chip{padding:6px 13px; border-radius:999px; border:1px solid var(--border); background:var(--panel-2); color:var(--text-muted); font-size:12.5px; font-weight:600; cursor:pointer; transition:.12s ease;}
+.ev-filter-chip:hover{color:var(--text); border-color:var(--border-strong);}
+.ev-filter-chip.on{background:var(--accent); color:var(--on-accent); border-color:var(--accent);}
+.rec-datenav{display:inline-flex; align-items:center; background:var(--field); border:1px solid var(--border-strong); border-radius:10px; overflow:hidden; margin-left:auto;}
 .rec-date{background:transparent; border:0; color:var(--text); padding:8px 8px; font-size:13px; font-weight:600; outline:none; font-family:var(--font-mono);}
 .rec-date::-webkit-calendar-picker-indicator{opacity:.55; cursor:pointer;}
 .rec-nav{width:32px; height:36px; border:0; background:transparent; color:var(--text-muted); font-size:18px; line-height:1; cursor:pointer; transition:background .12s ease, color .12s ease;}
 .rec-nav:hover{color:var(--text); background:var(--panel-2);}
-.rec-play{width:38px; height:38px; border-radius:10px; border:1px solid var(--border-strong); background:var(--panel-2); color:var(--text); font-size:14px; line-height:1; cursor:pointer; transition:border-color .12s ease, color .12s ease;}
-.rec-play:hover{border-color:var(--accent-2); color:var(--accent-2);}
 .rec-meta{font-size:12.5px; color:var(--text-faint); font-weight:600; font-family:var(--font-mono);}
-.rec-actions{display:inline-flex; gap:8px; margin-left:auto;}
-.rec-dl{padding:8px 15px; border-radius:10px; border:1px solid var(--border-strong); background:transparent; color:var(--text-muted); font-size:13px; font-weight:700; cursor:pointer; transition:.12s ease;}
-.rec-dl:hover:not(:disabled){color:var(--text); border-color:var(--text-faint);}
-.rec-dl:disabled{opacity:.4; cursor:default;}
-.rec-dl-go{background:color-mix(in srgb,var(--accent) 16%, transparent); border-color:color-mix(in srgb,var(--accent) 55%, transparent); color:var(--accent);}
-.rec-dl-go:hover{background:color-mix(in srgb,var(--accent) 26%, transparent); color:var(--accent);}
 
-/* ===== Protect-style two-pane recording layout ===== */
-/* rec-pane fills the agent view height; rail scrolls, video pane does not. */
+/* the grid: responsive, scrollable, fills the pane */
 #rec-pane.active{display:flex; flex-direction:column; height:calc(100vh - 230px); min-height:520px;}
-.rec-split{flex:1; min-height:0; display:flex; gap:16px; margin-top:4px;}
-.rec-left{flex:1; min-width:0; display:flex; flex-direction:column; min-height:0;}
+.ev-grid{flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); grid-auto-rows:max-content; gap:10px; padding:2px 2px 16px; align-content:start;}
+/* empty / filtered-empty state spans the whole grid */
+.ev-grid-empty{grid-column:1/-1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; min-height:240px; color:var(--text-faint); text-align:center;}
+.ev-grid-empty svg{width:40px; height:40px; opacity:.6;}
+.ev-grid-empty b{font-size:15px; color:var(--text-muted); font-weight:700;}
 
-/* stage (single) + grid (multi) — same framed viewport look */
-.rec-stage,.rec-grid{position:relative; width:100%; flex:1; min-height:0; background:radial-gradient(120% 120% at 50% 0%, #0b0f15, #05070a); border:1px solid var(--border-strong); border-radius:var(--r-lg); overflow:hidden; box-shadow:inset 0 0 0 1px rgba(255,255,255,.02), 0 6px 22px rgba(0,0,0,.28);}
-.rec-stage{display:flex; align-items:center; justify-content:center;}
-.rec-video{width:100%; height:100%; object-fit:contain; background:#000;}
-.rec-empty{position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; gap:10px; color:var(--text-faint); text-align:center; padding:16px;}
-.rec-empty svg{width:38px; height:38px; opacity:.7;}
-.rec-empty b{font-size:15px; color:var(--text-muted); font-weight:700;}
-.rec-empty span{font-size:12px;}
+/* event card: thumbnail fills the cell, bottom gradient bar */
+.ev-cell{position:relative; display:block; width:100%; padding:0; aspect-ratio:16/9; border-radius:var(--r-sm); overflow:hidden; border:1px solid var(--border); background:#05070a; cursor:pointer; transition:transform .12s ease, border-color .12s ease, box-shadow .12s ease;}
+.ev-cell:hover{transform:translateY(-2px); border-color:var(--border-strong); box-shadow:0 8px 22px rgba(0,0,0,.4);}
+.ev-cell:focus-visible{outline:2px solid var(--accent-2); outline-offset:2px;}
+.ev-cellimg{display:block; width:100%; height:100%; object-fit:cover; background:#05070a;}
+/* no thumbnail yet (event in still-recording segment) -> dark placeholder + glyph */
+.ev-thumb-na{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' fill='none' stroke='%23394150' stroke-width='1.6'%3E%3Crect x='3' y='5' width='20' height='16' rx='2'/%3E%3Cpath d='M3 17l5-5 4 4 4-5 7 7'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:center; background-size:34px;}
+/* bottom overlay: time + camera + kind dot */
+.ev-cellbar{position:absolute; left:0; right:0; bottom:0; padding:18px 10px 8px; display:flex; align-items:flex-end; gap:8px; background:linear-gradient(transparent, rgba(0,0,0,.82)); color:#fff; pointer-events:none;}
+.ev-cellbar .ev-celltxt{flex:1; min-width:0; display:flex; flex-direction:column; gap:1px;}
+.ev-celltime{font-size:12.5px; font-weight:700; letter-spacing:.2px; line-height:1.2;}
+.ev-cellcam{font-size:11px; color:rgba(255,255,255,.66); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.ev-kicon{flex:none; width:9px; height:9px; border-radius:50%; margin-bottom:3px; box-shadow:0 0 0 2px rgba(0,0,0,.35);}
+.ev-kicon.ev-person{background:#79b8ff;}
+.ev-kicon.ev-vehicle{background:#c8a6ff;}
+.ev-kicon.ev-motion{background:#e8c25a;}
+.ev-kicon.ev-linecross{background:#79b8ff;}
+.ev-kicon.ev-intrusion{background:#f87171;}
 
-/* multi-cam grid */
-.rec-grid{display:grid; grid-template-columns:repeat(var(--rc,2),1fr); grid-auto-rows:1fr; gap:8px; padding:8px;}
-.rec-cell{position:relative; background:#000; border-radius:9px; overflow:hidden; box-shadow:0 0 0 1px var(--border);}
-.rec-cell video{width:100%; height:100%; object-fit:contain; background:#000;}
-.rec-clabel{position:absolute; left:7px; bottom:7px; background:rgba(0,0,0,.62); color:#fff; font-size:11px; font-weight:600; font-family:var(--font-mono); padding:2px 8px; border-radius:6px; pointer-events:none; max-width:calc(100% - 14px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+/* modal event video player */
+.ev-modal-wrap{display:flex; flex-direction:column; width:100%; height:100%;}
+.ev-modal-wrap video{width:100%; height:100%; object-fit:contain; background:#000; border-radius:10px;}
+.ev-modal-na{display:flex; align-items:center; justify-content:center; width:100%; min-height:240px; color:var(--text-faint); font-size:14px;}
 
-/* ===== vertical event rail (time axis + recorded bar + event filmstrip) ===== */
-.rec-rail{position:relative; flex:none; width:360px; display:flex; flex-direction:column; min-height:0; background:var(--panel); border:1px solid var(--border); border-radius:var(--r-lg); overflow:hidden;}
-.rec-rail-head{display:flex; flex-direction:column; gap:8px; padding:12px 14px; border-bottom:1px solid var(--border); flex:none;}
-.rec-rail-head h3{margin:0; font-size:13.5px; font-weight:700; letter-spacing:.3px;}
-.rec-events-filters{display:flex; flex-wrap:wrap; gap:6px;}
-.ev-filter-chip{padding:4px 10px; border-radius:999px; border:1px solid var(--border); background:var(--panel-2); color:var(--text-muted); font-size:11.5px; font-weight:600; cursor:pointer; transition:.12s ease;}
-.ev-filter-chip:hover{color:var(--text); border-color:var(--border-strong);}
-.ev-filter-chip.on{background:var(--accent); color:var(--on-accent); border-color:var(--accent);}
-.rec-rail-scroll{flex:1; min-height:0; overflow-y:auto; overflow-x:hidden;}
-/* Body is a fixed-height canvas (set in JS) so events can be absolutely
-   positioned by time. Left gutter = axis labels; then the recorded bar; then
-   the event filmstrip column. */
-.rec-rail-body{position:relative; padding:10px 12px 10px 0;}
-/* time axis: hour labels down the left gutter, newest at top */
-.rec-axis{position:absolute; left:0; top:0; bottom:0; width:54px; pointer-events:none;}
-.rec-axis span{position:absolute; left:0; right:6px; transform:translateY(-50%); text-align:right; font-size:10px; color:var(--text-faint); font-family:var(--font-mono);}
-.rec-axis span::after{content:""; position:absolute; right:-6px; top:50%; width:5px; height:1px; background:var(--border-strong);}
-/* recorded-segment bar (thin vertical strip just right of the axis) */
-.rec-axisbar{position:absolute; left:56px; top:0; bottom:0; width:10px; background:var(--panel-2); border:1px solid var(--border); border-radius:6px; cursor:pointer; overflow:visible;}
-.rec-vtrack{position:absolute; inset:0; border-radius:6px; overflow:hidden;}
-.rec-vseg{position:absolute; left:1px; right:1px; border-radius:3px; background:linear-gradient(90deg, color-mix(in srgb,var(--accent-2) 92%, transparent), color-mix(in srgb,var(--accent) 78%, transparent)); box-shadow:0 1px 5px color-mix(in srgb,var(--accent) 38%, transparent);}
-.rec-vplayhead{position:absolute; left:-3px; right:-3px; height:2px; background:#fff; box-shadow:0 0 10px rgba(255,255,255,.8); display:none; pointer-events:none; z-index:4; border-radius:2px;}
-.rec-vplayhead::before{content:""; position:absolute; left:-5px; top:50%; transform:translateY(-50%); width:10px; height:10px; border-radius:50%; background:#fff; box-shadow:0 0 8px rgba(255,255,255,.7);}
-.rec-vlive{position:absolute; left:-4px; right:-4px; top:0; height:2px; background:var(--accent); display:none; z-index:3; border-radius:2px;}
-.rec-vlive::after{content:"라이브"; position:absolute; right:14px; top:50%; transform:translateY(-50%); font-size:9px; font-weight:700; color:var(--accent); font-family:var(--font-mono); white-space:nowrap;}
-/* event filmstrip: rows absolutely positioned by their time */
-.rec-strip{position:relative; margin-left:80px;}
-.ev-card{position:absolute; left:0; right:0; transform:translateY(-50%); display:flex; gap:9px; padding:6px; border-radius:var(--r-sm); background:var(--panel-2); border:1px solid var(--border); cursor:pointer; transition:border-color .12s ease, background .12s ease;}
-.ev-card:hover{border-color:var(--border-strong); background:color-mix(in srgb,var(--accent-2) 8%, var(--panel-2)); z-index:5;}
-.ev-card::before{content:""; position:absolute; left:-26px; top:50%; transform:translateY(-50%); width:8px; height:8px; border-radius:50%; background:var(--warn); box-shadow:0 0 0 3px var(--panel);}
-.ev-card.ev-k-person::before{background:#79b8ff;}
-.ev-card.ev-k-vehicle::before{background:#c8a6ff;}
-.ev-card.ev-k-motion::before{background:var(--warn);}
-.ev-card.ev-k-linecross::before{background:#79b8ff;}
-.ev-card.ev-k-intrusion::before{background:#f87171;}
-.ev-thumb{width:104px; height:59px; flex:none; border-radius:var(--r-sm); object-fit:cover; background:#05070a; border:1px solid var(--border);}
-/* No thumbnail yet (event still in the recording segment): clean dark box + glyph. */
-.ev-thumb-na{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' fill='none' stroke='%23394150' stroke-width='1.6'%3E%3Crect x='3' y='5' width='20' height='16' rx='2'/%3E%3Cpath d='M3 17l5-5 4 4 4-5 7 7'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:center; background-size:24px;}
-.ev-meta{flex:1; min-width:0; display:flex; flex-direction:column; gap:5px; justify-content:center;}
-.ev-header{display:flex; align-items:center; gap:6px; flex-wrap:wrap;}
-.ev-name{font-size:12px; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0;}
-.ev-chip{display:inline-flex; align-items:center; padding:1px 7px; border-radius:6px; font-size:10.5px; font-weight:700; letter-spacing:.3px; flex:none;}
-.ev-chip.ev-person{background:rgba(88,166,255,.14); color:#79b8ff; border:1px solid rgba(88,166,255,.3);}
-.ev-chip.ev-vehicle{background:rgba(163,113,247,.16); color:#c8a6ff; border:1px solid rgba(163,113,247,.32);}
-.ev-chip.ev-motion{background:var(--warn-bg); color:#e8c25a; border:1px solid color-mix(in srgb,var(--warn) 40%, transparent);}
-.ev-chip.ev-linecross{background:rgba(88,166,255,.14); color:#79b8ff; border:1px solid rgba(88,166,255,.3);}
-.ev-chip.ev-intrusion{background:var(--bad-bg); color:#f87171; border:1px solid color-mix(in srgb,var(--bad) 40%, transparent);}
-.ev-time{font-family:var(--font-mono); font-size:11px; color:var(--text-muted); font-weight:600;}
-.rec-events-empty{position:absolute; left:80px; right:0; top:18px; text-align:center; font-size:13px; color:var(--text-faint);}
-
-/* hover scrub preview (anchored inside rail, left of the rail) */
-.rec-preview{position:absolute; right:calc(100% + 10px); transform:translateY(-50%); width:220px; background:#000; border:1px solid var(--border-strong); border-radius:11px; overflow:hidden; display:none; pointer-events:none; z-index:30; box-shadow:0 12px 30px rgba(0,0,0,.6);}
-.rec-preview::after{content:""; position:absolute; right:-7px; top:50%; transform:translateY(-50%); border:7px solid transparent; border-left-color:var(--border-strong); border-right:0;}
-.rec-preview video{width:100%; height:124px; object-fit:contain; background:#000; display:block;}
-.rec-preview span{position:absolute; left:7px; bottom:7px; background:rgba(0,0,0,.74); color:#fff; font-size:10.5px; font-weight:700; font-family:var(--font-mono); padding:2px 7px; border-radius:5px;}
-
-/* narrow: stack rail under the video */
+/* narrow */
 @media (max-width:1000px){
   #rec-pane.active{height:auto;}
-  .rec-split{flex-direction:column;}
-  .rec-rail{width:auto; height:60vh;}
-  .rec-stage,.rec-grid{aspect-ratio:16/9; flex:none;}
+  .ev-grid{grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));}
 }
 
 /* ============================ 관리 (manage: 지점 / 알림 / 보안) ============================ */
