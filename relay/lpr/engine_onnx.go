@@ -29,17 +29,10 @@ func initORT(libPath string) error {
 type Engine struct {
 	cfg         Config
 	plateCfg    PlateConfig
-	detSess     *ort.AdvancedSession
-	ocrSess     *ort.AdvancedSession
-	detIn       *ort.Tensor[float32]
-	detOut      *ort.Tensor[float32]
-	ocrIn       *ort.Tensor[uint8]
-	ocrOut      *ort.Tensor[float32]
+	detSess     *ort.DynamicAdvancedSession
+	ocrSess     *ort.DynamicAdvancedSession
 	detSize     int
-	detInName   string
-	detOutName  string
-	ocrInName   string
-	ocrOutName  string
+	ocrOutCount int
 }
 
 func newEngine(cfg Config) (Recognizer, error) {
@@ -77,36 +70,15 @@ func (e *Engine) initDetector() error {
 	if len(inputs) == 0 || len(outputs) == 0 {
 		return fmt.Errorf("detector model has no inputs/outputs")
 	}
-	e.detInName = inputs[0].Name
-	e.detOutName = outputs[0].Name
 	shape := inputs[0].Dimensions
-	if len(shape) != 4 || shape[2] != shape[3] {
+	if len(shape) != 4 || shape[2] != shape[3] || shape[2] <= 0 {
 		return fmt.Errorf("detector expects square NCHW input, got %v", shape)
 	}
 	e.detSize = int(shape[2])
-	n := shape[0] * shape[1] * shape[2] * shape[3]
-	e.detIn, err = ort.NewEmptyTensor[float32](shape)
-	if err != nil {
-		return err
-	}
-	outShape := outputs[0].Dimensions
-	if len(outShape) == 3 {
-		outShape = []int64{outShape[0] * outShape[1], outShape[2]}
-	}
-	if len(outShape) != 2 {
-		return fmt.Errorf("unexpected detector output shape %v", outputs[0].Dimensions)
-	}
-	e.detOut, err = ort.NewEmptyTensor[float32](outShape)
-	if err != nil {
-		return err
-	}
-	_ = n
-	e.detSess, err = ort.NewAdvancedSession(
+	e.detSess, err = ort.NewDynamicAdvancedSession(
 		e.cfg.DetectorONNX,
-		[]string{e.detInName},
-		[]string{e.detOutName},
-		[]ort.Value{e.detIn},
-		[]ort.Value{e.detOut},
+		[]string{inputs[0].Name},
+		[]string{outputs[0].Name},
 		nil,
 	)
 	return err
@@ -120,30 +92,15 @@ func (e *Engine) initOCR() error {
 	if len(inputs) == 0 || len(outputs) == 0 {
 		return fmt.Errorf("ocr model has no inputs/outputs")
 	}
-	e.ocrInName = inputs[0].Name
-	e.ocrOutName = outputs[0].Name
-	h := int64(e.plateCfg.ImgHeight)
-	w := int64(e.plateCfg.ImgWidth)
-	ch := int64(3)
-	if e.plateCfg.ImageColorMode == "grayscale" {
-		ch = 1
+	outNames := make([]string, len(outputs))
+	for i, o := range outputs {
+		outNames[i] = o.Name
 	}
-	inShape := ort.NewShape(1, h, w, ch)
-	e.ocrIn, err = ort.NewEmptyTensor[uint8](inShape)
-	if err != nil {
-		return err
-	}
-	outShape := outputs[0].Dimensions
-	e.ocrOut, err = ort.NewEmptyTensor[float32](outShape)
-	if err != nil {
-		return err
-	}
-	e.ocrSess, err = ort.NewAdvancedSession(
+	e.ocrOutCount = len(outputs)
+	e.ocrSess, err = ort.NewDynamicAdvancedSession(
 		e.cfg.OCRONNX,
-		[]string{e.ocrInName},
-		[]string{e.ocrOutName},
-		[]ort.Value{e.ocrIn},
-		[]ort.Value{e.ocrOut},
+		[]string{inputs[0].Name},
+		outNames,
 		nil,
 	)
 	return err
@@ -156,17 +113,24 @@ func (e *Engine) close() {
 	if e.ocrSess != nil {
 		e.ocrSess.Destroy()
 	}
-	if e.detIn != nil {
-		e.detIn.Destroy()
+}
+
+func destroyValues(vs []ort.Value) {
+	for _, v := range vs {
+		if v != nil {
+			v.Destroy()
+		}
 	}
-	if e.detOut != nil {
-		e.detOut.Destroy()
-	}
-	if e.ocrIn != nil {
-		e.ocrIn.Destroy()
-	}
-	if e.ocrOut != nil {
-		e.ocrOut.Destroy()
+}
+
+func tensorRowsCols(shape ort.Shape) (rows, cols int, err error) {
+	switch len(shape) {
+	case 2:
+		return int(shape[0]), int(shape[1]), nil
+	case 3:
+		return int(shape[0] * shape[1]), int(shape[2]), nil
+	default:
+		return 0, 0, fmt.Errorf("unexpected output shape %v", shape)
 	}
 }
 
@@ -178,15 +142,26 @@ func (e *Engine) Recognize(jpeg []byte) (Result, error) {
 	}
 	box := [4]int{}
 	crop := im
+
 	tensor, ratio, padW, padH := letterboxRGB(im, e.detSize)
-	copy(e.detIn.GetData(), tensor)
-	if err := e.detSess.Run(); err != nil {
+	detIn, err := ort.NewTensor(ort.NewShape(1, 3, int64(e.detSize), int64(e.detSize)), tensor)
+	if err != nil {
+		return Result{}, fmt.Errorf("detector input: %w", err)
+	}
+	detOuts := []ort.Value{nil}
+	if err := e.detSess.Run([]ort.Value{detIn}, detOuts); err != nil {
+		detIn.Destroy()
 		return Result{}, fmt.Errorf("detector run: %w", err)
 	}
-	outShape := e.detOut.GetShape()
-	rows := int(outShape[0])
-	cols := int(outShape[1])
-	dets := decodeYoloV9End2End(e.detOut.GetData(), rows, cols, ratio, padW, padH, []string{"License Plate"}, e.cfg.DetConf)
+	detIn.Destroy()
+	defer detOuts[0].Destroy()
+
+	detOut := detOuts[0].(*ort.Tensor[float32])
+	rows, cols, err := tensorRowsCols(detOut.GetShape())
+	if err != nil {
+		return Result{}, err
+	}
+	dets := decodeYoloV9End2End(detOut.GetData(), rows, cols, ratio, padW, padH, []string{"License Plate"}, e.cfg.DetConf)
 	if best, ok := bestDetection(dets); ok {
 		box = [4]int{best.x1, best.y1, best.x2, best.y2}
 		crop = im.crop(best.x1, best.y1, best.x2, best.y2)
@@ -196,16 +171,34 @@ func (e *Engine) Recognize(jpeg []byte) (Result, error) {
 	if crop.w == 0 || crop.h == 0 {
 		return Result{}, nil
 	}
+
 	plateBytes := plateTensorUint8(crop, e.plateCfg)
-	inData := e.ocrIn.GetData()
-	if len(plateBytes) != len(inData) {
-		return Result{}, fmt.Errorf("ocr tensor size mismatch: got %d want %d", len(plateBytes), len(inData))
+	h := int64(e.plateCfg.ImgHeight)
+	w := int64(e.plateCfg.ImgWidth)
+	ch := int64(3)
+	if e.plateCfg.ImageColorMode == "grayscale" {
+		ch = 1
 	}
-	copy(inData, plateBytes)
-	if err := e.ocrSess.Run(); err != nil {
+	ocrIn, err := ort.NewTensor(ort.NewShape(1, h, w, ch), plateBytes)
+	if err != nil {
+		return Result{}, fmt.Errorf("ocr input: %w", err)
+	}
+	ocrOuts := make([]ort.Value, e.ocrOutCount)
+	for i := range ocrOuts {
+		ocrOuts[i] = nil
+	}
+	if err := e.ocrSess.Run([]ort.Value{ocrIn}, ocrOuts); err != nil {
+		ocrIn.Destroy()
 		return Result{}, fmt.Errorf("ocr run: %w", err)
 	}
-	plate, conf := decodePlateOCR(e.ocrOut.GetData(), e.plateCfg)
+	ocrIn.Destroy()
+	defer destroyValues(ocrOuts)
+
+	plateOut, ok := ocrOuts[0].(*ort.Tensor[float32])
+	if !ok {
+		return Result{}, fmt.Errorf("ocr plate output type %T", ocrOuts[0])
+	}
+	plate, conf := decodePlateOCR(plateOut.GetData(), e.plateCfg)
 	if plate == "" || conf < e.cfg.MinConf {
 		return Result{Box: box}, nil
 	}
