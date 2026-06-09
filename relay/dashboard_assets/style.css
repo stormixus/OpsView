@@ -720,3 +720,25 @@ button{font-family:inherit; cursor:pointer;}
 /* rail filled in Task 4 */
 .up-rail{position:relative; width:14px; background:linear-gradient(90deg,transparent,rgba(8,12,18,.7)); border-left:1px solid rgba(255,255,255,.08); transition:width .14s ease; flex:none;}
 .up-rail.expanded{width:132px;}
+.up-cov{position:absolute; right:0; width:100%; background:rgba(55,211,103,.16); border-right:2px solid rgba(55,211,103,.5);}
+.up-tick{position:absolute; right:0; width:8px; height:1px; background:rgba(255,255,255,.22);}
+.up-tlabel{position:absolute; right:16px; transform:translateY(-50%); font-size:10px; color:#9aa6b4; font-family:var(--font-mono); white-space:nowrap; opacity:0; transition:opacity .12s;}
+.up-rail.expanded .up-tlabel{opacity:1;}
+.up-now{position:absolute; left:0; right:0; height:2px; background:#37d367; box-shadow:0 0 8px rgba(55,211,103,.7);}
+.up-nowlbl{position:absolute; right:16px; transform:translateY(-50%); font-size:9.5px; color:#37d367; font-weight:700; opacity:0; transition:opacity .12s;}
+.up-rail.expanded .up-nowlbl{opacity:1;}
+.up-ev{position:absolute; right:0; width:100%; height:0; border:0; background:transparent; padding:0; cursor:pointer; display:flex; align-items:center; justify-content:flex-end; gap:5px; transform:translateY(-50%);}
+.up-ev-dot{flex:none; width:7px; height:7px; border-radius:50%; box-shadow:0 0 0 2px rgba(0,0,0,.4);}
+.up-ev-ic{display:none; flex:none; width:14px; height:14px;}
+.up-ev-ic svg{width:14px; height:14px; display:block;}
+.up-ev-t{display:none; font-size:10px; color:#cdd6e0; font-family:var(--font-mono);}
+.up-rail.expanded .up-ev{height:16px; padding-right:8px;}
+.up-rail.expanded .up-ev-ic{display:inline-flex;}
+.up-rail.expanded .up-ev-t{display:inline;}
+.up-rail.expanded .up-ev:hover{background:rgba(255,255,255,.06);}
+.up-ev.ev-person .up-ev-dot,.up-ev.ev-linecross .up-ev-dot{background:#79b8ff;} .up-ev.ev-person .up-ev-ic,.up-ev.ev-linecross .up-ev-ic{color:#79b8ff;}
+.up-ev.ev-vehicle .up-ev-dot{background:#c8a6ff;} .up-ev.ev-vehicle .up-ev-ic{color:#c8a6ff;}
+.up-ev.ev-motion .up-ev-dot{background:#e8c25a;} .up-ev.ev-motion .up-ev-ic{color:#e8c25a;}
+.up-ev.ev-intrusion .up-ev-dot{background:#f87171;} .up-ev.ev-intrusion .up-ev-ic{color:#f87171;}
+.up-cursor{position:absolute; left:0; right:0; height:0; border-top:2px dashed rgba(255,255,255,.9);}
+.up-curlbl{position:absolute; right:16px; transform:translateY(-50%); background:#111820; border:1px solid #2a3442; color:#e6edf3; font-size:10px; font-weight:700; padding:2px 5px; border-radius:5px; font-family:var(--font-mono);}

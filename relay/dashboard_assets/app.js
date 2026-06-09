@@ -914,16 +914,97 @@ function upStartLive(){
   var wsUrl=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/surv/ws/'+up.path;
   var hlsUrl=location.origin+'/surv/'+up.path+'/index.m3u8';
   up.player=playWS(upVideo, wsUrl, function(){ playHLS(upVideo, hlsUrl); });
+  upSyncLiveWindow(); upScheduleTimeline(); clearTimeout(up._liveTimer); upLiveTick();
 }
 function upStopVideo(){
   if(up.player){ try{ up.player.close&&up.player.close(); }catch(e){} up.player=null; }
   try{ upVideo.pause(); upVideo.removeAttribute('src'); upVideo.load(); }catch(e){}
 }
+
+// fetch coverage+events for the current window (debounced). Cache by stream + a
+// coarse window bucket so panning/zoom doesn't refetch on every frame.
+up._tlCache={};
+up._tlTimer=null;
+function upFetchTimeline(){
+  if(!up.stream) return;
+  var pad=Math.round((up.t1-up.t0)*0.5); // fetch a little beyond the window
+  var qs=up.t0-pad, qe=up.t1+pad;
+  var key=up.path+'|'+Math.floor(qs/300)+'|'+Math.floor(qe/300);
+  if(up._tlCache[key]){ up.segs=up._tlCache[key].segments; up.events=up._tlCache[key].events; upRenderRail(); return; }
+  fetch(BASE+'/api/rec-timeline?stream='+encodeURIComponent(up.path)+'&start='+qs+'&end='+qe,{credentials:'same-origin'})
+    .then(function(r){ return r.ok? r.json() : {segments:[],events:[]}; })
+    .then(function(d){
+      up._tlCache[key]=d; up.segs=d.segments||[]; up.events=d.events||[];
+      upRenderRail();
+    }).catch(function(){ up.segs=[]; up.events=[]; upRenderRail(); });
+}
+function upScheduleTimeline(){ clearTimeout(up._tlTimer); up._tlTimer=setTimeout(upFetchTimeline,150); }
+
+var upRail=$('#upRail');
+function upRailH(){ return upRail.clientHeight || 600; }
+// recompute the LIVE window so t1=now and the rail height maps to a time span.
+function upSyncLiveWindow(){
+  var now=Math.floor(Date.now()/1000);
+  var span=Math.round(upRailH()/up.pxPerSec);
+  up.t1=now; up.t0=now-span;
+}
+function upRenderRail(){
+  var H=upRailH(), html='';
+  // recording coverage shading (recorded vs gap)
+  up.segs.forEach(function(s){
+    var yTop=timeToY(s.start, up.t0, up.t1, H);
+    var yBot=timeToY(s.start+s.dur, up.t0, up.t1, H);
+    var top=Math.max(0,Math.min(yTop,yBot)), h=Math.abs(yBot-yTop);
+    if(top+h<0||top>H) return;
+    html+='<div class="up-cov" style="top:'+top+'px;height:'+h+'px"></div>';
+  });
+  // tick labels (only visible when expanded; CSS hides when thin)
+  var interval=niceTickInterval(up.t1-up.t0,6);
+  for(var tt=firstTickTime(up.t0,interval); tt<=up.t1; tt+=interval){
+    var y=timeToY(tt,up.t0,up.t1,H); if(y<0||y>H) continue;
+    html+='<div class="up-tick" style="top:'+y+'px"></div>'+
+          '<div class="up-tlabel" style="top:'+y+'px">'+upFmtTick(tt,interval)+'</div>';
+  }
+  // event marks: thin = colored dot, expanded = icon + time (CSS toggles)
+  up.events.forEach(function(ev){
+    var y=timeToY(ev.start,up.t0,up.t1,H); if(y<0||y>H) return;
+    var k=ev.kind||'motion';
+    html+='<button class="up-ev ev-'+escAttr(k)+'" data-t="'+ev.start+'" style="top:'+y+'px" title="'+escAttr((REC_KIND_NAMES[k]||k))+'">'+
+            '<span class="up-ev-dot"></span>'+
+            '<span class="up-ev-ic">'+(REC_KIND_ICONS[k]||'')+'</span>'+
+            '<span class="up-ev-t">'+upClock(ev.start)+'</span>'+
+          '</button>';
+  });
+  // "지금" anchor
+  var nowY=timeToY(Math.floor(Date.now()/1000),up.t0,up.t1,H);
+  if(nowY>=0&&nowY<=H){ html+='<div class="up-now" style="top:'+nowY+'px"></div><div class="up-nowlbl" style="top:'+nowY+'px">지금</div>'; }
+  // cursor (REC mode; set in Task 5)
+  if(up.mode==='rec'){ var cy=timeToY(up.cursorT,up.t0,up.t1,H); if(cy>=0&&cy<=H){ html+='<div class="up-cursor" style="top:'+cy+'px"></div><div class="up-curlbl" style="top:'+cy+'px">'+upClock(up.cursorT)+'</div>'; } }
+  upRail.innerHTML=html;
+}
+function upFmtTick(t,interval){
+  var d=new Date(t*1000);
+  if(interval>=86400) return (d.getMonth()+1)+'/'+d.getDate();
+  if(interval>=3600) return pad2(d.getHours())+'시';
+  return pad2(d.getHours())+':'+pad2(d.getMinutes());
+}
+function upClock(t){ var d=new Date(t*1000); return pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds()); }
+
+upRail.addEventListener('mouseenter', function(){ upRail.classList.add('expanded'); upRenderRail(); });
+upRail.addEventListener('mouseleave', function(){ if(up.mode!=='rec') upRail.classList.remove('expanded'); });
+// LIVE 모드에서 1초마다 윈도우를 now에 맞춰 재렌더
+function upLiveTick(){
+  if(!up.open || up.mode!=='live') return;
+  upSyncLiveWindow(); upRenderRail();
+  up._liveTimer=setTimeout(upLiveTick,1000);
+}
+
 function closePlayer(){
   if(!up.open) return;
   up.open=false; upStopVideo();
   upEl.classList.remove('show'); upEl.setAttribute('aria-hidden','true');
   if(up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
+  clearTimeout(up._liveTimer); clearTimeout(up._tlTimer);
 }
 $('#uplayerClose').addEventListener('click', closePlayer);
 upEl.addEventListener('click', function(e){ if(e.target===upEl) closePlayer(); });
