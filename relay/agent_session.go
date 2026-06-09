@@ -27,6 +27,7 @@ type agentSession struct {
 	bytesOut      atomic.Int64
 	watcherCount  atomic.Int32
 	connectedAt   atomic.Int64 // unix ms; 0 = never
+	clientVer     atomic.Value // string: agent app version from Hello (e.g. "0.11.0")
 
 	survConfig   []byte
 	survConfigMu sync.RWMutex
@@ -102,7 +103,7 @@ type WatcherInfo struct {
 	ID    uint32 `json:"id"`
 	IP    string `json:"ip"`
 	Label string `json:"label,omitempty"` // operator-assigned name for this IP (dashboard)
-	Since string `json:"since"`            // RFC3339; empty if connectedAt is zero
+	Since string `json:"since"`           // RFC3339; empty if connectedAt is zero
 }
 
 // watcherList snapshots this session's connected watchers.

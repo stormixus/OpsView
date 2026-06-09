@@ -215,6 +215,69 @@ type recEventItem struct {
 	End    int64  `json:"end"`   // unix seconds
 }
 
+// recEventMergeGapSec is the cooldown used to coalesce a channel's fragmented
+// events into one card: same-channel, same-kind intervals separated by at or
+// under this gap are merged. A raw motion event that overlaps a more-specific
+// smart event (person/vehicle/…) on the same channel is dropped, since AcuSense
+// fires both for a single happening. Keeps one channel from spraying dozens of
+// near-simultaneous cards.
+const recEventMergeGapSec = 90
+
+// clusterEventItems coalesces fragmented per-channel events (see
+// recEventMergeGapSec). Order-independent; the caller re-sorts for display.
+func clusterEventItems(items []recEventItem) []recEventItem {
+	if len(items) <= 1 {
+		return items
+	}
+	// 1) Merge same-(stream,kind) intervals separated by <= the cooldown.
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Stream != items[j].Stream {
+			return items[i].Stream < items[j].Stream
+		}
+		if items[i].Kind != items[j].Kind {
+			return items[i].Kind < items[j].Kind
+		}
+		return items[i].Start < items[j].Start
+	})
+	merged := make([]recEventItem, 0, len(items))
+	for _, it := range items {
+		if n := len(merged); n > 0 {
+			last := &merged[n-1]
+			if last.Stream == it.Stream && last.Kind == it.Kind && it.Start-last.End <= recEventMergeGapSec {
+				if it.End > last.End {
+					last.End = it.End
+				}
+				continue
+			}
+		}
+		merged = append(merged, it)
+	}
+	// 2) Per stream, drop a motion event that coincides with a more-specific one.
+	specific := map[string][]recEventItem{}
+	for _, it := range merged {
+		if it.Kind != "motion" {
+			specific[it.Stream] = append(specific[it.Stream], it)
+		}
+	}
+	out := make([]recEventItem, 0, len(merged))
+	for _, it := range merged {
+		if it.Kind == "motion" {
+			drop := false
+			for _, sp := range specific[it.Stream] {
+				if it.Start <= sp.End+recEventMergeGapSec && sp.Start <= it.End+recEventMergeGapSec {
+					drop = true
+					break
+				}
+			}
+			if drop {
+				continue
+			}
+		}
+		out = append(out, it)
+	}
+	return out
+}
+
 // HandleDashboardRecEventsList aggregates event intervals across all enabled
 // channels in an agent session for a given day, sorted newest-first.
 // Admin-gated. ?agent=<id>&day=YYYYMMDD.
@@ -265,7 +328,8 @@ func (h *Hub) HandleDashboardRecEventsList(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	// sort newest first
+	// coalesce fragmented per-channel events, then sort newest first
+	items = clusterEventItems(items)
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].Start > items[j].Start
 	})

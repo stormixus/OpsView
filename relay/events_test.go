@@ -135,3 +135,42 @@ func TestRecEventListJSONShape(t *testing.T) {
 		t.Fatalf("event-list payload shape wrong: %s", b)
 	}
 }
+
+func TestClusterEventItems(t *testing.T) {
+	// One channel flapping: many short motion intervals within the cooldown
+	// collapse into a single merged event; a separate channel stays separate.
+	items := []recEventItem{
+		{Stream: "a/dvr0_ch1", Ch: 1, Name: "Lobby", Kind: "motion", Start: 1000, End: 1010},
+		{Stream: "a/dvr0_ch1", Ch: 1, Name: "Lobby", Kind: "motion", Start: 1050, End: 1060}, // gap 40s -> merge
+		{Stream: "a/dvr0_ch1", Ch: 1, Name: "Lobby", Kind: "motion", Start: 1120, End: 1140}, // gap 60s -> merge
+		{Stream: "a/dvr0_ch1", Ch: 1, Name: "Lobby", Kind: "motion", Start: 9000, End: 9010}, // far -> separate
+		{Stream: "a/dvr0_ch2", Ch: 2, Name: "Gate", Kind: "motion", Start: 1005, End: 1015},  // other channel
+	}
+	out := clusterEventItems(items)
+	// expect: ch1 merged(1000..1140) + ch1 separate(9000..9010) + ch2(1005..1015) = 3
+	if len(out) != 3 {
+		t.Fatalf("got %d clustered items, want 3: %+v", len(out), out)
+	}
+	var mergedEnd int64
+	for _, it := range out {
+		if it.Stream == "a/dvr0_ch1" && it.Start == 1000 {
+			mergedEnd = it.End
+		}
+	}
+	if mergedEnd != 1140 {
+		t.Fatalf("merged event end = %d, want 1140", mergedEnd)
+	}
+}
+
+func TestClusterEventItemsMotionSupersededBySmart(t *testing.T) {
+	// AcuSense fires motion + person for one happening; the raw motion that
+	// overlaps the person event on the same channel is dropped.
+	items := []recEventItem{
+		{Stream: "a/dvr0_ch1", Ch: 1, Name: "Lobby", Kind: "motion", Start: 1000, End: 1030},
+		{Stream: "a/dvr0_ch1", Ch: 1, Name: "Lobby", Kind: "person", Start: 1005, End: 1025},
+	}
+	out := clusterEventItems(items)
+	if len(out) != 1 || out[0].Kind != "person" {
+		t.Fatalf("expected only the person event to survive, got %+v", out)
+	}
+}

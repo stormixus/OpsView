@@ -84,7 +84,7 @@ function adaptState(api){
     var chTotal=(a.dvrs||[]).reduce(function(n,d){return n+(d.channels||0);},0) || (a.streams||[]).length;
     var tp=_tputFor(a.id, a.bytes_in||0, a.bytes_out||0, now);
     return {
-      id:a.id, name:a.name, online:!!a.connected,
+      id:a.id, name:a.name, online:!!a.connected, version:a.version||'',
       dvr:(a.dvrs&&a.dvrs[0]?a.dvrs[0].name:''),
       dvrs:(a.dvrs||[]).map(function(d){return {id:d.id, name:d.name, channels:d.channels};}),
       chans:(a.channels||[]).map(function(c){return {dvr_id:c.dvr_id, ch_num:c.ch_num, name:c.name, order:c.order, enabled:c.enabled, active:c.active};}),
@@ -318,7 +318,7 @@ $('#dvrChips').addEventListener('click', function(e){
   var a=agentById(selected); if(!a) return;
   renderDvrChips(a); renderStreams(a);
   if(curTab==='live') renderGrid(a);
-  else if(curTab==='rec') openRec();
+  else if(curTab==='rec'){ recCtx.eventFilter='all'; recRenderEventList(); } // re-scope the loaded day to this DVR (no re-fetch/day reset)
 });
 
 /* ============================================================ OVERVIEW RENDER */
@@ -413,6 +413,7 @@ function renderStatus(a){
   $('#pubBytes').textContent=fmtBytes(a.bytes_out);
   $('#pubUptime').textContent= connected? fmtUptime(Math.floor((Date.now()-a.since_ms)/1000)) : '—';
   $('#pubDvr').textContent=a.dvr;
+  if($('#pubVer')) $('#pubVer').textContent = (connected && a.version) ? ('v'+a.version) : '';
   $('#pinBadge').style.display=a.pin_set?'':'none';
   $('#tpDown').textContent=fmtKbps(a.tput.down);
   $('#tpUp').textContent=fmtKbps(a.tput.up);
@@ -629,11 +630,23 @@ modalCell.addEventListener('keydown', function(e){ if(e.target.classList.contain
 // recCtx keeps the day + the agent-wide event list (newest-first from the API).
 // segCache memoizes per-stream segment lists for the day (used for modal playback).
 var REC_EV_PAGE = 80; // number of event cards to load per page
-var recCtx = { day:null, eventList:[], eventFilter:'all', segCache:{}, evShown:0 };
+var recCtx = { day:null, selDay:'', availDays:[], eventList:[], eventFilter:'all', segCache:{}, evShown:0 };
 function pad2(n){ return (n<10?'0':'')+n; }
 function recDayStr(d){ return ''+d.getFullYear()+pad2(d.getMonth()+1)+pad2(d.getDate()); }
-function recSetDateInput(ymd){ $('#recDate').value=ymd.slice(0,4)+'-'+ymd.slice(4,6)+'-'+ymd.slice(6,8); }
-function recDateInputVal(){ var v=$('#recDate').value; return v? v.replace(/-/g,'') : ''; }
+// Date model for the custom calendar: a single YYYYMMDD string (recSelDay)
+// replaces the old native <input type=date>. recSetDateInput / recDateInputVal
+// keep their names so the rest of the rec code is unchanged.
+var REC_WD=['일','월','화','수','목','금','토'];
+function recSetDateInput(ymd){
+  recCtx.selDay=ymd||'';
+  var lbl=$('#recDateLabel'); if(lbl){
+    if(ymd){ var d=new Date(+ymd.slice(0,4),+ymd.slice(4,6)-1,+ymd.slice(6,8));
+      lbl.textContent=ymd.slice(0,4)+'.'+ymd.slice(4,6)+'.'+ymd.slice(6,8)+' ('+REC_WD[d.getDay()]+')'; }
+    else lbl.textContent='날짜';
+  }
+  if(recCalOpen) recRenderCal();
+}
+function recDateInputVal(){ return recCtx.selDay||''; }
 function recSegAtIn(segs, sec){ for(var i=0;i<segs.length;i++){ var s=segs[i]; if(sec>=s.start && sec<s.start+s.dur+2) return s; } return null; }
 
 function openRec(){
@@ -649,8 +662,10 @@ function recLoadDays(){
   if(!probe){ recLoadDay(); return; }
   fetch(BASE+'/api/rec?stream='+encodeURIComponent(probe)).then(function(r){return r.ok?r.json():null;}).then(function(d){
     var days=(d&&d.days)||[], want=recDateInputVal();
+    recCtx.availDays=days; // recorded days (probe stream) -> dotted in the calendar
     if((!want || days.indexOf(want)<0) && days.length) want=days[0];
     if(want) recSetDateInput(want);
+    if(recCalOpen) recRenderCal();
     recLoadDay();
   }).catch(function(){ recLoadDay(); });
 }
@@ -671,6 +686,19 @@ function loadRecEventList(day){
     .catch(function(){ return []; });
 }
 var REC_KIND_NAMES={person:'사람',vehicle:'차량',motion:'모션',linecross:'라인',intrusion:'침입'};
+// Inline SVG glyphs for the event-kind filter chips (전체/사람/차량/…).
+var REC_KIND_ICONS={
+  all:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
+  person:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="3.4"/><path d="M5.5 21a6.5 6.5 0 0 1 13 0"/></svg>',
+  vehicle:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l1.6-4.2A2 2 0 0 1 6.5 7.5h11a2 2 0 0 1 1.9 1.3L21 13v5h-2.5M3 18v-5m0 5h2.5M21 18v-5"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></svg>',
+  motion:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8a13 13 0 0 1 0 8M8 6a18 18 0 0 1 0 12"/><circle cx="15" cy="12" r="2.4"/><path d="M19 9a5 5 0 0 1 0 6"/></svg>',
+  linecross:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17h18"/><path d="M14 6l4 4-4 4"/><path d="M18 10H7"/></svg>',
+  intrusion:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>'
+};
+function recFilterChip(kind, label){
+  return '<button class="ev-filter-chip'+(recCtx.eventFilter===kind?' on':'')+'" data-kind="'+kind+'">'+
+    '<span class="ev-fi-ic">'+(REC_KIND_ICONS[kind]||'')+'</span>'+escHtml(label)+'</button>';
+}
 var recIntersectObs = null; // IntersectionObserver for infinite scroll sentinel
 // Helper: generate HTML for a single event card
 function evCardHTML(ev){
@@ -684,14 +712,18 @@ function evCardHTML(ev){
     '<span class="ev-kicon ev-'+escAttr(kind)+'"></span></div></button>';
 }
 // Render the Protect-style event thumbnail grid (newest-first, filtered by kind).
+// Parse the DVR id out of an event's stream path (".../dvr<N>_ch<M>").
+function evDvrId(ev){ var m=String(ev&&ev.stream).match(/dvr(\d+)/); return m?+m[1]:0; }
 function recRenderEventList(){
   var grid=$('#recEventGrid'), filtersEl=$('#recEventFilters'); if(!grid || !filtersEl) return;
+  // Scope to the selected DVR chip (shared with the live grid); 'all' = every device.
   var events=recCtx.eventList||[];
+  if(selDvr!=='all') events=events.filter(function(ev){ return evDvrId(ev)===selDvr; });
   // filter chips: 전체 + every kind present in the day's events
   var kinds={}; events.forEach(function(ev){ kinds[ev.kind||'motion']=true; });
-  var filters=['<button class="ev-filter-chip'+(recCtx.eventFilter==='all'?' on':'')+'" data-kind="all">전체</button>'];
+  var filters=[recFilterChip('all','전체')];
   ['person','vehicle','motion','linecross','intrusion'].forEach(function(k){
-    if(kinds[k]) filters.push('<button class="ev-filter-chip'+(recCtx.eventFilter===k?' on':'')+'" data-kind="'+k+'">'+(REC_KIND_NAMES[k]||k)+'</button>');
+    if(kinds[k]) filters.push(recFilterChip(k, REC_KIND_NAMES[k]||k));
   });
   filtersEl.innerHTML=filters.join('');
   $('#recMeta').textContent = events.length ? (events.length+'건') : '';
@@ -787,7 +819,6 @@ function openEventModal(stream, t, ch, timeEl){
     v.onloadedmetadata=function(){ try{ v.currentTime=offset; }catch(e){} v.play().catch(function(){}); };
   });
 }
-$('#recDate').addEventListener('change', recLoadDay);
 function recShiftDay(delta){
   var day=recDateInputVal(); if(!day) return;
   var d=new Date(+day.slice(0,4), +day.slice(4,6)-1, +day.slice(6,8));
@@ -795,6 +826,62 @@ function recShiftDay(delta){
 }
 $('#recPrevDay').addEventListener('click', function(){ recShiftDay(-1); });
 $('#recNextDay').addEventListener('click', function(){ recShiftDay(1); });
+
+/* ---- custom calendar popover (replaces native date picker) ---- */
+var recCalOpen=false, recCalView=null; // recCalView = {y, m} month being shown (m: 0-11)
+function recCalToggle(){ recCalOpen ? recCalClose() : recCalShow(); }
+function recCalShow(){
+  var cal=$('#recCal'); if(!cal) return;
+  var sel=recDateInputVal();
+  var base = sel ? new Date(+sel.slice(0,4), +sel.slice(4,6)-1, +sel.slice(6,8)) : new Date();
+  recCalView={ y:base.getFullYear(), m:base.getMonth() };
+  recCalOpen=true; cal.hidden=false;
+  $('#recDate').setAttribute('aria-expanded','true');
+  recRenderCal();
+}
+function recCalClose(){
+  var cal=$('#recCal'); if(!cal) return;
+  recCalOpen=false; cal.hidden=true;
+  $('#recDate').setAttribute('aria-expanded','false');
+}
+function recCalShiftMonth(delta){
+  if(!recCalView) return;
+  var d=new Date(recCalView.y, recCalView.m+delta, 1);
+  recCalView={ y:d.getFullYear(), m:d.getMonth() };
+  recRenderCal();
+}
+function recRenderCal(){
+  var cal=$('#recCal'); if(!cal || !recCalView) return;
+  var y=recCalView.y, m=recCalView.m;
+  var first=new Date(y, m, 1), startWd=first.getDay(), ndays=new Date(y, m+1, 0).getDate();
+  var sel=recDateInputVal(), today=recDayStr(new Date());
+  var avail={}; (recCtx.availDays||[]).forEach(function(d){ avail[d]=true; });
+  var head='<div class="rc-head">'+
+    '<button type="button" class="rc-nav" data-mo="-1" title="이전 달">‹</button>'+
+    '<span class="rc-title">'+y+'년 '+(m+1)+'월</span>'+
+    '<button type="button" class="rc-nav" data-mo="1" title="다음 달">›</button></div>';
+  var wd='<div class="rc-wd">'+REC_WD.map(function(w){return '<span>'+w+'</span>';}).join('')+'</div>';
+  var cells='';
+  for(var i=0;i<startWd;i++) cells+='<span class="rc-d rc-pad"></span>';
+  for(var day=1;day<=ndays;day++){
+    var ymd=''+y+pad2(m+1)+pad2(day);
+    var cls='rc-d';
+    if(ymd===sel) cls+=' on';
+    if(ymd===today) cls+=' today';
+    if(avail[ymd]) cls+=' has';
+    cells+='<button type="button" class="'+cls+'" data-ymd="'+ymd+'">'+day+'</button>';
+  }
+  cal.innerHTML=head+wd+'<div class="rc-grid">'+cells+'</div>';
+}
+$('#recDate').addEventListener('click', function(e){ e.stopPropagation(); recCalToggle(); });
+$('#recCal').addEventListener('click', function(e){
+  e.stopPropagation();
+  var nav=e.target.closest('.rc-nav'); if(nav){ recCalShiftMonth(+nav.dataset.mo); return; }
+  var d=e.target.closest('.rc-d[data-ymd]'); if(!d) return;
+  recSetDateInput(d.dataset.ymd); recCalClose(); recLoadDay();
+});
+document.addEventListener('click', function(){ if(recCalOpen) recCalClose(); });
+document.addEventListener('keydown', function(e){ if(e.key==='Escape' && recCalOpen) recCalClose(); });
 // No live playback on this tab; recStop tears down only the event modal video.
 var recModalVideo=null;
 function recStop(){ if(recModalVideo){ try{ recModalVideo.pause(); recModalVideo.removeAttribute('src'); recModalVideo.load(); }catch(e){} recModalVideo=null; } }

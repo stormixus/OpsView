@@ -35,6 +35,7 @@ type relayInfo struct {
 type agentState struct {
 	ID            string        `json:"id"`
 	Name          string        `json:"name"`
+	Version       string        `json:"version"` // agent app version reported in Hello ("" if unknown)
 	Connected     bool          `json:"connected"`
 	Since         string        `json:"since"`           // RFC3339, "" if never
 	LastPublishAt string        `json:"last_publish_at"` // RFC3339, "" if never
@@ -198,9 +199,12 @@ func (h *Hub) buildDashboardState() dashboardState {
 		bin += sbin
 		bout += sbout
 
+		clientVer, _ := s.clientVer.Load().(string)
+
 		agents = append(agents, agentState{
 			ID:            s.id,
 			Name:          s.name,
+			Version:       clientVer,
 			Connected:     connected,
 			Since:         msToRFC3339(s.connectedAt.Load()),
 			LastPublishAt: msToRFC3339(s.lastPublishAt.Load()),

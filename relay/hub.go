@@ -324,6 +324,7 @@ func (h *Hub) HandlePublish(w http.ResponseWriter, r *http.Request) {
 	sess.pin = auth.PIN
 	sess.mu.Unlock()
 	sess.connectedAt.Store(time.Now().UnixMilli())
+	sess.clientVer.Store(hello.ClientVersion)
 
 	if entry.ID == "default" {
 		h.testPattern.Stop()
