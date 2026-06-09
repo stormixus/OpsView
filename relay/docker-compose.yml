@@ -34,11 +34,24 @@ services:
       # On Unraid, bind /rec to a big share via RELAY_REC_HOST (see volumes).
       - RELAY_REC_DIR=${RELAY_REC_DIR:-}
       - RELAY_REC_MAX=${RELAY_REC_MAX:-}
+      # Optional license-plate OCR (ONNX, in-process). Off unless RELAY_LPR=1.
+      # Models default to /data/lpr/models — run relay/lpr/fetch_models.sh once on
+      # the host and bind that dir via RELAY_LPR_MODELS_HOST on Unraid.
+      - RELAY_LPR=${RELAY_LPR:-}
+      - ORT_LIB_PATH=${ORT_LIB_PATH:-/usr/local/lib/libonnxruntime.so}
+      - RELAY_LPR_DETECTOR=${RELAY_LPR_DETECTOR:-/data/lpr/models/plate-detector.onnx}
+      - RELAY_LPR_OCR=${RELAY_LPR_OCR:-/data/lpr/models/plate-ocr.onnx}
+      - RELAY_LPR_OCR_CONFIG=${RELAY_LPR_OCR_CONFIG:-/data/lpr/models/plate-ocr.yaml}
+      - RELAY_LPR_DET_CONF=${RELAY_LPR_DET_CONF:-}
+      - RELAY_LPR_MIN_CONF=${RELAY_LPR_MIN_CONF:-}
     volumes:
       - relay-data:/data
       # Recordings live here. Default = a docker volume; on Unraid set
       # RELAY_REC_HOST=/mnt/user/<share> in relay/.env to use a real disk.
       - ${RELAY_REC_HOST:-relay-rec}:/rec
+      # LPR ONNX models (read-only). On Unraid:
+      #   RELAY_LPR_MODELS_HOST=/mnt/user/appdata/opsview/lpr-models
+      - ${RELAY_LPR_MODELS_HOST:-relay-lpr-models}:/data/lpr/models:ro
     restart: unless-stopped
 
   # Cloudflare Tunnel: exposes the relay over TLS (wss/https) at your domain with
@@ -62,3 +75,4 @@ services:
 volumes:
   relay-data:
   relay-rec:
+  relay-lpr-models:

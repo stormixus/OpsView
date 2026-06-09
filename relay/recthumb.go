@@ -58,6 +58,10 @@ func (h *Hub) storeEventThumb(stream string, tsMs int64, jpeg []byte) {
 		log.Printf("[rec-thumb] %s @%d: dropped oversized event thumb (%d bytes)", stream, tsMs/1000, len(jpeg))
 		return
 	}
+	
+	// Trigger License Plate Recognition asynchronously
+	go h.runLPR(stream, tsMs, jpeg)
+
 	recDir := h.recRootDir()
 	if recDir == "" {
 		return
@@ -75,6 +79,26 @@ func (h *Hub) storeEventThumb(stream string, tsMs int64, jpeg []byte) {
 	if err := os.Rename(tmp, dst); err != nil {
 		os.Remove(tmp)
 		log.Printf("[rec-thumb] %s: rename event thumb: %v", stream, err)
+	}
+}
+
+// runLPR runs in-process ONNX plate recognition when configured (RELAY_LPR=1).
+func (h *Hub) runLPR(stream string, tsMs int64, jpeg []byte) {
+	rec := h.lpr
+	if rec == nil {
+		return
+	}
+	res, err := rec.Recognize(jpeg)
+	if err != nil {
+		log.Printf("[lpr] recognize: %v", err)
+		return
+	}
+	if res.Plate == "" {
+		return
+	}
+	log.Printf("[lpr] recognized plate: %s (confidence: %.2f) for stream: %s", res.Plate, res.Confidence, stream)
+	if h.events != nil {
+		h.events.updateOpenPlate(stream, tsMs, res.Plate)
 	}
 }
 

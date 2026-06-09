@@ -19,11 +19,13 @@ type eventInterval struct {
 	Start int64  `json:"start"`
 	End   int64  `json:"end"`
 	Kind  string `json:"kind"`
+	Plate string `json:"plate,omitempty"`
 }
 
 type openKey struct{ stream, kind string }
 type openInterval struct {
 	startMs int64
+	plate   string
 }
 
 type evDayCache struct {
@@ -68,7 +70,7 @@ func (e *eventStore) add(stream, kind string, active bool, tsMs int64) {
 	if active {
 		if cur, ok := e.open[k]; ok {
 			// stale open: force-close at start+max before opening the new one
-			e.closeLocked(stream, kind, cur.startMs, cur.startMs+e.maxEventMs)
+			e.closeLocked(stream, kind, cur.startMs, cur.startMs+e.maxEventMs, cur.plate)
 		}
 		e.open[k] = openInterval{startMs: tsMs}
 		return
@@ -79,13 +81,13 @@ func (e *eventStore) add(stream, kind string, active bool, tsMs int64) {
 		if end > cur.startMs+e.maxEventMs {
 			end = cur.startMs + e.maxEventMs
 		}
-		e.closeLocked(stream, kind, cur.startMs, end)
+		e.closeLocked(stream, kind, cur.startMs, end, cur.plate)
 	}
 }
 
 // closeLocked appends a finished interval (caller holds e.mu).
-func (e *eventStore) closeLocked(stream, kind string, startMs, endMs int64) {
-	iv := eventInterval{Start: startMs / 1000, End: endMs / 1000, Kind: kind}
+func (e *eventStore) closeLocked(stream, kind string, startMs, endMs int64, plate string) {
+	iv := eventInterval{Start: startMs / 1000, End: endMs / 1000, Kind: kind, Plate: plate}
 	startDay := dayKeyFromMs(startMs)
 	e.fileIntervalLocked(stream, startDay, iv)
 	// An event straddling local midnight must be findable on BOTH days, else the
@@ -93,6 +95,35 @@ func (e *eventStore) closeLocked(stream, kind string, startMs, endMs int64) {
 	// segment it overlaps (overlaps() only queries the segment's own day).
 	if endDay := dayKeyFromMs(endMs); endDay != startDay {
 		e.fileIntervalLocked(stream, endDay, iv)
+	}
+}
+
+// updateOpenPlate updates the plate number for an active open event or recently cached event.
+func (e *eventStore) updateOpenPlate(stream string, tsMs int64, plate string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	
+	// 1. Check open events
+	for k, cur := range e.open {
+		if k.stream == stream && cur.startMs == tsMs {
+			cur.plate = plate
+			e.open[k] = cur
+			return
+		}
+	}
+	
+	// 2. Check recently cached events (if closed quickly)
+	day := dayKeyFromMs(tsMs)
+	key := stream + "|" + day
+	if c, ok := e.cache[key]; ok {
+		tSec := tsMs / 1000
+		for i := len(c.ivals) - 1; i >= 0; i-- {
+			if c.ivals[i].Start == tSec {
+				c.ivals[i].Plate = plate
+				e.cache[key] = c
+				break
+			}
+		}
 	}
 }
 
@@ -213,6 +244,7 @@ type recEventItem struct {
 	Kind   string `json:"kind"`
 	Start  int64  `json:"start"` // unix seconds
 	End    int64  `json:"end"`   // unix seconds
+	Plate  string `json:"plate,omitempty"`
 }
 
 // recEventMergeGapSec is the cooldown used to coalesce a channel's fragmented
@@ -252,6 +284,9 @@ func clusterEventItems(items []recEventItem, gapSec int64) []recEventItem {
 			if last.Stream == it.Stream && last.Kind == it.Kind && it.Start-last.End <= gapSec {
 				if it.End > last.End {
 					last.End = it.End
+				}
+				if last.Plate == "" && it.Plate != "" {
+					last.Plate = it.Plate
 				}
 				continue
 			}
@@ -328,6 +363,7 @@ func (h *Hub) HandleDashboardRecEventsList(w http.ResponseWriter, r *http.Reques
 						Kind:   iv.Kind,
 						Start:  iv.Start,
 						End:    iv.End,
+						Plate:  iv.Plate,
 					})
 				}
 			}

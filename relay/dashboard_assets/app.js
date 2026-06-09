@@ -724,8 +724,10 @@ function evCardHTML(ev){
   var d=new Date(ev.start*1000), kind=ev.kind||'motion', kindLabel=REC_KIND_NAMES[kind]||kind;
   var when=(d.getMonth()+1)+'월 '+pad2(d.getDate())+', '+pad2(d.getHours())+':'+pad2(d.getMinutes());
   var thumbUrl=BASE+'/api/rec-thumb?stream='+encodeURIComponent(ev.stream)+'&t='+ev.start;
+  var plateHtml = ev.plate ? '<span class="ev-plate-badge">🚗 ' + escHtml(ev.plate) + '</span>' : '';
   return '<button class="ev-cell ev-k-'+escAttr(kind)+'" data-stream="'+escAttr(ev.stream)+'" data-start="'+ev.start+'" data-ch="'+escAttr(''+ev.ch)+'">'+
     '<img class="ev-cellimg" loading="lazy" src="'+escAttr(thumbUrl)+'" alt="'+escAttr(kindLabel)+'">'+
+    plateHtml +
     '<div class="ev-cellbar"><span class="ev-celltxt"><span class="ev-celltime">'+escHtml(when)+'</span>'+
     '<span class="ev-cellcam">'+escHtml(ev.name)+' · CH'+escHtml(''+ev.ch)+'</span></span>'+
     '<span class="ev-kicon ev-'+escAttr(kind)+'"></span></div></button>';

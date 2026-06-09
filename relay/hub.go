@@ -15,6 +15,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/opsview/opsview/proto"
+	"github.com/opsview/opsview/relay/lpr"
 )
 
 // allowedOrigins is the WebSocket Origin allowlist (RELAY_ALLOWED_ORIGINS).
@@ -61,6 +62,7 @@ type Hub struct {
 
 	rec    *Recorder   // NVR recorder (nil when recording is disabled)
 	events *eventStore // event timeline store (nil when recording is disabled)
+	lpr    lpr.Recognizer // optional in-process plate recognition (nil => env-based default)
 }
 
 // effectiveDashToken returns the active dashboard password: the DB-stored value
@@ -130,6 +132,7 @@ func NewHub(cfg Config) *Hub {
 		}
 	}
 	h.testPattern = NewTestPattern(h)
+	h.lpr = lpr.NewFromEnv()
 	return h
 }
 
