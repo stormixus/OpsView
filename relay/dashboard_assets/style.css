@@ -716,6 +716,7 @@ button{font-family:inherit; cursor:pointer;}
 .uplayer-close:hover{background:rgba(40,52,66,.9);}
 .up-preview{position:absolute; pointer-events:none; width:160px; background:#0c1118; border:1px solid #2a3442; border-radius:8px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.6);}
 .up-preview img{display:block; width:100%; height:90px; object-fit:cover; background:#05070a;}
+.up-preview.na img{background:#0a0f15 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' fill='none' stroke='%23394150' stroke-width='1.6'%3E%3Crect x='3' y='5' width='16' height='12' rx='2'/%3E%3Cpath d='M3 14l4-4 3 3 3-4 6 6'/%3E%3C/svg%3E") center/26px no-repeat;}
 .up-previewtime{display:block; text-align:center; font-size:11px; font-weight:700; color:#e6edf3; padding:3px 0; font-family:var(--font-mono);}
 /* rail filled in Task 4 */
 .up-rail{position:relative; width:14px; background:linear-gradient(90deg,transparent,rgba(8,12,18,.7)); border-left:1px solid rgba(255,255,255,.08); transition:width .14s ease; flex:none;}

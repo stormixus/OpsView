@@ -942,6 +942,7 @@ function upFetchTimeline(){
 function upScheduleTimeline(){ clearTimeout(up._tlTimer); up._tlTimer=setTimeout(upFetchTimeline,150); }
 
 var upRail=$('#upRail');
+var upPrev=$('#upPreview'), upPrevImg=$('#upPreviewImg');
 function upRailH(){ return upRail.clientHeight || 600; }
 // recompute the LIVE window so t1=now and the rail height maps to a time span.
 function upSyncLiveWindow(){
@@ -1006,6 +1007,8 @@ function closePlayer(){
   upEl.classList.remove('show'); upEl.setAttribute('aria-hidden','true');
   if(up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
   clearTimeout(up._liveTimer); clearTimeout(up._tlTimer);
+  up.mode='live'; upEl.classList.remove('up-rec'); upRail.classList.remove('expanded');
+  upPrev.hidden=true; up._curSeg=null; up._tlCache={};
 }
 $('#uplayerClose').addEventListener('click', closePlayer);
 upEl.addEventListener('click', function(e){ if(e.target===upEl) closePlayer(); });
@@ -1083,6 +1086,51 @@ upRail.addEventListener('click', function(e){
   var now=Math.floor(Date.now()/1000);
   if(t>=now-2){ upStartLive(); } else { upSeekTo(t); }
 });
+
+// wheel over the stage/rail: pan time (REC) or step back from LIVE into REC.
+// ctrl/⌘+wheel: zoom (change pxPerSec) around the cursor.
+function upOnWheel(e){
+  if(!up.open) return;
+  e.preventDefault();
+  if(e.ctrlKey || e.metaKey){
+    var factor=e.deltaY>0?1/1.15:1.15;
+    up.pxPerSec=Math.max(0.02, Math.min(8, up.pxPerSec*factor)); // 8s/px .. 0.125s/px
+    if(up.mode==='live'){ upSyncLiveWindow(); } else { upSyncRecWindow(); }
+    upRenderRail(); upScheduleTimeline();
+    return;
+  }
+  // pan: scrolling up (deltaY<0) = into the past.
+  var H=upRailH(), span=up.t1-up.t0;
+  var dt=(e.deltaY/H)*span;
+  var center=(up.mode==='rec')? up.cursorT : Math.floor(Date.now()/1000);
+  var newCursor=center+dt;
+  var now=Math.floor(Date.now()/1000);
+  if(newCursor>=now-2){ if(up.mode!=='live') upStartLive(); return; }
+  upSeekTo(Math.round(newCursor));
+}
+$('#upStage').addEventListener('wheel', upOnWheel, {passive:false});
+upRail.addEventListener('wheel', upOnWheel, {passive:false});
+
+up._prevTimer=null;
+function upHoverPreview(e){
+  if(!up.open || !upRail.classList.contains('expanded')) return;
+  var H=upRailH(), rect=upRail.getBoundingClientRect();
+  var y=e.clientY-rect.top;
+  var t=Math.round(yToTime(y, up.t0, up.t1, H));
+  var now=Math.floor(Date.now()/1000); if(t>=now){ upPrev.hidden=true; return; }
+  upPrev.hidden=false;
+  upPrev.style.top=Math.max(8,Math.min(H-100, y-50))+'px';
+  upPrev.style.right='150px';
+  $('#upPreviewTime').textContent=upClock(t);
+  clearTimeout(up._prevTimer);
+  up._prevTimer=setTimeout(function(){
+    upPrevImg.onerror=function(){ upPrevImg.onerror=null; upPrevImg.removeAttribute('src'); upPrev.classList.add('na'); };
+    upPrevImg.onload=function(){ upPrev.classList.remove('na'); };
+    upPrevImg.src=BASE+'/api/rec-thumb?stream='+encodeURIComponent(up.path)+'&t='+t;
+  }, 90);
+}
+upRail.addEventListener('mousemove', upHoverPreview);
+upRail.addEventListener('mouseleave', function(){ upPrev.hidden=true; });
 /* ============================================================ RELAY / CONN */
 var relayDownAt=Date.now();
 function renderConn(){
