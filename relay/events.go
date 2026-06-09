@@ -216,16 +216,22 @@ type recEventItem struct {
 }
 
 // recEventMergeGapSec is the cooldown used to coalesce a channel's fragmented
-// events into one card: same-channel, same-kind intervals separated by at or
-// under this gap are merged. A raw motion event that overlaps a more-specific
-// smart event (person/vehicle/…) on the same channel is dropped, since AcuSense
-// fires both for a single happening. Keeps one channel from spraying dozens of
-// near-simultaneous cards.
+// events: same-channel, same-kind intervals separated by at or under this gap are
+// merged. A raw motion event that overlaps a more-specific smart event
+// (person/vehicle/…) on the same channel is dropped, since AcuSense fires both for
+// a single happening. The event-grid uses this (90s) to keep one channel from
+// spraying dozens of cards; the player timeline uses a finer gap so distinct
+// events stay visible (see recTimelineMergeGapSec).
 const recEventMergeGapSec = 90
 
-// clusterEventItems coalesces fragmented per-channel events (see
-// recEventMergeGapSec). Order-independent; the caller re-sorts for display.
-func clusterEventItems(items []recEventItem) []recEventItem {
+// recTimelineMergeGapSec is the finer cooldown used by the unified-player timeline:
+// marks are spread out vertically by time, so showing more distinct events is
+// useful (unlike the grid, where over-fragmentation is noise).
+const recTimelineMergeGapSec = 25
+
+// clusterEventItems coalesces fragmented per-channel events, merging same-(stream,
+// kind) intervals separated by <= gapSec. Order-independent; the caller re-sorts.
+func clusterEventItems(items []recEventItem, gapSec int64) []recEventItem {
 	if len(items) <= 1 {
 		return items
 	}
@@ -243,7 +249,7 @@ func clusterEventItems(items []recEventItem) []recEventItem {
 	for _, it := range items {
 		if n := len(merged); n > 0 {
 			last := &merged[n-1]
-			if last.Stream == it.Stream && last.Kind == it.Kind && it.Start-last.End <= recEventMergeGapSec {
+			if last.Stream == it.Stream && last.Kind == it.Kind && it.Start-last.End <= gapSec {
 				if it.End > last.End {
 					last.End = it.End
 				}
@@ -264,7 +270,7 @@ func clusterEventItems(items []recEventItem) []recEventItem {
 		if it.Kind == "motion" {
 			drop := false
 			for _, sp := range specific[it.Stream] {
-				if it.Start <= sp.End+recEventMergeGapSec && sp.Start <= it.End+recEventMergeGapSec {
+				if it.Start <= sp.End+gapSec && sp.Start <= it.End+gapSec {
 					drop = true
 					break
 				}
@@ -328,8 +334,8 @@ func (h *Hub) HandleDashboardRecEventsList(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	// coalesce fragmented per-channel events, then sort newest first
-	items = clusterEventItems(items)
+	// coalesce fragmented per-channel events (grid: consolidate aggressively), sort newest first
+	items = clusterEventItems(items, recEventMergeGapSec)
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].Start > items[j].Start
 	})

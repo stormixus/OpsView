@@ -146,7 +146,7 @@ func TestClusterEventItems(t *testing.T) {
 		{Stream: "a/dvr0_ch1", Ch: 1, Name: "Lobby", Kind: "motion", Start: 9000, End: 9010}, // far -> separate
 		{Stream: "a/dvr0_ch2", Ch: 2, Name: "Gate", Kind: "motion", Start: 1005, End: 1015},  // other channel
 	}
-	out := clusterEventItems(items)
+	out := clusterEventItems(items, recEventMergeGapSec)
 	// expect: ch1 merged(1000..1140) + ch1 separate(9000..9010) + ch2(1005..1015) = 3
 	if len(out) != 3 {
 		t.Fatalf("got %d clustered items, want 3: %+v", len(out), out)
@@ -169,7 +169,7 @@ func TestClusterEventItemsMotionSupersededBySmart(t *testing.T) {
 		{Stream: "a/dvr0_ch1", Ch: 1, Name: "Lobby", Kind: "motion", Start: 1000, End: 1030},
 		{Stream: "a/dvr0_ch1", Ch: 1, Name: "Lobby", Kind: "person", Start: 1005, End: 1025},
 	}
-	out := clusterEventItems(items)
+	out := clusterEventItems(items, recEventMergeGapSec)
 	if len(out) != 1 || out[0].Kind != "person" {
 		t.Fatalf("expected only the person event to survive, got %+v", out)
 	}

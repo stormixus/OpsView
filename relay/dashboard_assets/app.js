@@ -1021,6 +1021,7 @@ function upRenderRail(){
   // REC playhead pill at the cursor
   if(up.mode==='rec'){ var cy=upYat(up.cursorT,H); if(cy>=0&&cy<=H){ html+='<div class="up-cursor" style="top:'+cy+'px"></div><div class="up-curpill" style="top:'+cy+'px">'+upClock(up.cursorT)+'</div>'; } }
   upRail._axis.innerHTML=html;
+  upSetBigClock(now);
 }
 function upFmtTick(t,interval){
   var d=new Date(t*1000);
@@ -1029,6 +1030,15 @@ function upFmtTick(t,interval){
   return pad2(d.getHours())+':'+pad2(d.getMinutes());
 }
 function upClock(t){ var d=new Date(t*1000); return pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds()); }
+// authoritative date+time for the top-left readout (relay/segment time — independent
+// of the DVR's burned-in OSD clock, which can drift).
+function upFmtFull(t){ var d=new Date(t*1000); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+' '+pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds()); }
+function upSetBigClock(now){
+  var bc=$('#upBigClock'); if(!bc) return;
+  var live=up.mode==='live', t=live? now : up.cursorT;
+  bc.textContent=(live?'LIVE · ':'녹화 · ')+upFmtFull(t);
+  bc.className='up-bigclock'+(live?' live':'');
+}
 
 // the timeline is a hover-reveal OVERLAY on top of the full-bleed video — it never
 // resizes the video. Reveal when the pointer nears the right edge, or while scrubbing.

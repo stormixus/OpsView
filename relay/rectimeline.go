@@ -65,7 +65,7 @@ func (h *Hub) timelineFor(stream string, start, end int64) recTimeline {
 				}
 			}
 		}
-		for _, it := range clusterEventItems(items) {
+		for _, it := range clusterEventItems(items, recTimelineMergeGapSec) {
 			out.Events = append(out.Events, tlEvent{Start: it.Start, End: it.End, Kind: it.Kind})
 		}
 		sort.Slice(out.Events, func(i, j int) bool { return out.Events[i].Start < out.Events[j].Start })

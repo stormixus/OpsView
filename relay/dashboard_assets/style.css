@@ -708,6 +708,8 @@ button{font-family:inherit; cursor:pointer;}
 .up-toplabel{position:absolute; left:18px; top:14px; z-index:3; display:flex; flex-direction:column; gap:2px; text-shadow:0 1px 6px #000; pointer-events:none;}
 .up-toplabel #upTitle{color:#e6edf3; font-size:15px; font-weight:700;}
 .up-toplabel .up-sub{color:#9aa6b4; font-size:12px;}
+.up-bigclock{margin-top:6px; align-self:flex-start; font-family:var(--font-mono); font-size:14px; font-weight:800; letter-spacing:.3px; color:#e6edf3; background:rgba(8,12,18,.62); border:1px solid rgba(255,255,255,.1); padding:3px 9px; border-radius:8px;}
+.up-bigclock.live{color:#fff; border-color:rgba(42,157,74,.6); box-shadow:0 0 0 1px rgba(42,157,74,.35) inset;}
 .up-livebadge{position:absolute; left:18px; bottom:16px; z-index:3; display:flex; align-items:center; gap:6px; color:#fff; font-size:12px; font-weight:700; background:rgba(0,0,0,.45); padding:5px 11px; border-radius:999px;}
 .uplayer.up-rec .up-livebadge{display:none;}
 .up-state{position:absolute; left:50%; bottom:16px; z-index:3; transform:translateX(-50%); color:#cdd6e0; font-size:12.5px; font-weight:600; background:rgba(0,0,0,.5); padding:4px 10px; border-radius:8px;}
