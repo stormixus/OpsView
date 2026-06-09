@@ -908,7 +908,8 @@ function openPlayer(stream, opts){
 }
 function upStartLive(){
   upStopVideo();
-  up.mode='live'; upEl.classList.remove('up-rec'); $('#upLiveBadge').style.display='';
+  if(up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
+  up.mode='live'; upEl.classList.remove('up-rec'); upRail.classList.remove('expanded'); $('#upLiveBadge').style.display='';
   $('#upState').textContent='';
   if(!up.path){ return; }
   var wsUrl=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/surv/ws/'+up.path;
@@ -1009,6 +1010,79 @@ function closePlayer(){
 $('#uplayerClose').addEventListener('click', closePlayer);
 upEl.addEventListener('click', function(e){ if(e.target===upEl) closePlayer(); });
 document.addEventListener('keydown', function(e){ if(e.key==='Escape' && up.open) closePlayer(); });
+
+// enter REC at unix-second time t: find the covering segment and seek into it.
+function upSeekTo(t){
+  var i=segmentAt(up.segs, t);
+  if(i<0){ upGap(t); return; }
+  up.mode='rec'; upEl.classList.add('up-rec'); upRail.classList.add('expanded');
+  $('#upLiveBadge').style.display='none'; $('#upState').textContent='';
+  up.cursorT=t;
+  upStopVideo();
+  var seg=up.segs[i];
+  // rec-timeline segments carry start/dur but not the file name; resolve it via /api/rec day list.
+  upResolveSegName(seg.start).then(function(name){
+    if(!name){ upGap(t); return; }
+    upVideo.src=BASE+'/api/rec-file?stream='+encodeURIComponent(up.path)+'&name='+encodeURIComponent(name);
+    upVideo.currentTime=0;
+    upVideo.onloadedmetadata=function(){ try{ upVideo.currentTime=Math.max(0,t-seg.start); }catch(e){} upVideo.play().catch(function(){}); };
+    up._curSeg={start:seg.start, dur:seg.dur, name:name};
+    upStartRecLoop();
+  });
+}
+
+function upDayOf(t){ var d=new Date(t*1000); return ''+d.getFullYear()+pad2(d.getMonth()+1)+pad2(d.getDate()); }
+// resolve the segment file name whose start == segStart (via the day's listing).
+function upResolveSegName(segStart){
+  return recSegsForDay(up.path, upDayOf(segStart)).then(function(list){
+    var hit=(list||[]).filter(function(s){return s.start===segStart;})[0];
+    return hit? hit.name : null;
+  });
+}
+
+function upStartRecLoop(){
+  if(up._raf) cancelAnimationFrame(up._raf);
+  function loop(){
+    if(!up.open || up.mode!=='rec'){ up._raf=null; return; }
+    if(up._curSeg){
+      up.cursorT=up._curSeg.start + (upVideo.currentTime||0);
+      // reached the live edge? hand back to LIVE.
+      if(up.cursorT >= Math.floor(Date.now()/1000)-2){ upStartLive(); return; }
+      // near end of this segment -> jump to the next contiguous one.
+      if(upVideo.currentTime >= up._curSeg.dur-0.25){
+        var next=segmentAt(up.segs, up._curSeg.start+up._curSeg.dur+1);
+        if(next>=0){ upSeekTo(up.segs[next].start+0.1); return; }
+      }
+    }
+    upSyncRecWindow(); upRenderRail();
+    up._raf=requestAnimationFrame(loop);
+  }
+  up._raf=requestAnimationFrame(loop);
+}
+// keep the cursor comfortably in view as REC plays (cursor ~40% down from top).
+function upSyncRecWindow(){
+  var H=upRailH(), span=Math.round(H/up.pxPerSec);
+  up.t1=up.cursorT + span*0.4; up.t0=up.t1-span;
+  var now=Math.floor(Date.now()/1000);
+  var c=clampWindow(up.t0,up.t1,now); up.t0=c.t0; up.t1=c.t1;
+}
+function upGap(t){
+  up.mode='gap'; up.cursorT=t; $('#upState').textContent='이 시각 녹화 없음';
+  var best=null,bestD=1e15;
+  up.segs.forEach(function(s){ [s.start, s.start+s.dur-1].forEach(function(edge){ var d=Math.abs(edge-t); if(d<bestD){bestD=d;best=edge;} }); });
+  upSyncRecWindow(); upRenderRail();
+  if(best!=null){ setTimeout(function(){ if(up.mode==='gap') upSeekTo(best); }, 700); }
+}
+
+upRail.addEventListener('click', function(e){
+  var evb=e.target.closest('.up-ev');
+  if(evb){ upSeekTo(+evb.dataset.t); return; }
+  var H=upRailH(), rect=upRail.getBoundingClientRect();
+  var y=e.clientY-rect.top;
+  var t=Math.round(yToTime(y, up.t0, up.t1, H));
+  var now=Math.floor(Date.now()/1000);
+  if(t>=now-2){ upStartLive(); } else { upSeekTo(t); }
+});
 /* ============================================================ RELAY / CONN */
 var relayDownAt=Date.now();
 function renderConn(){
