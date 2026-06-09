@@ -786,12 +786,11 @@ $('#recEventFilters').addEventListener('click', function(e){
   recCtx.evShown = 0; // reset on filter change
   recRenderEventList();
 });
-// Click a card -> open the event in the modal video player at its timestamp.
-// The grid spans all cameras, so fetch the card's stream segments for the day
-// (memoized), find the segment containing the event time, and seek into it.
+// Click a card -> open the unified rail player seeked to the event time (REC mode).
+// Replaces the old per-event clip modal so live and recording share one player.
 $('#recEventGrid').addEventListener('click', function(e){
   var card=e.target.closest('.ev-cell'); if(!card) return;
-  openEventModal(card.dataset.stream, +card.dataset.start, card.dataset.ch, card.querySelector('.ev-celltime'));
+  openPlayer(card.dataset.stream, {mode:'rec', t:+card.dataset.start});
 });
 function recSegsForDay(stream, day){
   var key=stream+'|'+day;
@@ -896,15 +895,31 @@ var up = {
 };
 var upEl=$('#uplayer'), upVideo=$('#upVideo');
 
+// open the unified player. opts.mode==='rec' with opts.t (unix sec) opens straight
+// into recording playback seeked to that time (used by the event grid); otherwise LIVE.
 function openPlayer(stream, opts){
   opts=opts||{};
   if(selected===null) return; var a=agentById(selected); if(!a) return;
-  var s=a.streams.filter(function(x){return x.id===stream || x.path===stream;})[0]; if(!s) return;
+  var rec = opts.mode==='rec' && opts.t;
+  var s=a.streams.filter(function(x){return x.id===stream || x.path===stream;})[0];
+  if(!s){
+    if(!rec) return; // live needs a currently-active stream
+    // recorded event on a channel that isn't streaming right now — synthesize from the path
+    var m=String(stream).match(/_ch(\d+)/);
+    s={ id:stream, path:stream, codec:'h264', name:'CH'+(m?m[1]:'?'), ch:(m?+m[1]:0) };
+  }
   up.open=true; up.stream=s.id; up.path=s.path; up.codec=s.codec; up.name=s.name; up.sub=a.name;
-  up.mode='live';
+  up.pxPerSec=0.08; // reset to the default zoom on every open
   $('#upTitle').textContent=s.name; $('#upSub').textContent=a.name+' · CH'+s.ch;
   upEl.classList.add('show'); upEl.setAttribute('aria-hidden','false');
-  upStartLive();
+  if(rec){
+    up.mode='rec'; upEl.classList.add('up-rec'); upRail.classList.add('show');
+    $('#upLiveBadge').style.display='none';
+    up.cursorT=opts.t; upSyncRecWindow(); upRenderRail();
+    upSeekTo(opts.t);
+  } else {
+    up.mode='live'; upStartLive();
+  }
 }
 function upStartLive(){
   upStopVideo();
