@@ -120,3 +120,13 @@ type SurvEvent struct {
 	Active  bool   `json:"active"` // true = event started, false = ended
 	TS      int64  `json:"ts"`     // event time, unix milliseconds (from the source's local wall-clock)
 }
+
+// SurvEventThumb carries a small JPEG snapshot captured at an event's start, so
+// the dashboard can show an event thumbnail without extracting from recordings.
+// AgentID is stamped by the relay (left empty by the publisher), like SurvEvent.
+type SurvEventThumb struct {
+	AgentID string `json:"agent_id,omitempty"`
+	ChID    string `json:"ch_id"` // "dvr1_ch2" — matches the event/stream path
+	TS      int64  `json:"ts"`    // unix MILLISECONDS — SAME value as the matching SurvEvent edge that opened the event
+	Jpeg    []byte `json:"jpeg"`  // raw JPEG (Go json encodes []byte as base64)
+}

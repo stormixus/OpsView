@@ -48,6 +48,9 @@ type Agent struct {
 	stopped     chan struct{}
 	stopOnce    sync.Once
 	snapshotSem chan struct{} // bounds concurrent snapshot handlers
+
+	thumbMu     sync.Mutex       // guards lastThumbAt
+	lastThumbAt map[string]int64 // chID -> last event-thumb send (unix ms); throttles bursts
 }
 
 func NewAgent(cfg AgentConfig) *Agent {
@@ -377,6 +380,55 @@ func (a *Agent) sendSurvEvent(chID, kind string, active bool, tsMs int64) {
 	}
 }
 
+// eventThumbThrottle is the minimum gap between event-thumb snapshots for a single
+// channel, so a burst of motion edges doesn't fetch dozens of snapshots.
+const eventThumbThrottle = 3 * time.Second
+
+// sendEventThumb fetches a live DVR snapshot for the channel and ships it to the
+// relay as a MsgSurvEventThumb so the dashboard can show an instant event
+// thumbnail without extracting from recordings. ChID/TS match the SurvEvent edge
+// that opened the event. Best-effort: bails on fetch error and no-ops while
+// disconnected; per-channel throttled. Run off the event loop (it does network I/O).
+func (a *Agent) sendEventThumb(dvr DVRConfig, chNum int, tsMs int64) {
+	if a.survMgr == nil {
+		return
+	}
+	chID := fmt.Sprintf("dvr%d_ch%d", dvr.ID, chNum)
+
+	// Throttle per channel.
+	now := time.Now().UnixMilli()
+	a.thumbMu.Lock()
+	if a.lastThumbAt == nil {
+		a.lastThumbAt = make(map[string]int64)
+	}
+	if last, ok := a.lastThumbAt[chID]; ok && now-last < eventThumbThrottle.Milliseconds() {
+		a.thumbMu.Unlock()
+		return
+	}
+	a.lastThumbAt[chID] = now
+	a.thumbMu.Unlock()
+
+	jpeg, err := a.survMgr.FetchSnapshot(dvr.ID, chNum)
+	if err != nil || len(jpeg) == 0 {
+		if err != nil {
+			log.Printf("[agent] sendEventThumb %s: snapshot: %v", chID, err)
+		}
+		return
+	}
+
+	payload, _ := json.Marshal(proto.SurvEventThumb{ChID: chID, TS: tsMs, Jpeg: jpeg})
+	msg := proto.MarshalMessage(proto.MsgSurvEventThumb, payload)
+	a.connMu.Lock()
+	conn := a.conn
+	a.connMu.Unlock()
+	if conn == nil {
+		return
+	}
+	if err := a.wsWrite(conn, msg); err != nil {
+		log.Printf("[agent] sendEventThumb send error: %v", err)
+	}
+}
+
 // runEventManager starts one ISAPI alertStream consumer per ISAPI DVR for the
 // agent's lifetime; each emits event edges to the relay via sendSurvEvent. The
 // consumers talk to the DVRs (not the relay), so they persist across relay
@@ -393,6 +445,14 @@ func (a *Agent) runEventManager() {
 			isapiAlertLoop(a.survMgr.client, ed.dvr, ed.chNums, a.stopped, func(e alertEvent) {
 				chID := fmt.Sprintf("dvr%d_ch%d", ed.dvr.ID, e.chNum)
 				a.sendSurvEvent(chID, e.kind, e.active, e.tsMs)
+				if e.active {
+					// Grab a live snapshot for this event's start and pre-store it on the
+					// relay. Off the event loop (snapshot is network I/O) and throttled
+					// per channel inside sendEventThumb.
+					ed := ed
+					e := e
+					go a.runGuarded("eventThumb", func() { a.sendEventThumb(ed.dvr, e.chNum, e.tsMs) })
+				}
 			})
 		})
 	}

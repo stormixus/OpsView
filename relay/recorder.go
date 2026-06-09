@@ -104,6 +104,7 @@ func (r *Recorder) Run() {
 			r.reconcile()
 		case <-janTicker.C:
 			r.runJanitor()
+			r.pruneEventThumbs()
 		}
 	}
 }
@@ -328,6 +329,39 @@ func (r *Recorder) runJanitor() {
 	}
 	if deleted > 0 {
 		log.Printf("[rec] janitor: freed %s (%d segments) — over cap %s", fmtBytesCap(freed), deleted, fmtBytesCap(r.capBytes))
+	}
+}
+
+// pruneEventThumbs deletes pre-stored event-thumb JPEGs older than the recordings
+// event-retention window (RELAY_REC_KEEP_EVENT_DAYS, default 30d) so .evthumbs/
+// dirs don't grow unbounded. Walks <recDir>/*/.evthumbs/. Best-effort and bounded.
+func (r *Recorder) pruneEventThumbs() {
+	keepEventDays := parseEnvInt("RELAY_REC_KEEP_EVENT_DAYS", recKeepEventDaysDefault)
+	cutoff := time.Now().Add(-time.Duration(keepEventDays) * 24 * time.Hour)
+	pruned := 0
+	filepath.WalkDir(r.dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if filepath.Base(filepath.Dir(p)) != evThumbDir || !strings.HasSuffix(p, ".jpg") {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		if info.ModTime().Before(cutoff) {
+			if os.Remove(p) == nil {
+				pruned++
+			}
+		}
+		return nil
+	})
+	if pruned > 0 {
+		log.Printf("[rec] janitor: pruned %d event thumbs older than %dd", pruned, keepEventDays)
 	}
 }
 

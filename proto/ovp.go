@@ -19,19 +19,20 @@ const (
 type MessageType uint16
 
 const (
-	MsgHello        MessageType = 1
-	MsgAuth         MessageType = 2
-	MsgFrameDelta   MessageType = 3
-	MsgFullFrame    MessageType = 4
-	MsgControl      MessageType = 5
-	MsgHeartbeat    MessageType = 6
-	MsgError        MessageType = 7
-	MsgReady        MessageType = 8
-	MsgSurvConfig   MessageType = 9  // Surveillance config (publisher→relay→watcher)
-	MsgSurvSnapshot MessageType = 10 // Snapshot request/response
-	MsgSurvMeta     MessageType = 11 // Channel meta edit (relay→publisher): reorder/rename
-	MsgAgentControl MessageType = 12 // Agent control (relay→publisher): e.g. reconnect/rediscover DVRs
-	MsgSurvEvent    MessageType = 13 // DVR motion/analytics event edge (publisher→relay)
+	MsgHello          MessageType = 1
+	MsgAuth           MessageType = 2
+	MsgFrameDelta     MessageType = 3
+	MsgFullFrame      MessageType = 4
+	MsgControl        MessageType = 5
+	MsgHeartbeat      MessageType = 6
+	MsgError          MessageType = 7
+	MsgReady          MessageType = 8
+	MsgSurvConfig     MessageType = 9  // Surveillance config (publisher→relay→watcher)
+	MsgSurvSnapshot   MessageType = 10 // Snapshot request/response
+	MsgSurvMeta       MessageType = 11 // Channel meta edit (relay→publisher): reorder/rename
+	MsgAgentControl   MessageType = 12 // Agent control (relay→publisher): e.g. reconnect/rediscover DVRs
+	MsgSurvEvent      MessageType = 13 // DVR motion/analytics event edge (publisher→relay)
+	MsgSurvEventThumb MessageType = 14 // JPEG snapshot captured at an event's start (publisher→relay)
 )
 
 func (m MessageType) String() string {
@@ -62,6 +63,8 @@ func (m MessageType) String() string {
 		return "AGENT_CONTROL"
 	case MsgSurvEvent:
 		return "SURV_EVENT"
+	case MsgSurvEventThumb:
+		return "SURV_EVENT_THUMB"
 	default:
 		return fmt.Sprintf("UNKNOWN(%d)", m)
 	}

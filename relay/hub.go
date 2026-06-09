@@ -387,6 +387,13 @@ func (h *Hub) HandlePublish(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
+		case proto.MsgSurvEventThumb:
+			var th proto.SurvEventThumb
+			if json.Unmarshal(data[proto.HeaderSize:], &th) == nil {
+				stream := streamPath(sess.id, th.ChID)
+				h.storeEventThumb(stream, th.TS, th.Jpeg)
+			}
+
 		case proto.MsgSurvSnapshot:
 			if len(data) > proto.HeaderSize {
 				var resp proto.SnapshotResponse

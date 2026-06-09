@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 )
@@ -55,5 +56,31 @@ func TestSurvEventRoundTrip(t *testing.T) {
 	}
 	if MsgSurvEvent.String() != "SURV_EVENT" {
 		t.Fatalf("String() = %q, want SURV_EVENT", MsgSurvEvent.String())
+	}
+}
+
+func TestSurvEventThumbRoundTrip(t *testing.T) {
+	th := SurvEventThumb{ChID: "dvr1_ch2", TS: 1717843200123, Jpeg: []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10}}
+	payload, err := json.Marshal(th)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	msg := MarshalMessage(MsgSurvEventThumb, payload)
+	hdr, err := DecodeHeader(msg)
+	if err != nil {
+		t.Fatalf("decode header: %v", err)
+	}
+	if hdr.Type != MsgSurvEventThumb {
+		t.Fatalf("type = %v, want MsgSurvEventThumb", hdr.Type)
+	}
+	var got SurvEventThumb
+	if err := json.Unmarshal(msg[HeaderSize:], &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.ChID != th.ChID || got.TS != th.TS || !bytes.Equal(got.Jpeg, th.Jpeg) {
+		t.Fatalf("round-trip = %+v, want %+v", got, th)
+	}
+	if MsgSurvEventThumb.String() != "SURV_EVENT_THUMB" {
+		t.Fatalf("String() = %q, want SURV_EVENT_THUMB", MsgSurvEventThumb.String())
 	}
 }
