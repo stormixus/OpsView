@@ -628,7 +628,8 @@ modalCell.addEventListener('keydown', function(e){ if(e.target.classList.contain
 /* ============================================================ EVENTS (이벤트) — Protect-style thumbnail grid */
 // recCtx keeps the day + the agent-wide event list (newest-first from the API).
 // segCache memoizes per-stream segment lists for the day (used for modal playback).
-var recCtx = { day:null, eventList:[], eventFilter:'all', segCache:{} };
+var REC_EV_PAGE = 80; // number of event cards to load per page
+var recCtx = { day:null, eventList:[], eventFilter:'all', segCache:{}, evShown:0 };
 function pad2(n){ return (n<10?'0':'')+n; }
 function recDayStr(d){ return ''+d.getFullYear()+pad2(d.getMonth()+1)+pad2(d.getDate()); }
 function recSetDateInput(ymd){ $('#recDate').value=ymd.slice(0,4)+'-'+ymd.slice(4,6)+'-'+ymd.slice(6,8); }
@@ -670,6 +671,18 @@ function loadRecEventList(day){
     .catch(function(){ return []; });
 }
 var REC_KIND_NAMES={person:'사람',vehicle:'차량',motion:'모션',linecross:'라인',intrusion:'침입'};
+var recIntersectObs = null; // IntersectionObserver for infinite scroll sentinel
+// Helper: generate HTML for a single event card
+function evCardHTML(ev){
+  var d=new Date(ev.start*1000), kind=ev.kind||'motion', kindLabel=REC_KIND_NAMES[kind]||kind;
+  var when=(d.getMonth()+1)+'월 '+pad2(d.getDate())+', '+pad2(d.getHours())+':'+pad2(d.getMinutes());
+  var thumbUrl=BASE+'/api/rec-thumb?stream='+encodeURIComponent(ev.stream)+'&t='+ev.start;
+  return '<button class="ev-cell ev-k-'+escAttr(kind)+'" data-stream="'+escAttr(ev.stream)+'" data-start="'+ev.start+'" data-ch="'+escAttr(''+ev.ch)+'">'+
+    '<img class="ev-cellimg" loading="lazy" src="'+escAttr(thumbUrl)+'" alt="'+escAttr(kindLabel)+'">'+
+    '<div class="ev-cellbar"><span class="ev-celltxt"><span class="ev-celltime">'+escHtml(when)+'</span>'+
+    '<span class="ev-cellcam">'+escHtml(ev.name)+' · CH'+escHtml(''+ev.ch)+'</span></span>'+
+    '<span class="ev-kicon ev-'+escAttr(kind)+'"></span></div></button>';
+}
 // Render the Protect-style event thumbnail grid (newest-first, filtered by kind).
 function recRenderEventList(){
   var grid=$('#recEventGrid'), filtersEl=$('#recEventFilters'); if(!grid || !filtersEl) return;
@@ -682,27 +695,63 @@ function recRenderEventList(){
   });
   filtersEl.innerHTML=filters.join('');
   $('#recMeta').textContent = events.length ? (events.length+'건') : '';
-  if(!events.length){ grid.innerHTML='<div class="ev-grid-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg><b>이벤트 없음</b></div>'; return; }
+  if(!events.length){ grid.innerHTML='<div class="ev-grid-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg><b>이벤트 없음</b></div>'; recCleanupIntersect(); return; }
   var filtered = recCtx.eventFilter==='all' ? events : events.filter(function(ev){ return (ev.kind||'motion')===recCtx.eventFilter; });
-  if(!filtered.length){ grid.innerHTML='<div class="ev-grid-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg><b>선택한 종류 이벤트 없음</b></div>'; return; }
-  grid.innerHTML = filtered.map(function(ev){
-    var d=new Date(ev.start*1000), kind=ev.kind||'motion', kindLabel=REC_KIND_NAMES[kind]||kind;
-    var when=(d.getMonth()+1)+'월 '+pad2(d.getDate())+', '+pad2(d.getHours())+':'+pad2(d.getMinutes());
-    var thumbUrl=BASE+'/api/rec-thumb?stream='+encodeURIComponent(ev.stream)+'&t='+ev.start;
-    return '<button class="ev-cell ev-k-'+escAttr(kind)+'" data-stream="'+escAttr(ev.stream)+'" data-start="'+ev.start+'" data-ch="'+escAttr(''+ev.ch)+'">'+
-      '<img class="ev-cellimg" loading="lazy" src="'+escAttr(thumbUrl)+'" alt="'+escAttr(kindLabel)+'">'+
-      '<div class="ev-cellbar"><span class="ev-celltxt"><span class="ev-celltime">'+escHtml(when)+'</span>'+
-      '<span class="ev-cellcam">'+escHtml(ev.name)+' · CH'+escHtml(''+ev.ch)+'</span></span>'+
-      '<span class="ev-kicon ev-'+escAttr(kind)+'"></span></div></button>';
-  }).join('');
-  // No thumbnail yet (event in the still-recording segment -> 204) -> clean dark placeholder.
-  grid.querySelectorAll('.ev-cellimg').forEach(function(img){
-    img.addEventListener('error', function(){ this.onerror=null; this.classList.add('ev-thumb-na'); this.removeAttribute('src'); });
-  });
+  if(!filtered.length){ grid.innerHTML='<div class="ev-grid-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg><b>선택한 종류 이벤트 없음</b></div>'; recCleanupIntersect(); return; }
+  // Reset for fresh render (day/filter change)
+  recCtx.evShown = 0;
+  grid.innerHTML = '';
+  recAppendEvents(grid, filtered);
+}
+// Append the next page of event cards to the grid
+function recAppendEvents(grid, filtered){
+  if(!grid || !filtered) return;
+  var start = recCtx.evShown;
+  var end = Math.min(start + REC_EV_PAGE, filtered.length);
+  var slice = filtered.slice(start, end);
+  if(!slice.length) return;
+  var html = slice.map(evCardHTML).join('');
+  grid.insertAdjacentHTML('beforeend', html);
+  recCtx.evShown = end;
+  // Attach onerror handler to newly appended thumbnails
+  var newImgs = grid.querySelectorAll('.ev-cellimg');
+  for(var i = newImgs.length - slice.length; i < newImgs.length; i++){
+    var img = newImgs[i];
+    if(img && !img.onerror){
+      img.addEventListener('error', function(){ this.onerror=null; this.classList.add('ev-thumb-na'); this.removeAttribute('src'); });
+    }
+  }
+  // Setup or update the sentinel for infinite scroll
+  if(recCtx.evShown < filtered.length){
+    recSetupIntersect(grid, filtered);
+  } else {
+    recCleanupIntersect();
+  }
+}
+// Setup IntersectionObserver on a sentinel div at the end of the grid
+function recSetupIntersect(grid, filtered){
+  recCleanupIntersect();
+  var sentinel = document.createElement('div');
+  sentinel.id = 'recSentinel';
+  sentinel.style.cssText = 'height:1px;pointer-events:none;';
+  grid.appendChild(sentinel);
+  recIntersectObs = new IntersectionObserver(function(entries){
+    if(entries[0] && entries[0].isIntersecting){
+      recAppendEvents(grid, filtered);
+    }
+  }, { rootMargin: '600px' });
+  recIntersectObs.observe(sentinel);
+}
+// Cleanup the IntersectionObserver and sentinel
+function recCleanupIntersect(){
+  if(recIntersectObs){ recIntersectObs.disconnect(); recIntersectObs = null; }
+  var sentinel = document.getElementById('recSentinel');
+  if(sentinel && sentinel.parentNode){ sentinel.parentNode.removeChild(sentinel); }
 }
 $('#recEventFilters').addEventListener('click', function(e){
   var b=e.target.closest('[data-kind]'); if(!b) return;
   recCtx.eventFilter=b.dataset.kind;
+  recCtx.evShown = 0; // reset on filter change
   recRenderEventList();
 });
 // Click a card -> open the event in the modal video player at its timestamp.
