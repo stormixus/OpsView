@@ -1,7 +1,7 @@
 # Build stage — bookworm + CGO for onnxruntime_go (linux/amd64 / Unraid).
 FROM golang:1.25-bookworm AS builder
 ARG VERSION=dev
-ARG ONNXRUNTIME_VERSION=1.21.0
+ARG ONNXRUNTIME_VERSION=1.26.0
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev curl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL -o /tmp/ort.tgz \
@@ -19,7 +19,7 @@ RUN go build -tags onnx -ldflags="-s -w -X main.relayVersion=${VERSION}" -o /ops
 
 # Runtime stage — glibc base; onnxruntime .so bundled from builder.
 FROM debian:bookworm-slim
-ARG ONNXRUNTIME_VERSION=1.21.0
+ARG ONNXRUNTIME_VERSION=1.26.0
 # ffmpeg: NVR recorder (HLS → MP4). tzdata: TZ=Asia/Seoul for recording names/timeline.
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates ffmpeg tzdata \
   && rm -rf /var/lib/apt/lists/*
