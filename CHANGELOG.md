@@ -4,6 +4,21 @@ All notable changes to OpsView are documented here.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-06-09
+
+### Added
+
+- **Pre-stored event snapshots (instant thumbnails, no 404).** When an event fires
+  the agent grabs a live DVR snapshot and ships it to the relay (`MsgSurvEventThumb`),
+  which stores it; the event-grid thumbnail endpoint serves that stored JPEG —
+  instant, no per-request ffmpeg, and no 404 when the event time doesn't map to a
+  recording (clock skew / gaps). On-demand ffmpeg extraction stays as the fallback
+  for non-event times. Snapshots are throttled per channel (~3s) and pruned with the
+  recordings retention. **Update the agent** for the agent to start sending them.
+- **Infinite scroll on the event grid.** The 이벤트 grid renders in pages (80 cards)
+  and loads more as you scroll, instead of rendering thousands of cards + thumbnail
+  requests at once.
+
 ### Changed
 
 - **Dashboard design + UX pass (from a design/UX review).** Relay-only:
