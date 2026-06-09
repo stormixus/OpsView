@@ -1022,6 +1022,7 @@ function upSeekTo(t){
   if(i<0){ upGap(t); return; }
   up.mode='rec'; upEl.classList.add('up-rec'); upRail.classList.add('expanded');
   $('#upLiveBadge').style.display='none'; $('#upState').textContent='';
+  clearTimeout(up._liveTimer); // stop the 1s LIVE re-render so it can't fight the REC rAF over t0/t1
   up.cursorT=t;
   upStopVideo();
   var seg=up.segs[i], seq=++up._seekSeq;
