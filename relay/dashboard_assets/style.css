@@ -598,7 +598,7 @@ button{font-family:inherit; cursor:pointer;}
 /* narrow */
 @media (max-width:1000px){
   #rec-pane.active{height:auto;}
-  .ev-grid{grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));}
+  .ev-grid{grid-template-columns:repeat(2, minmax(0, 1fr));}
 }
 
 /* ============================ 관리 (manage: 지점 / 알림 / 보안) ============================ */
