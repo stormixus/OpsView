@@ -71,7 +71,9 @@ button{font-family:inherit; cursor:pointer;}
 *::-webkit-scrollbar-track{background:transparent;}
 
 /* ============================================================ LOGIN */
-#login{position:fixed; inset:0; display:grid; place-items:center; padding:24px;
+/* Hidden until the boot auth-check decides — otherwise login flashes on every reload
+   before the (HttpOnly-cookie) /state check returns. Shown via inline display:grid. */
+#login{position:fixed; inset:0; display:none; place-items:center; padding:24px;
   background:radial-gradient(900px 520px at 50% -10%, color-mix(in srgb,var(--accent) 14%, transparent), transparent 60%), var(--bg); z-index:50;}
 .login-card{width:min(420px,100%); background:var(--panel); border:1px solid var(--border); border-radius:var(--r-lg); box-shadow:var(--shadow); padding:38px 34px 30px; text-align:center;}
 .login-card .brand{justify-content:center; margin-bottom:6px;}

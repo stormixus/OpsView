@@ -191,9 +191,11 @@ pwIn.addEventListener('keydown', function(e){ if(e.key==='Enter') attempt(); });
 pwIn.addEventListener('input', function(){ if(loginCard.classList.contains('err') && Date.now()>=lockUntil){ loginCard.classList.remove('err'); } });
 $('#logoutBtn').addEventListener('click', function(){ fetch('/dashboard/api/logout', {method:'POST'}).catch(function(){}); logoutToLogin(); });
 // On load, the session cookie decides: a 200 from /state means we're already in.
+// #login stays hidden until we know we're NOT authed, so it never flashes on reload.
+function showLogin(){ loginEl.style.display='grid'; setTimeout(function(){pwIn.focus();},120); }
 fetch('/dashboard/api/state').then(function(r){
-  if(r.status===200){ showApp(); } else { setTimeout(function(){pwIn.focus();},120); }
-}).catch(function(){ setTimeout(function(){pwIn.focus();},120); });
+  if(r.status===200){ showApp(); } else { showLogin(); }
+}).catch(showLogin);
 
 /* ============================================================ NAVIGATION */
 var selected=null;   // null = overview ; else agent id
