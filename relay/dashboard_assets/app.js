@@ -1185,6 +1185,7 @@ function upGap(t){
 }
 
 upRail.addEventListener('click', function(e){
+  if(up._noClick) return; // a swipe just ended — don't also seek to the release point
   var evb=e.target.closest('.up-ev');
   if(evb){ upSeekTo(+evb.dataset.t); return; }
   var H=upRailH(), rect=upRail.getBoundingClientRect();
@@ -1217,6 +1218,40 @@ function upOnWheel(e){
 }
 $('#upStage').addEventListener('wheel', upOnWheel, {passive:false});
 upRail.addEventListener('wheel', upOnWheel, {passive:false});
+
+// iPhone/touch: no wheel or hover. Swipe vertically (from the right edge) to scrub
+// the timeline — finger down = toward now, finger up = into the past; release to play.
+var upTouch=null;
+function upTouchStart(e){
+  if(!up.open || e.touches.length!==1) return;
+  var x=e.touches[0].clientX, y=e.touches[0].clientY;
+  if(y<64) return; // keep clear of the close button row
+  if(x < window.innerWidth-220 && !upRail.classList.contains('show')) return; // start in the right zone
+  upTouch={ y:y, base:(up.mode==='live'?Math.floor(Date.now()/1000):up.cursorT), span:up.t1-up.t0, moved:false };
+  upRail.classList.add('show');
+}
+function upTouchMove(e){
+  if(!upTouch || e.touches.length!==1) return;
+  e.preventDefault(); // stop the page from scrolling / pull-to-refresh
+  var H=upRailH(), dy=e.touches[0].clientY-upTouch.y;
+  if(Math.abs(dy)>5) upTouch.moved=true;
+  var now=Math.floor(Date.now()/1000);
+  var t=Math.round(upTouch.base + (dy/H)*upTouch.span); if(t>now) t=now; // finger down -> toward now
+  up.mode='rec'; upEl.classList.add('up-rec'); $('#upLiveBadge').style.display='none';
+  up.cursorT=t; upSyncRecWindow(); upRenderRail(); // visual scrub (thumbs/cursor); video loads on release
+}
+function upTouchEnd(){
+  if(!upTouch) return;
+  var moved=upTouch.moved, t=up.cursorT; upTouch=null;
+  if(!moved) return; // a tap -> let the click handler seek at the tapped position
+  up._noClick=true; setTimeout(function(){ up._noClick=false; }, 450);
+  var now=Math.floor(Date.now()/1000);
+  if(t>=now-2){ upStartLive(); } else { upSeekTo(t); }
+}
+upEl.addEventListener('touchstart', upTouchStart, {passive:true});
+upEl.addEventListener('touchmove', upTouchMove, {passive:false});
+upEl.addEventListener('touchend', upTouchEnd);
+upEl.addEventListener('touchcancel', upTouchEnd);
 
 /* ============================================================ RELAY / CONN */
 var relayDownAt=Date.now();
