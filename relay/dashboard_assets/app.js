@@ -890,7 +890,7 @@ var up = {
   open:false, stream:null, name:'', sub:'', codec:'h264', path:'',
   mode:'live',            // 'live' | 'rec' | 'gap'
   player:null,            // live WS/HLS handle (has .close)
-  t0:0, t1:0, pxPerSec:0.25, // timeline window (unix sec): t0=top(past), t1=bottom(now). default 4s/px
+  t0:0, t1:0, pxPerSec:0.08, // window (unix sec): t0=oldest, t1=newest(now). rail renders newest at TOP. ~12.5s/px
   segs:[], events:[],     // from rec-timeline
   cursorT:0,
 };
@@ -909,7 +909,7 @@ function openPlayer(stream, opts){
 function upStartLive(){
   upStopVideo();
   if(up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
-  up.mode='live'; upEl.classList.remove('up-rec'); upRail.classList.remove('expanded'); $('#upLiveBadge').style.display='';
+  up.mode='live'; upEl.classList.remove('up-rec'); $('#upLiveBadge').style.display='';
   $('#upState').textContent='';
   if(!up.path){ return; }
   var wsUrl=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/surv/ws/'+up.path;
@@ -946,45 +946,72 @@ function upScheduleTimeline(){ clearTimeout(up._tlTimer); up._tlTimer=setTimeout
 var upRail=$('#upRail');
 var upPrev=$('#upPreview'), upPrevImg=$('#upPreviewImg');
 function upRailH(){ return upRail.clientHeight || 600; }
+// position mapping: NEWEST (t1/now) at TOP (y=0), OLDEST (t0) at BOTTOM (y=H).
+function upYat(t,H){ return H - timeToY(t, up.t0, up.t1, H); }
+function upTat(y,H){ return yToTime(H-y, up.t0, up.t1, H); }
 // recompute the LIVE window so t1=now and the rail height maps to a time span.
 function upSyncLiveWindow(){
   var now=Math.floor(Date.now()/1000);
   var span=Math.round(upRailH()/up.pxPerSec);
   up.t1=now; up.t0=now-span;
 }
+// two layers inside the rail: a reconciled thumbnail filmstrip (NOT rebuilt each
+// frame, so images don't re-fetch) + a cheap axis layer rebuilt every render.
+function upRailLayers(){
+  if(!upRail._axis){
+    upRail.innerHTML='<div class="up-thumbs" id="upRailThumbs"></div><div class="up-axis" id="upRailAxis"></div>';
+    upRail._thumbs=$('#upRailThumbs'); upRail._axis=$('#upRailAxis'); upRail._thumbMap={};
+  }
+}
+function upResetThumbs(){ if(upRail._thumbs){ upRail._thumbs.innerHTML=''; upRail._thumbMap={}; } }
+// reconcile inline thumbnails at tick positions where recording exists (reuse <img>
+// elements by time key so the per-frame re-render never re-fetches).
+function upRenderThumbs(H, interval, now){
+  var layer=upRail._thumbs, map=upRail._thumbMap, keep={};
+  for(var tt=Math.ceil(up.t0/interval)*interval; tt<=up.t1; tt+=interval){
+    if(tt>now || segmentAt(up.segs,tt)<0) continue;
+    var y=upYat(tt,H); if(y<-40||y>H+40) continue;
+    keep[tt]=1;
+    var img=map[tt];
+    if(!img){
+      img=document.createElement('img'); img.className='up-thumb'; img.loading='lazy';
+      img.onerror=function(){ this.classList.add('na'); };
+      img.src=BASE+'/api/rec-thumb?stream='+encodeURIComponent(up.path)+'&t='+tt;
+      layer.appendChild(img); map[tt]=img;
+    }
+    img.style.top=(y-27)+'px';
+  }
+  for(var k in map){ if(!keep[k]){ if(map[k].parentNode) layer.removeChild(map[k]); delete map[k]; } }
+}
 function upRenderRail(){
-  var H=upRailH(), html='';
-  // recording coverage shading (recorded vs gap)
+  upRailLayers();
+  var H=upRailH(), now=Math.floor(Date.now()/1000), html='';
+  var interval=niceTickInterval(up.t1-up.t0,6);
+  upRenderThumbs(H, interval, now);
+  // recording coverage track (recorded vs gap)
   up.segs.forEach(function(s){
-    var yTop=timeToY(s.start, up.t0, up.t1, H);
-    var yBot=timeToY(s.start+s.dur, up.t0, up.t1, H);
-    var top=Math.max(0,Math.min(yTop,yBot)), h=Math.abs(yBot-yTop);
+    var yA=upYat(s.start,H), yB=upYat(s.start+s.dur,H);
+    var top=Math.max(0,Math.min(yA,yB)), h=Math.abs(yB-yA);
     if(top+h<0||top>H) return;
     html+='<div class="up-cov" style="top:'+top+'px;height:'+h+'px"></div>';
   });
-  // tick labels (only visible when expanded; CSS hides when thin)
-  var interval=niceTickInterval(up.t1-up.t0,6);
-  for(var tt=firstTickTime(up.t0,interval); tt<=up.t1; tt+=interval){
-    var y=timeToY(tt,up.t0,up.t1,H); if(y<0||y>H) continue;
-    html+='<div class="up-tick" style="top:'+y+'px"></div>'+
-          '<div class="up-tlabel" style="top:'+y+'px">'+upFmtTick(tt,interval)+'</div>';
+  // ticks + time labels
+  for(var tt=Math.ceil(up.t0/interval)*interval; tt<=up.t1; tt+=interval){
+    var y=upYat(tt,H); if(y<0||y>H) continue;
+    html+='<div class="up-tick" style="top:'+y+'px"></div><div class="up-tlabel" style="top:'+y+'px">'+upFmtTick(tt,interval)+'</div>';
   }
-  // event marks: thin = colored dot, expanded = icon + time (CSS toggles)
+  // event markers: kind icon + colored dot
   up.events.forEach(function(ev){
-    var y=timeToY(ev.start,up.t0,up.t1,H); if(y<0||y>H) return;
+    var y=upYat(ev.start,H); if(y<0||y>H) return;
     var k=ev.kind||'motion';
-    html+='<button class="up-ev ev-'+escAttr(k)+'" data-t="'+ev.start+'" style="top:'+y+'px" title="'+escAttr((REC_KIND_NAMES[k]||k))+'">'+
-            '<span class="up-ev-dot"></span>'+
-            '<span class="up-ev-ic">'+(REC_KIND_ICONS[k]||'')+'</span>'+
-            '<span class="up-ev-t">'+upClock(ev.start)+'</span>'+
-          '</button>';
+    html+='<button class="up-ev ev-'+escAttr(k)+'" data-t="'+ev.start+'" style="top:'+y+'px" title="'+escAttr((REC_KIND_NAMES[k]||k)+' '+upClock(ev.start))+'"><span class="up-ev-ic">'+(REC_KIND_ICONS[k]||'')+'</span><span class="up-ev-dot"></span></button>';
   });
-  // "지금" anchor
-  var nowY=timeToY(Math.floor(Date.now()/1000),up.t0,up.t1,H);
-  if(nowY>=0&&nowY<=H){ html+='<div class="up-now" style="top:'+nowY+'px"></div><div class="up-nowlbl" style="top:'+nowY+'px">지금</div>'; }
-  // cursor (REC mode; set in Task 5)
-  if(up.mode==='rec'){ var cy=timeToY(up.cursorT,up.t0,up.t1,H); if(cy>=0&&cy<=H){ html+='<div class="up-cursor" style="top:'+cy+'px"></div><div class="up-curlbl" style="top:'+cy+'px">'+upClock(up.cursorT)+'</div>'; } }
-  upRail.innerHTML=html;
+  // now line + pill at TOP (LIVE pill in live mode, else 지금)
+  var ny=upYat(now,H);
+  if(ny>=0&&ny<=H){ html+='<div class="up-now" style="top:'+ny+'px"></div><div class="up-nowpill'+(up.mode==='live'?' live':'')+'" style="top:'+ny+'px">'+(up.mode==='live'?'LIVE':'지금')+'</div>'; }
+  // REC playhead pill at the cursor
+  if(up.mode==='rec'){ var cy=upYat(up.cursorT,H); if(cy>=0&&cy<=H){ html+='<div class="up-cursor" style="top:'+cy+'px"></div><div class="up-curpill" style="top:'+cy+'px">'+upClock(up.cursorT)+'</div>'; } }
+  upRail._axis.innerHTML=html;
 }
 function upFmtTick(t,interval){
   var d=new Date(t*1000);
@@ -994,8 +1021,11 @@ function upFmtTick(t,interval){
 }
 function upClock(t){ var d=new Date(t*1000); return pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds()); }
 
-upRail.addEventListener('mouseenter', function(){ upRail.classList.add('expanded'); upRenderRail(); });
-upRail.addEventListener('mouseleave', function(){ if(up.mode!=='rec') upRail.classList.remove('expanded'); });
+// the timeline is a hover-reveal OVERLAY on top of the full-bleed video — it never
+// resizes the video. Reveal when the pointer nears the right edge, or while scrubbing.
+function upRailReveal(on){ upRail.classList.toggle('show', on || up.mode==='rec'); }
+upEl.addEventListener('mousemove', function(e){ if(up.open) upRailReveal(e.clientX > window.innerWidth-260); });
+upEl.addEventListener('mouseleave', function(){ if(up.mode!=='rec') upRail.classList.remove('show'); });
 // LIVE 모드에서 1초마다 윈도우를 now에 맞춰 재렌더
 function upLiveTick(){
   if(!up.open || up.mode!=='live') return;
@@ -1009,8 +1039,8 @@ function closePlayer(){
   upEl.classList.remove('show'); upEl.setAttribute('aria-hidden','true');
   if(up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
   clearTimeout(up._liveTimer); clearTimeout(up._tlTimer);
-  up.mode='live'; upEl.classList.remove('up-rec'); upRail.classList.remove('expanded');
-  upPrev.hidden=true; up._curSeg=null; up._tlCache={};
+  up.mode='live'; upEl.classList.remove('up-rec'); upRail.classList.remove('show');
+  upPrev.hidden=true; up._curSeg=null; up._tlCache={}; upResetThumbs();
 }
 $('#uplayerClose').addEventListener('click', closePlayer);
 upEl.addEventListener('click', function(e){ if(e.target===upEl) closePlayer(); });
@@ -1020,7 +1050,7 @@ document.addEventListener('keydown', function(e){ if(e.key==='Escape' && up.open
 function upSeekTo(t){
   var i=segmentAt(up.segs, t);
   if(i<0){ upGap(t); return; }
-  up.mode='rec'; upEl.classList.add('up-rec'); upRail.classList.add('expanded');
+  up.mode='rec'; upEl.classList.add('up-rec'); upRail.classList.add('show');
   $('#upLiveBadge').style.display='none'; $('#upState').textContent='';
   clearTimeout(up._liveTimer); // stop the 1s LIVE re-render so it can't fight the REC rAF over t0/t1
   up.cursorT=t;
@@ -1093,7 +1123,7 @@ upRail.addEventListener('click', function(e){
   if(evb){ upSeekTo(+evb.dataset.t); return; }
   var H=upRailH(), rect=upRail.getBoundingClientRect();
   var y=e.clientY-rect.top;
-  var t=Math.round(yToTime(y, up.t0, up.t1, H));
+  var t=Math.round(upTat(y, H));
   var now=Math.floor(Date.now()/1000);
   if(t>=now-2){ upStartLive(); } else { upSeekTo(t); }
 });
@@ -1110,9 +1140,9 @@ function upOnWheel(e){
     upRenderRail(); upScheduleTimeline();
     return;
   }
-  // pan: scrolling up (deltaY<0) = into the past.
+  // pan: now is at TOP, past below — scrolling DOWN (deltaY>0) = into the past.
   var H=upRailH(), span=up.t1-up.t0;
-  var dt=(e.deltaY/H)*span;
+  var dt=-(e.deltaY/H)*span;
   var center=(up.mode==='rec')? up.cursorT : Math.floor(Date.now()/1000);
   var newCursor=center+dt;
   var now=Math.floor(Date.now()/1000);
@@ -1122,26 +1152,6 @@ function upOnWheel(e){
 $('#upStage').addEventListener('wheel', upOnWheel, {passive:false});
 upRail.addEventListener('wheel', upOnWheel, {passive:false});
 
-up._prevTimer=null;
-function upHoverPreview(e){
-  if(!up.open || !upRail.classList.contains('expanded')) return;
-  var H=upRailH(), rect=upRail.getBoundingClientRect();
-  var y=e.clientY-rect.top;
-  var t=Math.round(yToTime(y, up.t0, up.t1, H));
-  var now=Math.floor(Date.now()/1000); if(t>=now){ upPrev.hidden=true; return; }
-  upPrev.hidden=false;
-  upPrev.style.top=Math.max(8,Math.min(H-100, y-50))+'px';
-  upPrev.style.right='150px';
-  $('#upPreviewTime').textContent=upClock(t);
-  clearTimeout(up._prevTimer);
-  up._prevTimer=setTimeout(function(){
-    upPrevImg.onerror=function(){ upPrevImg.onerror=null; upPrevImg.removeAttribute('src'); upPrev.classList.add('na'); };
-    upPrevImg.onload=function(){ upPrev.classList.remove('na'); };
-    upPrevImg.src=BASE+'/api/rec-thumb?stream='+encodeURIComponent(up.path)+'&t='+t;
-  }, 90);
-}
-upRail.addEventListener('mousemove', upHoverPreview);
-upRail.addEventListener('mouseleave', function(){ upPrev.hidden=true; });
 /* ============================================================ RELAY / CONN */
 var relayDownAt=Date.now();
 function renderConn(){
