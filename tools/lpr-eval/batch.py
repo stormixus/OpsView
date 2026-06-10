@@ -94,13 +94,17 @@ def extract_rec_roi(segs, starts, t, delta, roi, upscale, out):
     x1, y1, x2, y2 = roi
     vf = "crop=in_w*%.4f:in_h*%.4f:in_w*%.4f:in_h*%.4f" % (x2 - x1, y2 - y1, x1, y1)
     if upscale and upscale != 1:
-        vf += ":flags=lanczos,scale=iw*%g:ih*%g:flags=lanczos" % (upscale, upscale)
-    subprocess.run(
+        vf += ",scale=iw*%g:ih*%g:flags=lanczos" % (upscale, upscale)
+    r = subprocess.run(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", str(off), "-i", segs[i],
          "-frames:v", "1", "-vf", vf, "-q:v", "3", "-y", out],
         capture_output=True,
     )
-    return os.path.exists(out) and os.path.getsize(out) > 0
+    ok = os.path.exists(out) and os.path.getsize(out) > 0
+    if not ok and not getattr(extract_rec_roi, "_shown", False):
+        extract_rec_roi._shown = True  # surface the first ffmpeg failure for diagnosis
+        sys.stderr.write("ffmpeg failed (first occurrence):\n" + r.stderr.decode("utf-8", "replace")[:600] + "\n")
+    return ok
 
 
 def best_plate(reader, img_bgr):
