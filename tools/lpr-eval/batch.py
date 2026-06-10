@@ -107,6 +107,49 @@ def extract_rec_roi(segs, starts, t, delta, roi, upscale, out):
     return ok
 
 
+def extract_rec_full(segs, starts, t, delta, out):
+    """ffmpeg: the WHOLE full-res frame at unix-time t (no crop) — for ROI picking."""
+    target = t - delta
+    i = bisect.bisect_right(starts, target) - 1
+    if i < 0:
+        return False
+    off = target - starts[i]
+    if off < 0 or off > 3600:
+        return False
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", str(off), "-i", segs[i],
+         "-frames:v", "1", "-q:v", "3", "-y", out],
+        capture_output=True,
+    )
+    return os.path.exists(out) and os.path.getsize(out) > 0
+
+
+def dump_full_frames(segs, starts, files, delta, roi, n, outdir):
+    """Save N evenly-spaced full frames with the ROI box drawn — ground truth for
+    'is there a car, where is the plate, is it readable, is my ROI right?'."""
+    os.makedirs(outdir, exist_ok=True)
+    evs = [(int(os.path.splitext(os.path.basename(p))[0]), p) for p in files
+           if os.path.splitext(os.path.basename(p))[0].isdigit()]
+    if not evs:
+        return
+    step = max(1, len(evs) // n)
+    done = 0
+    for t, _ in evs[::step]:
+        out = os.path.join(outdir, "%d_full.jpg" % t)
+        if not extract_rec_full(segs, starts, t, delta, out):
+            continue
+        img = cv2.imread(out)
+        if img is None:
+            continue
+        if roi:
+            h, w = img.shape[:2]
+            x1, y1, x2, y2 = (int(roi[0] * w), int(roi[1] * h), int(roi[2] * w), int(roi[3] * h))
+            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 3)
+            cv2.imwrite(out, img)
+        done += 1
+    print(f"FULLDUMP: wrote {done} full frames (red box = ROI) to {outdir}/")
+
+
 def best_plate(reader, img_bgr):
     raw, plate = [], ("", 0.0)
     for (_, text, conf) in reader.readtext(img_bgr):
@@ -127,8 +170,9 @@ def main():
         sys.exit(1)
     cropdir = os.path.join(folder, "crops")
     os.makedirs(cropdir, exist_ok=True)
+    fulldump_only = int(os.environ.get("FULLDUMP", "0") or 0) > 0 and rec
 
-    if not roi:
+    if not roi and not fulldump_only:
         # save a sample so the user can pick the ROI fractions
         import shutil
         shutil.copy(files[0], os.path.join(folder, "sample.jpg"))
@@ -136,13 +180,7 @@ def main():
         print("then rerun with -e ROI=x1,y1,x2,y2 (fractions). For full-res add -e REC=/rec.")
         sys.exit(0)
 
-    print("loading EasyOCR (best_acc Korean recogniser)...")
-    reader = easyocr.Reader(
-        ["en"], detect_network="craft", recog_network="best_acc",
-        user_network_directory="lp_models/user_network",
-        model_storage_directory="lp_models/models",
-        gpu=torch.cuda.is_available(),
-    )
+    fulldump = int(os.environ.get("FULLDUMP", "0") or 0)
 
     segs = starts = None
     delta = 0
@@ -155,6 +193,18 @@ def main():
         delta = calibrate_offset(starts, ev_times)
         print(f"REC mode: {len(segs)} segments; auto-detected recorder offset {delta // 3600:+d}h "
               f"({delta:+d}s). Extracting full-res frames.")
+        if fulldump > 0:
+            # ground-truth pass: dump full frames with ROI box, then stop (no OCR).
+            dump_full_frames(segs, starts, files, delta, roi, fulldump, os.path.join(folder, "fulls"))
+            sys.exit(0)
+
+    print("loading EasyOCR (best_acc Korean recogniser)...")
+    reader = easyocr.Reader(
+        ["en"], detect_network="craft", recog_network="best_acc",
+        user_network_directory="lp_models/user_network",
+        model_storage_directory="lp_models/models",
+        gpu=torch.cuda.is_available(),
+    )
 
     rows, read, got = [], 0, 0
     for i, p in enumerate(files, 1):
