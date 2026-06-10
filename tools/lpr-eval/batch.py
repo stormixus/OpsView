@@ -14,6 +14,7 @@ Usage:  python batch.py /frames
 import csv
 import glob
 import os
+import re
 import sys
 
 import cv2
@@ -23,6 +24,15 @@ import torch
 from PIL import Image
 
 PLATE_SIZE = (224, 128)  # (w, h) — matches server.py
+_HANGUL = re.compile(r"[가-힣]")
+
+
+def is_korean_plate(text):
+    """Reject OSD junk ('01', 'Camera', date/time): a Korean plate is ~7-8 chars
+    with exactly one Hangul syllable and 4-6 digits (e.g. 12가3456 / 123가4567)."""
+    t = re.sub(r"\s", "", text)
+    digits = sum(c.isdigit() for c in t)
+    return bool(_HANGUL.search(t)) and 4 <= digits <= 7 and 6 <= len(t) <= 9
 
 
 VEHICLE_CLS = {2, 3, 5, 7}  # COCO: car, motorcycle, bus, truck
@@ -98,27 +108,30 @@ def main():
             with_car += 1
         if nplate:
             with_plate += 1
-        best = max(plates, key=lambda x: x[1]) if plates else ("", 0.0)
+        # keep only outputs shaped like a Korean plate (drops OSD '01'/'Camera' etc.)
+        plausible = [pl for pl in plates if is_korean_plate(pl[0])]
+        best = max(plausible, key=lambda x: x[1]) if plausible else ("", 0.0)
+        raw = (max(plates, key=lambda x: x[1])[0] if plates else "")
         if best[0]:
             read += 1
-        rows.append([os.path.basename(p), ncar, nplate, best[0], round(best[1], 3)])
+        rows.append([os.path.basename(p), ncar, nplate, best[0], raw, round(best[1], 3)])
         if best[0]:
             print(f"[{i}/{len(files)}] {os.path.basename(p)}  car={ncar} plate={nplate}  -> {best[0]}")
 
     out_csv = os.path.join(folder, "lpr_results.csv")
     with open(out_csv, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["file", "cars", "plate_boxes", "plate", "conf"])
+        w.writerow(["file", "cars", "plate_boxes", "plate", "raw_ocr", "conf"])
         w.writerows(rows)
     n = len(files)
     pct = lambda x: 100 * x // max(n, 1)
     print(f"\n== {n} frames ==")
-    print(f"  frames with a VEHICLE:     {with_car} ({pct(with_car)}%)")
-    print(f"  frames with a PLATE box:   {with_plate} ({pct(with_plate)}%)")
-    print(f"  frames with PLATE TEXT:    {read} ({pct(read)}%)")
+    print(f"  frames with a VEHICLE:        {with_car} ({pct(with_car)}%)")
+    print(f"  frames with a PLATE box:      {with_plate} ({pct(with_plate)}%)")
+    print(f"  frames with a KOREAN PLATE:   {read} ({pct(read)}%)   <- the real signal")
     print(f"  -> CSV: {out_csv}   crops: {cropdir}")
-    print("Now signs can't be read (plates only searched inside cars). If VEHICLE% is")
-    print("near 0, this camera just doesn't see cars — try the parking/garage channel.")
+    print("'plate' col = plate-shaped only; 'raw_ocr' col = whatever OCR said (incl OSD junk).")
+    print("If raw_ocr is full of '01'/'Camera'/dates, turn OFF the DVR OSD for a clean test.")
 
 
 if __name__ == "__main__":
