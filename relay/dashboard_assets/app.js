@@ -942,6 +942,7 @@ var up = {
   t0:0, t1:0, pxPerSec:0.08, // window (unix sec): t0=oldest, t1=newest(now). rail renders newest at TOP. ~12.5s/px
   segs:[], events:[],     // from rec-timeline
   cursorT:0,
+  hires:false, hdOn:false,
 };
 var upPaused=false, upDrag=null;
 var upEl=$('#uplayer'), upVideo=$('#upVideo');
@@ -957,13 +958,15 @@ function openPlayer(stream, opts){
     if(!rec) return; // live needs a currently-active stream
     // recorded event on a channel that isn't streaming right now — synthesize from the path
     var m=String(stream).match(/_ch(\d+)/);
-    s={ id:stream, path:stream, codec:'h264', name:'CH'+(m?m[1]:'?'), ch:(m?+m[1]:0) };
+    s={ id:stream, path:stream, codec:'h264', name:'CH'+(m?m[1]:'?'), ch:(m?+m[1]:0), hires:false };
   }
   up.open=true; up.stream=s.id; up.path=s.path; up.codec=s.codec; up.name=s.name; up.sub=a.name;
+  up.hires=!!s.hires; up.hdOn=false;
   up.pxPerSec=0.08; // reset to the default zoom on every open
   $('#upTitle').textContent=s.name; $('#upSub').textContent=a.name+' · CH'+s.ch;
   upEl.classList.add('show'); upEl.setAttribute('aria-hidden','false');
   upPaused=false; upUpdatePauseBtn();
+  var hdBtn=$('#upHdBtn'); if(hdBtn){ hdBtn.hidden=!up.hires; hdBtn.classList.toggle('on', up.hdOn); }
   if(rec){
     up.mode='rec'; upEl.classList.add('up-rec'); upRail.classList.add('show');
     $('#upLiveBadge').style.display='none';
@@ -1009,7 +1012,8 @@ function upStartLive(){
   up.mode='live'; upEl.classList.remove('up-rec'); $('#upLiveBadge').style.display='';
   $('#upState').textContent='';
   if(!up.path){ return; }
-  var wsUrl=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/surv/ws/'+up.path;
+  var wsPath = liveWsPath(up.path, up.hires, up.hdOn);
+  var wsUrl=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/surv/ws/'+wsPath;
   var hlsUrl=location.origin+'/surv/'+up.path+'/index.m3u8';
   up.player=playWS(upVideo, wsUrl, function(){ playHLS(upVideo, hlsUrl); });
   upSyncLiveWindow(); upEnsureTimeline(true); clearTimeout(up._liveTimer); upLiveTick();
@@ -1261,6 +1265,12 @@ $('#uplayerClose').addEventListener('click', closePlayer);
 $('#upBack10').addEventListener('click', function(e){ e.stopPropagation(); upSkipSec(-10); });
 $('#upFwd10').addEventListener('click', function(e){ e.stopPropagation(); upSkipSec(10); });
 $('#upPause').addEventListener('click', function(e){ e.stopPropagation(); upTogglePause(); });
+if($('#upHdBtn')) $('#upHdBtn').addEventListener('click', function(){
+  if(!up.open || !up.hires) return;
+  up.hdOn=!up.hdOn;
+  this.classList.toggle('on', up.hdOn);
+  if(up.mode==='live'){ if(up.player&&up.player.close)up.player.close(); upStartLive(); }
+});
 upEl.addEventListener('click', function(e){ if(e.target===upEl) closePlayer(); });
 document.addEventListener('keydown', function(e){ if(e.key==='Escape' && up.open) closePlayer(); });
 

@@ -745,6 +745,8 @@ button{font-family:inherit; cursor:pointer;}
 .uplayer-close{position:absolute; right:16px; top:14px; z-index:6; width:40px; height:40px; border:0; border-radius:10px; background:rgba(17,24,32,.7); color:#e6edf3; cursor:pointer; display:flex; align-items:center; justify-content:center;}
 .uplayer-close svg{width:22px; height:22px;}
 .uplayer-close:hover{background:rgba(40,52,66,.9);}
+.up-hd-btn{position:absolute;top:14px;right:70px;z-index:4;padding:4px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.3);background:rgba(0,0,0,.45);color:#fff;font-weight:800;font-size:12px;cursor:pointer;}
+.up-hd-btn.on{background:var(--accent-2,#22d3ee);color:#04121a;border-color:transparent;}
 .up-preview{display:none;} /* replaced by the inline filmstrip */
 
 /* timeline = hover-reveal OVERLAY on the right, floating on top of the full-bleed video */
