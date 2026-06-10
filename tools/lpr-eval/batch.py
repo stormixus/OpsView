@@ -38,21 +38,26 @@ def load_models():
     return lp_m, reader
 
 
-def read_plates(lp_m, reader, path):
-    """Return [(text, conf)] for every plate box found in the image."""
+def read_plates(lp_m, reader, path, cropdir):
+    """Return (n_boxes_detected, [(text, conf)]). Saves each detected plate crop to
+    cropdir so you can eyeball whether the DETECTOR found a real plate and whether the
+    OCR input was legible — separating "no plate in frame" from "OCR failed"."""
     im = Image.open(path).convert("RGB")
     arr = np.array(im)
+    boxes = lp_m(im).xyxy[0].tolist()  # [x1,y1,x2,y2,conf,cls]
+    base = os.path.splitext(os.path.basename(path))[0]
     out = []
-    for b in lp_m(im).xyxy[0].tolist():  # [x1,y1,x2,y2,conf,cls]
+    for i, b in enumerate(boxes):
         ax, ay, bx, by = int(b[0]), int(b[1]), int(b[2]), int(b[3])
         crop = arr[ay:by, ax:bx]
         if crop.size == 0:
             continue
+        cv2.imwrite(os.path.join(cropdir, f"{base}_{i}.jpg"), cv2.cvtColor(crop, cv2.COLOR_RGB2BGR))
         gray = cv2.cvtColor(cv2.resize(crop, PLATE_SIZE), cv2.COLOR_BGR2GRAY)
         res = reader.recognize(gray)
-        if res:
+        if res and res[0][1]:
             out.append((res[0][1], float(res[0][2])))
-    return out
+    return len(boxes), out
 
 
 def main():
@@ -61,29 +66,39 @@ def main():
     if not files:
         print("no .jpg files in", folder)
         sys.exit(1)
+    cropdir = os.path.join(folder, "crops")
+    os.makedirs(cropdir, exist_ok=True)
     print("loading models (first run downloads yolov5 + easyocr weights)...")
     lp_m, reader = load_models()
 
-    rows, hit = [], 0
+    rows, detected, read = [], 0, 0
     for i, p in enumerate(files, 1):
         try:
-            plates = read_plates(lp_m, reader, p)
+            nbox, plates = read_plates(lp_m, reader, p, cropdir)
         except Exception as e:  # keep going on a bad frame
-            plates = []
+            nbox, plates = 0, []
             print("  !", os.path.basename(p), "error:", e)
+        if nbox:
+            detected += 1
         best = max(plates, key=lambda x: x[1]) if plates else ("", 0.0)
         if best[0]:
-            hit += 1
-        rows.append([os.path.basename(p), best[0], round(best[1], 3)])
-        print(f"[{i}/{len(files)}] {os.path.basename(p)} -> {best[0] or '(none)'}")
+            read += 1
+        rows.append([os.path.basename(p), nbox, best[0], round(best[1], 3)])
+        if best[0]:
+            print(f"[{i}/{len(files)}] {os.path.basename(p)}  box={nbox}  -> {best[0]}")
 
     out_csv = os.path.join(folder, "lpr_results.csv")
     with open(out_csv, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["file", "plate", "conf"])
+        w.writerow(["file", "boxes", "plate", "conf"])
         w.writerows(rows)
-    print(f"\ndone: {hit}/{len(files)} frames produced a plate string -> {out_csv}")
-    print("(eyeball the CSV: how many plates are actually CORRECT, esp. ch1 night vs ch4 indoor)")
+    n = len(files)
+    print(f"\n== {n} frames ==")
+    print(f"  plate DETECTED (>=1 box): {detected} ({100*detected//max(n,1)}%)")
+    print(f"  plate text READ:          {read} ({100*read//max(n,1)}%)")
+    print(f"  -> CSV: {out_csv}   crops: {cropdir}")
+    print("Diagnose: low DETECTED = wrong camera / plates too small / no cars in motion frames.")
+    print("          DETECTED high but READ low = OCR/resolution problem. Eyeball crops/ to see.")
 
 
 if __name__ == "__main__":
