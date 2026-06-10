@@ -25,7 +25,12 @@ from PIL import Image
 PLATE_SIZE = (224, 128)  # (w, h) — matches server.py
 
 
+VEHICLE_CLS = {2, 3, 5, 7}  # COCO: car, motorcycle, bus, truck
+
+
 def load_models():
+    from ultralytics import YOLO
+    car_m = YOLO("yolo26s.pt")
     lp_m = torch.hub.load("ultralytics/yolov5", "custom", "lp_det.pt", trust_repo=True)
     reader = easyocr.Reader(
         ["en"],
@@ -35,29 +40,40 @@ def load_models():
         model_storage_directory="lp_models/models",
         gpu=torch.cuda.is_available(),
     )
-    return lp_m, reader
+    return car_m, lp_m, reader
 
 
-def read_plates(lp_m, reader, path, cropdir):
-    """Return (n_boxes_detected, [(text, conf)]). Saves each detected plate crop to
-    cropdir so you can eyeball whether the DETECTOR found a real plate and whether the
-    OCR input was legible — separating "no plate in frame" from "OCR failed"."""
+def read_plates(car_m, lp_m, reader, path, cropdir):
+    """Return (n_cars, n_plate_boxes, [(text, conf)]). Mirrors server.py: detect
+    VEHICLES first, then look for a plate ONLY inside each car box — so signs/banners
+    in the scene can't be mis-read as plates. Saves each plate crop to cropdir."""
     im = Image.open(path).convert("RGB")
     arr = np.array(im)
-    boxes = lp_m(im).xyxy[0].tolist()  # [x1,y1,x2,y2,conf,cls]
     base = os.path.splitext(os.path.basename(path))[0]
-    out = []
-    for i, b in enumerate(boxes):
-        ax, ay, bx, by = int(b[0]), int(b[1]), int(b[2]), int(b[3])
-        crop = arr[ay:by, ax:bx]
-        if crop.size == 0:
+
+    cars = []
+    for r in car_m(arr, verbose=False):
+        for bx in r.boxes:
+            if int(bx.cls[0]) in VEHICLE_CLS:
+                cars.append([int(v) for v in bx.xyxy[0].tolist()])
+
+    out, nplate = [], 0
+    for ci, (cx1, cy1, cx2, cy2) in enumerate(cars):
+        if cx2 - cx1 < 16 or cy2 - cy1 < 16:
             continue
-        cv2.imwrite(os.path.join(cropdir, f"{base}_{i}.jpg"), cv2.cvtColor(crop, cv2.COLOR_RGB2BGR))
-        gray = cv2.cvtColor(cv2.resize(crop, PLATE_SIZE), cv2.COLOR_BGR2GRAY)
-        res = reader.recognize(gray)
-        if res and res[0][1]:
-            out.append((res[0][1], float(res[0][2])))
-    return len(boxes), out
+        car_pil = Image.fromarray(arr[cy1:cy2, cx1:cx2])
+        for b in lp_m(car_pil).xyxy[0].tolist():
+            ax, ay, bx2, by2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
+            crop = arr[cy1 + ay:cy1 + by2, cx1 + ax:cx1 + bx2]
+            if crop.size == 0:
+                continue
+            nplate += 1
+            cv2.imwrite(os.path.join(cropdir, f"{base}_c{ci}_{nplate}.jpg"), cv2.cvtColor(crop, cv2.COLOR_RGB2BGR))
+            gray = cv2.cvtColor(cv2.resize(crop, PLATE_SIZE), cv2.COLOR_BGR2GRAY)
+            res = reader.recognize(gray)
+            if res and res[0][1]:
+                out.append((res[0][1], float(res[0][2])))
+    return len(cars), nplate, out
 
 
 def main():
@@ -69,36 +85,40 @@ def main():
     cropdir = os.path.join(folder, "crops")
     os.makedirs(cropdir, exist_ok=True)
     print("loading models (first run downloads yolov5 + easyocr weights)...")
-    lp_m, reader = load_models()
+    car_m, lp_m, reader = load_models()
 
-    rows, detected, read = [], 0, 0
+    rows, with_car, with_plate, read = [], 0, 0, 0
     for i, p in enumerate(files, 1):
         try:
-            nbox, plates = read_plates(lp_m, reader, p, cropdir)
+            ncar, nplate, plates = read_plates(car_m, lp_m, reader, p, cropdir)
         except Exception as e:  # keep going on a bad frame
-            nbox, plates = 0, []
+            ncar, nplate, plates = 0, 0, []
             print("  !", os.path.basename(p), "error:", e)
-        if nbox:
-            detected += 1
+        if ncar:
+            with_car += 1
+        if nplate:
+            with_plate += 1
         best = max(plates, key=lambda x: x[1]) if plates else ("", 0.0)
         if best[0]:
             read += 1
-        rows.append([os.path.basename(p), nbox, best[0], round(best[1], 3)])
+        rows.append([os.path.basename(p), ncar, nplate, best[0], round(best[1], 3)])
         if best[0]:
-            print(f"[{i}/{len(files)}] {os.path.basename(p)}  box={nbox}  -> {best[0]}")
+            print(f"[{i}/{len(files)}] {os.path.basename(p)}  car={ncar} plate={nplate}  -> {best[0]}")
 
     out_csv = os.path.join(folder, "lpr_results.csv")
     with open(out_csv, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["file", "boxes", "plate", "conf"])
+        w.writerow(["file", "cars", "plate_boxes", "plate", "conf"])
         w.writerows(rows)
     n = len(files)
+    pct = lambda x: 100 * x // max(n, 1)
     print(f"\n== {n} frames ==")
-    print(f"  plate DETECTED (>=1 box): {detected} ({100*detected//max(n,1)}%)")
-    print(f"  plate text READ:          {read} ({100*read//max(n,1)}%)")
+    print(f"  frames with a VEHICLE:     {with_car} ({pct(with_car)}%)")
+    print(f"  frames with a PLATE box:   {with_plate} ({pct(with_plate)}%)")
+    print(f"  frames with PLATE TEXT:    {read} ({pct(read)}%)")
     print(f"  -> CSV: {out_csv}   crops: {cropdir}")
-    print("Diagnose: low DETECTED = wrong camera / plates too small / no cars in motion frames.")
-    print("          DETECTED high but READ low = OCR/resolution problem. Eyeball crops/ to see.")
+    print("Now signs can't be read (plates only searched inside cars). If VEHICLE% is")
+    print("near 0, this camera just doesn't see cars — try the parking/garage channel.")
 
 
 if __name__ == "__main__":
