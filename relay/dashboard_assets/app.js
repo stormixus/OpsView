@@ -497,6 +497,10 @@ function stopLiveGrid(){
   g.innerHTML=''; delete g.dataset.agent;
 }
 function _isIOS(){ return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1); }
+// Mobile browsers allow far fewer concurrent video decoders than desktop, so a big
+// live grid leaves cells black there. Desktop handles many fine — we only gate
+// playback by visibility on mobile, leaving desktop's all-at-once behavior intact.
+function _isMobile(){ return _isIOS() || /Android|Mobile/i.test(navigator.userAgent); }
 // The smooth low-latency path needs a MediaSource. iOS historically had none (HLS
 // only); iOS/iPadOS 17.1+ exposes ManagedMediaSource, which lets iPhones use the WS
 // path too — much smoother than segmented HLS. Returns the constructor to use, or null.
@@ -569,11 +573,16 @@ function renderGrid(a){
   grid.dataset.agent=a.id;
   var cells=$$('#grid .cell');
   list.forEach(function(s, i){ if(cells[i]) cells[i].dataset.path=s.path; });
-  // start playback per cell as it enters the viewport; stop (free the decoder) on exit
-  liveObs=new IntersectionObserver(function(entries){
-    entries.forEach(function(en){ if(en.isIntersecting){ _cellPlay(en.target); } else { _cellStop(en.target); } });
-  }, {rootMargin:'100px'});
-  cells.forEach(function(c){ liveObs.observe(c); });
+  if(_isMobile()){
+    // mobile: start a cell only when it enters the viewport; free the decoder on exit
+    liveObs=new IntersectionObserver(function(entries){
+      entries.forEach(function(en){ if(en.isIntersecting){ _cellPlay(en.target); } else { _cellStop(en.target); } });
+    }, {rootMargin:'100px'});
+    cells.forEach(function(c){ liveObs.observe(c); });
+  } else {
+    // desktop: play them all at once (original behavior — plenty of decoders)
+    cells.forEach(_cellPlay);
+  }
   if(liveEditing) wireLiveEdit(a);
   updateCellClocks();
 }
