@@ -63,6 +63,7 @@ func TestRecordTargets(t *testing.T) {
 	}{
 		{"sub only", []string{"dvr3_ch2"}, map[string]string{"dvr3_ch2": "dvr3_ch2"}},
 		{"main present", []string{"dvr3_ch1", "dvr3_ch1@main"}, map[string]string{"dvr3_ch1": "dvr3_ch1@main"}},
+		{"main before sub", []string{"dvr3_ch1@main", "dvr3_ch1"}, map[string]string{"dvr3_ch1": "dvr3_ch1@main"}}, // order-independent
 		{"agent prefixed", []string{"a1/dvr3_ch1", "a1/dvr3_ch1@main"}, map[string]string{"a1/dvr3_ch1": "a1/dvr3_ch1@main"}},
 		{"mixed", []string{"dvr3_ch1", "dvr3_ch1@main", "dvr3_ch2"},
 			map[string]string{"dvr3_ch1": "dvr3_ch1@main", "dvr3_ch2": "dvr3_ch2"}},
