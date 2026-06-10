@@ -28,11 +28,12 @@ _HANGUL = re.compile(r"[가-힣]")
 
 
 def is_korean_plate(text):
-    """A Korean plate is ~6-9 chars with one Hangul syllable and 4-7 digits
-    (12가3456 / 123가4567 / 서울12가3456). Rejects OSD 'Camera'/'01'/dates."""
+    """A Korean plate has EXACTLY one Hangul syllable and 4-7 digits, length 6-9
+    (12가3456 / 123가4567 / 서울12가3456). Exactly-one-Hangul rejects multi-Hangul
+    OCR garbage ('8소소소995') as well as OSD 'Camera'/'01'/dates."""
     t = re.sub(r"\s", "", text or "")
     digits = sum(c.isdigit() for c in t)
-    return bool(_HANGUL.search(t)) and 4 <= digits <= 7 and 6 <= len(t) <= 9
+    return len(_HANGUL.findall(t)) == 1 and 4 <= digits <= 7 and 6 <= len(t) <= 9
 
 
 def parse_roi(s, w, h):
@@ -67,12 +68,8 @@ def read_roi(reader, arr, roi, upscale, crop_path):
     for (_, text, conf) in results:
         if is_korean_plate(text) and conf > plate[1]:
             plate = (text, float(conf))
-    if not plate[0]:  # fallback: whole-ROI single-line read (tight ROI / split detect)
-        r = reader.recognize(cv2.cvtColor(sub, cv2.COLOR_RGB2GRAY))
-        if r:
-            raw = (raw + " | " if raw else "") + r[0][1]
-            if is_korean_plate(r[0][1]):
-                plate = (r[0][1], float(r[0][2]))
+    # NOTE: no whole-ROI recognize() fallback — it hallucinates a plate-shaped string
+    # from any digit noise / signage, which inflated the count with garbage.
     return plate[0], plate[1], raw
 
 
