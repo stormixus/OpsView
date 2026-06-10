@@ -51,16 +51,29 @@ def parse_roi(s, w, h):
 
 
 def read_roi(reader, arr, roi, upscale, crop_path):
+    """Crop the ROI, upscale, and DETECT+read text inside it (readtext) — so the
+    plate is found wherever it sits in the region (its position varies as the car
+    drives in/out). Returns (best_plate, conf, raw_all_text)."""
     x1, y1, x2, y2 = roi
     sub = arr[y1:y2, x1:x2]
     if sub.size == 0:
-        return ("", 0.0)
+        return ("", 0.0, "")
     if upscale and upscale != 1:
         sub = cv2.resize(sub, None, fx=upscale, fy=upscale, interpolation=cv2.INTER_CUBIC)
     cv2.imwrite(crop_path, cv2.cvtColor(sub, cv2.COLOR_RGB2BGR))
-    gray = cv2.cvtColor(sub, cv2.COLOR_RGB2GRAY)
-    res = reader.recognize(gray)  # whole ROI as one line
-    return (res[0][1], float(res[0][2])) if res else ("", 0.0)
+    results = reader.readtext(sub)  # [(box, text, conf)] anywhere in the ROI
+    raw = " | ".join(t for (_, t, _) in results)
+    plate = ("", 0.0)
+    for (_, text, conf) in results:
+        if is_korean_plate(text) and conf > plate[1]:
+            plate = (text, float(conf))
+    if not plate[0]:  # fallback: whole-ROI single-line read (tight ROI / split detect)
+        r = reader.recognize(cv2.cvtColor(sub, cv2.COLOR_RGB2GRAY))
+        if r:
+            raw = (raw + " | " if raw else "") + r[0][1]
+            if is_korean_plate(r[0][1]):
+                plate = (r[0][1], float(r[0][2]))
+    return plate[0], plate[1], raw
 
 
 def main():
@@ -102,12 +115,11 @@ def main():
                     print("ROI string invalid, ignoring:", roi_str)
         if not roi:
             continue
-        text, conf = read_roi(reader, arr, roi, upscale, os.path.join(cropdir, base + "_roi.jpg"))
-        ok = is_korean_plate(text)
-        if ok:
+        text, conf, raw = read_roi(reader, arr, roi, upscale, os.path.join(cropdir, base + "_roi.jpg"))
+        if text:
             read += 1
             print(f"[{i}/{len(files)}] {base} -> {text}  ({conf:.2f})")
-        rows.append([base, text if ok else "", text, round(conf, 3)])
+        rows.append([base, text, raw, round(conf, 3)])
 
     out_csv = os.path.join(folder, "lpr_results.csv")
     with open(out_csv, "w", newline="") as f:
