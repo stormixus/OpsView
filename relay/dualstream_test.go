@@ -1,6 +1,7 @@
 package main
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -26,5 +27,30 @@ func TestBuildSurvRTSPURLDahuaMainVsSub(t *testing.T) {
 	}
 	if got := buildSurvRTSPURL(dvr, 2, false); !strings.Contains(got, "subtype=1") {
 		t.Errorf("dahua sub: got %q, want subtype=1", got)
+	}
+}
+
+func TestStreamIDHelpers(t *testing.T) {
+	if mainStreamID("dvr3_ch1") != "dvr3_ch1@main" {
+		t.Errorf("mainStreamID wrong: %q", mainStreamID("dvr3_ch1"))
+	}
+	if !isMainStreamID("dvr3_ch1@main") || isMainStreamID("dvr3_ch1") {
+		t.Errorf("isMainStreamID wrong")
+	}
+	if baseStreamID("dvr3_ch1@main") != "dvr3_ch1" || baseStreamID("dvr3_ch1") != "dvr3_ch1" {
+		t.Errorf("baseStreamID wrong")
+	}
+}
+
+func TestDesiredStreamIDs(t *testing.T) {
+	chans := []proto.ChannelInfo{
+		{DVRID: 3, ChNum: 1, Enabled: true, RecordHighRes: true},
+		{DVRID: 3, ChNum: 2, Enabled: true, RecordHighRes: false},
+		{DVRID: 3, ChNum: 9, Enabled: false, RecordHighRes: true}, // disabled => no stream
+	}
+	got := desiredStreamIDs(chans)
+	want := map[string]bool{"dvr3_ch1": true, "dvr3_ch1@main": true, "dvr3_ch2": true}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("desiredStreamIDs = %v, want %v", got, want)
 	}
 }

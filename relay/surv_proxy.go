@@ -43,6 +43,32 @@ type streamEntry struct {
 	frag  *fragMuxer
 }
 
+// mainStreamSuffix marks the second (high-res main) pipeline for a channel; the
+// base id is the live sub stream. e.g. base "dvr3_ch1", main "dvr3_ch1@main".
+const mainStreamSuffix = "@main"
+
+func mainStreamID(base string) string { return base + mainStreamSuffix }
+func isMainStreamID(id string) bool   { return strings.HasSuffix(id, mainStreamSuffix) }
+func baseStreamID(id string) string   { return strings.TrimSuffix(id, mainStreamSuffix) }
+
+// desiredStreamIDs is the set of relay stream keys that should run for a config:
+// the base (sub, live) stream for every enabled channel, plus a "<id>@main"
+// stream for channels that record high-res.
+func desiredStreamIDs(channels []proto.ChannelInfo) map[string]bool {
+	out := map[string]bool{}
+	for _, ch := range channels {
+		if !ch.Enabled {
+			continue
+		}
+		id := fmt.Sprintf("dvr%d_ch%d", ch.DVRID, ch.ChNum)
+		out[id] = true
+		if ch.RecordHighRes {
+			out[mainStreamID(id)] = true
+		}
+	}
+	return out
+}
+
 // SurvProxy manages multiple RTSP→HLS streams, one per surveillance channel.
 type SurvProxy struct {
 	mu       sync.RWMutex
@@ -120,6 +146,20 @@ func (sp *SurvProxy) HandleSurvConfig(payload []byte) {
 				e.name = ch.Name
 			}
 			sp.mu.Unlock()
+		}
+		if ch.RecordHighRes {
+			mid := mainStreamID(chID)
+			desired[mid] = true
+			sp.mu.RLock()
+			_, mexists := sp.streams[mid]
+			sp.mu.RUnlock()
+			if !mexists {
+				perDVR[ch.DVRID] = append(perDVR[ch.DVRID], pendingCh{
+					chID:    mid,
+					name:    ch.Name,
+					rtspURL: survRTSPURLForChannel(dvr, ch, true), // main
+				})
+			}
 		}
 	}
 
