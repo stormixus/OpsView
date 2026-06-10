@@ -1386,7 +1386,7 @@ function upScrubToClientY(clientY){
   upPaintScrub();
 }
 upRail.addEventListener('mousedown', function(e){
-  if(!up.open || e.button!==0 || up._noClick) return;
+  if(!up.open || e.button!==0) return; // _noClick is only for the post-drag click, not new drags
   if(e.target.closest('.up-mark')) return;
   e.preventDefault();
   upDrag={ y0:e.clientY, moved:false };

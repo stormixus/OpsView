@@ -715,15 +715,16 @@ button{font-family:inherit; cursor:pointer;}
 .up-livebadge{position:absolute; left:18px; bottom:16px; z-index:5; display:flex; align-items:center; padding:0; background:transparent;}
 .up-livebadge .dot{width:12px; height:12px;}
 .uplayer.up-rec .up-livebadge{display:none;}
-.up-transport{position:absolute; left:50%; top:50%; z-index:5; display:flex; align-items:center; gap:8px; opacity:0; pointer-events:none; transform:translate(-50%, -50%) scale(.96); transition:opacity .16s ease, transform .16s ease;}
+.up-transport{position:absolute; left:50%; top:50%; z-index:5; display:flex; align-items:center; gap:26px; opacity:0; pointer-events:none; transform:translate(-50%, -50%) scale(.96); transition:opacity .16s ease, transform .16s ease;}
 .up-stage:hover .up-transport,
 .up-stage:focus-within .up-transport,
 .up-transport:hover{opacity:1; pointer-events:auto; transform:translate(-50%, -50%) scale(1);}
-.up-tr-btn{display:inline-flex; align-items:center; justify-content:center; gap:4px; min-width:40px; height:40px; padding:0 10px; border:1px solid rgba(255,255,255,.14); border-radius:10px; background:rgba(12,18,26,.78); color:#e6edf3; cursor:pointer; font-size:11px; font-weight:700; font-family:var(--font-mono);}
-.up-tr-btn svg{width:18px; height:18px; flex:none;}
-.up-tr-btn span{line-height:1;}
-.up-tr-btn:hover{background:rgba(32,44,58,.92); border-color:rgba(255,255,255,.22);}
-.up-tr-btn:active{transform:scale(.96);}
+/* Protect-style: bare big icons floating on the video, no box */
+.up-tr-btn{display:inline-flex; align-items:center; justify-content:center; border:0; background:transparent; color:#fff; cursor:pointer; padding:6px; filter:drop-shadow(0 2px 7px rgba(0,0,0,.75)); transition:transform .12s ease;}
+.up-tr-btn svg{width:36px; height:36px; flex:none; display:block;}
+.up-tr-btn#upPause svg{width:46px; height:46px;}
+.up-tr-btn:hover{transform:scale(1.1);}
+.up-tr-btn:active{transform:scale(.92);}
 .up-tr-ico-pause{display:block;}
 .up-tr-ico-play{display:none;}
 .up-tr-btn.paused .up-tr-ico-pause{display:none;}
@@ -763,8 +764,13 @@ button{font-family:inherit; cursor:pointer;}
 .up-now{position:absolute; left:0; right:0; height:2px; background:#37d367; box-shadow:0 0 8px rgba(55,211,103,.7);}
 .up-nowpill{position:absolute; right:8px; width:10px; height:10px; padding:0; transform:translateY(-50%); border-radius:50%; font-size:0; background:var(--ok); box-shadow:0 0 8px rgba(63,185,80,.65); animation:dotpulse 2.4s infinite;}
 .up-cursor{position:absolute; left:0; right:0; height:0; border-top:2px solid #4aa3ff;}
-.up-curpill{position:absolute; right:8px; transform:translateY(-50%); font-size:10px; font-weight:800; color:#fff; background:#2f6fed; padding:2px 7px; border-radius:999px; font-family:var(--font-mono); box-shadow:0 1px 6px rgba(47,111,237,.55);}
-.up-curpill.scrub{font-size:10.5px; letter-spacing:.2px;}
+.up-curpill{position:absolute; right:8px; transform:translateY(-50%); font-size:11px; font-weight:800; color:#fff; background:#2f6fed; padding:3px 9px; border-radius:999px; font-family:var(--font-mono); box-shadow:0 1px 6px rgba(47,111,237,.55);}
+.up-curpill.scrub{font-size:11.5px; letter-spacing:.2px;}
+/* the playhead lines + pills are grab handles for drag-to-seek (the .up-playhead
+   container is pointer-events:none; re-enable on the handles so they're draggable) */
+.up-now, .up-cursor, .up-nowpill, .up-curpill{pointer-events:auto; cursor:ns-resize;}
+.up-now::before, .up-cursor::before{content:""; position:absolute; left:0; right:0; top:-7px; height:16px;}
+.up-rail.scrubbing .up-now, .up-rail.scrubbing .up-cursor, .up-rail.scrubbing .up-curpill{cursor:grabbing;}
 
 /* license plate badge */
 .ev-plate-badge {
