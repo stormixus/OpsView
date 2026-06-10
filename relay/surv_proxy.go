@@ -108,7 +108,7 @@ func (sp *SurvProxy) HandleSurvConfig(payload []byte) {
 			perDVR[ch.DVRID] = append(perDVR[ch.DVRID], pendingCh{
 				chID:    chID,
 				name:    ch.Name,
-				rtspURL: survRTSPURLForChannel(dvr, ch),
+				rtspURL: survRTSPURLForChannel(dvr, ch, false),
 			})
 		} else {
 			// Stream already running: refresh its display name so a rename in a
@@ -540,23 +540,21 @@ func resolveSurvHost(dvr proto.DVRInfo) string {
 	return dvr.Addr
 }
 
-func buildSurvRTSPURL(dvr proto.DVRInfo, chNum int) string {
+func buildSurvRTSPURL(dvr proto.DVRInfo, chNum int, mainStream bool) string {
 	port := resolveRTSPPort(dvr)
 	host := fmt.Sprintf("%s:%d", resolveSurvHost(dvr), port)
 
 	var path string
 	switch dvr.Protocol {
 	case "dahua":
-		subtype := 1
-		if dvr.StreamQuality == "sub" || dvr.StreamQuality == "" {
-			subtype = 1
-		} else {
-			subtype = 0 // main stream
+		subtype := 1 // sub
+		if mainStream {
+			subtype = 0
 		}
 		path = fmt.Sprintf("/cam/realmonitor?channel=%d&subtype=%d", chNum, subtype)
 	default: // "isapi", "rtsp", "", or any other
-		streamID := "02"
-		if dvr.StreamQuality == "main" {
+		streamID := "02" // sub
+		if mainStream {
 			streamID = "01"
 		}
 		path = fmt.Sprintf("/Streaming/Channels/%d%s", chNum, streamID)
@@ -574,8 +572,10 @@ func buildSurvRTSPURL(dvr proto.DVRInfo, chNum int) string {
 // survRTSPURLForChannel uses the channel's ONVIF-provided RtspURI when present
 // (injecting DVR credentials if the URI has none), otherwise the per-protocol
 // template via buildSurvRTSPURL.
-func survRTSPURLForChannel(dvr proto.DVRInfo, ch proto.ChannelInfo) string {
+func survRTSPURLForChannel(dvr proto.DVRInfo, ch proto.ChannelInfo, mainStream bool) string {
 	if ch.RtspURI != "" {
+		// ONVIF-discovered URI is a single profile; main/sub selection unsupported
+		// for ONVIF-only DVRs (open item in the spec). Template DVRs use the path below.
 		u, err := url.Parse(ch.RtspURI)
 		if err == nil {
 			if u.User == nil && dvr.Username != "" {
@@ -584,7 +584,7 @@ func survRTSPURLForChannel(dvr proto.DVRInfo, ch proto.ChannelInfo) string {
 			return u.String()
 		}
 	}
-	return buildSurvRTSPURL(dvr, ch.ChNum)
+	return buildSurvRTSPURL(dvr, ch.ChNum, mainStream)
 }
 
 // resolveRTSPPort determines the RTSP port for a DVR.

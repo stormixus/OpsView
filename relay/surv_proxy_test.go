@@ -27,7 +27,7 @@ func TestBuildSurvRTSPURLUsesLANHost(t *testing.T) {
 		Username: "admin", Password: "secret",
 		Protocol: "isapi", StreamQuality: "sub",
 	}
-	u := buildSurvRTSPURL(dvr, 3)
+	u := buildSurvRTSPURL(dvr, 3, false)
 	if want := "rtsp://admin:secret@10.0.0.5:554/Streaming/Channels/302"; u != want {
 		t.Fatalf("url = %q, want %q", u, want)
 	}
@@ -37,7 +37,7 @@ func TestBuildSurvRTSPURLUsesChannelURI(t *testing.T) {
 	dvr := proto.DVRInfo{Addr: "10.0.0.9", Port: 80, Username: "admin", Password: "pw", Protocol: "onvif"}
 	// Channel carries an explicit ONVIF RTSP URI without credentials.
 	ch := proto.ChannelInfo{ChNum: 1, RtspURI: "rtsp://10.0.0.9:554/live/ch1"}
-	got := survRTSPURLForChannel(dvr, ch)
+	got := survRTSPURLForChannel(dvr, ch, false)
 	want := "rtsp://admin:pw@10.0.0.9:554/live/ch1"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
@@ -46,7 +46,7 @@ func TestBuildSurvRTSPURLUsesChannelURI(t *testing.T) {
 	// No per-channel URI -> falls back to the template (ISAPI path).
 	dvr2 := proto.DVRInfo{Addr: "10.0.0.8", Port: 80, Username: "admin", Password: "pw", Protocol: "isapi", StreamQuality: "sub"}
 	ch2 := proto.ChannelInfo{ChNum: 2}
-	got2 := survRTSPURLForChannel(dvr2, ch2)
+	got2 := survRTSPURLForChannel(dvr2, ch2, false)
 	if !strings.Contains(got2, "/Streaming/Channels/202") {
 		t.Fatalf("template fallback wrong: %q", got2)
 	}
