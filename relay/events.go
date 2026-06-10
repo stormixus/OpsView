@@ -319,9 +319,26 @@ func clusterEventItems(items []recEventItem, gapSec int64) []recEventItem {
 	return out
 }
 
+// recListDays returns the YYYYMMDD days to aggregate: a from..to range (date
+// presets) if both are valid, else the single day (back-compat). Newest-first
+// caller re-sorts events anyway, so day order here doesn't matter.
+func recListDays(day, from, to string) []string {
+	if len(from) == 8 && len(to) == 8 {
+		ft, e1 := time.ParseInLocation("20060102", from, time.Local)
+		tt, e2 := time.ParseInLocation("20060102", to, time.Local)
+		if e1 == nil && e2 == nil && !tt.Before(ft) {
+			return daysInRange(ft.Unix(), tt.Add(12*time.Hour).Unix())
+		}
+	}
+	if len(day) == 8 {
+		return []string{day}
+	}
+	return nil
+}
+
 // HandleDashboardRecEventsList aggregates event intervals across all enabled
-// channels in an agent session for a given day, sorted newest-first.
-// Admin-gated. ?agent=<id>&day=YYYYMMDD.
+// channels in an agent session for a day (?day=YYYYMMDD) or a range
+// (?from=YYYYMMDD&to=YYYYMMDD, for date presets), sorted newest-first. Admin-gated.
 func (h *Hub) HandleDashboardRecEventsList(w http.ResponseWriter, r *http.Request) {
 	if !h.authedDashboard(r) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -334,6 +351,7 @@ func (h *Hub) HandleDashboardRecEventsList(w http.ResponseWriter, r *http.Reques
 	q := r.URL.Query()
 	agentID := q.Get("agent")
 	day := q.Get("day")
+	days := recListDays(day, q.Get("from"), q.Get("to"))
 
 	sess := h.sessionByID(agentID)
 	if sess == nil {
@@ -355,16 +373,18 @@ func (h *Hub) HandleDashboardRecEventsList(w http.ResponseWriter, r *http.Reques
 					continue
 				}
 				stream := streamPath(sess.id, streamIDFor(ch.DVRID, ch.ChNum))
-				for _, iv := range h.events.eventsForDay(stream, day) {
-					items = append(items, recEventItem{
-						Stream: stream,
-						Ch:     ch.ChNum,
-						Name:   ch.Name,
-						Kind:   iv.Kind,
-						Start:  iv.Start,
-						End:    iv.End,
-						Plate:  iv.Plate,
-					})
+				for _, d := range days {
+					for _, iv := range h.events.eventsForDay(stream, d) {
+						items = append(items, recEventItem{
+							Stream: stream,
+							Ch:     ch.ChNum,
+							Name:   ch.Name,
+							Kind:   iv.Kind,
+							Start:  iv.Start,
+							End:    iv.End,
+							Plate:  iv.Plate,
+						})
+					}
 				}
 			}
 		}
@@ -377,7 +397,15 @@ func (h *Hub) HandleDashboardRecEventsList(w http.ResponseWriter, r *http.Reques
 	})
 
 	w.Header().Set("Content-Type", "application/json")
-	if day == todayKey() {
+	today := todayKey()
+	live := false
+	for _, d := range days {
+		if d == today {
+			live = true
+			break
+		}
+	}
+	if live {
 		w.Header().Set("Cache-Control", "no-store")
 	} else {
 		w.Header().Set("Cache-Control", "private, max-age=60")

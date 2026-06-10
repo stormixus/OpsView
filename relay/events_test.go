@@ -174,3 +174,22 @@ func TestClusterEventItemsMotionSupersededBySmart(t *testing.T) {
 		t.Fatalf("expected only the person event to survive, got %+v", out)
 	}
 }
+
+func TestRecListDays(t *testing.T) {
+	// range: 3 inclusive days
+	if d := recListDays("", "20260607", "20260609"); len(d) != 3 || d[0] != "20260607" || d[2] != "20260609" {
+		t.Fatalf("range: %v", d)
+	}
+	// single day (no range)
+	if d := recListDays("20260608", "", ""); len(d) != 1 || d[0] != "20260608" {
+		t.Fatalf("single: %v", d)
+	}
+	// reversed range falls back to the single day
+	if d := recListDays("20260608", "20260609", "20260607"); len(d) != 1 || d[0] != "20260608" {
+		t.Fatalf("reversed: %v", d)
+	}
+	// nothing valid -> empty
+	if d := recListDays("", "", ""); len(d) != 0 {
+		t.Fatalf("empty: %v", d)
+	}
+}

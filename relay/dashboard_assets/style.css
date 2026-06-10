@@ -529,6 +529,11 @@ button{font-family:inherit; cursor:pointer;}
 /* control row: filter chips + date nav + meta */
 .ev-bar{display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap;}
 .ev-filters{display:flex; flex-wrap:wrap; gap:6px;}
+/* date presets (오늘/어제/이번주/지난주/이번달) */
+.rec-presets{display:flex; flex-wrap:wrap; gap:6px;}
+.rec-presets button{padding:6px 11px; border-radius:999px; border:1px solid var(--border); background:var(--panel-2); color:var(--text-muted); font-size:12px; font-weight:600; cursor:pointer; transition:.12s ease;}
+.rec-presets button:hover{color:var(--text); border-color:var(--border-strong);}
+.rec-presets button.on{background:var(--accent); color:var(--on-accent); border-color:var(--accent);}
 .ev-filter-chip{display:inline-flex; align-items:center; gap:6px; padding:6px 13px 6px 10px; border-radius:999px; border:1px solid var(--border); background:var(--panel-2); color:var(--text-muted); font-size:12.5px; font-weight:600; cursor:pointer; transition:.12s ease;}
 .ev-filter-chip:hover{color:var(--text); border-color:var(--border-strong);}
 .ev-filter-chip.on{background:var(--accent); color:var(--on-accent); border-color:var(--accent);}

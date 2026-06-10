@@ -413,7 +413,7 @@ function renderStatus(a){
   $('#pubBytes').textContent=fmtBytes(a.bytes_out);
   $('#pubUptime').textContent= connected? fmtUptime(Math.floor((Date.now()-a.since_ms)/1000)) : '—';
   $('#pubDvr').textContent=a.dvr;
-  if($('#pubVer')) $('#pubVer').textContent = (connected && a.version) ? ('v'+a.version) : '';
+  if($('#pubVer')) $('#pubVer').textContent = (connected && a.version) ? ('v'+String(a.version).replace(/^v+/,'')) : ''; // agent Version already has a leading v (git tag) -> avoid vv
   $('#pinBadge').style.display=a.pin_set?'':'none';
   $('#tpDown').textContent=fmtKbps(a.tput.down);
   $('#tpUp').textContent=fmtKbps(a.tput.up);
@@ -561,25 +561,10 @@ function renderGrid(a){
 $('#grid').addEventListener('click', function(e){ if(liveEditing) return; var c=e.target.closest('.cell'); if(c) openPlayer(c.dataset.id); });
 function updateCellClocks(){ var ts=fmtTs(new Date()); $$('.cellts').forEach(function(e){ e.textContent=ts; }); }
 
-/* modal */
+/* modal — used by the Ops snapshot + watcher detail (the live-cell enlarge path
+   was replaced by the unified player; openModal removed). */
 var modal=$('#modal'), modalCell=$('#modalCell');
 var modalPlayer=null;
-function openModal(id){
-  if(!selected) return; var a=agentById(selected); if(!a) return;
-  var s=a.streams.filter(function(x){return x.id===id;})[0]; if(!s) return;
-  // Render the real video cell (not the demo placeholder) and attach the live
-  // WS/HLS player — same path as the grid cells, so the enlarged view streams.
-  modalCell.innerHTML=liveCellHTML(s); var ex=modalCell.querySelector('.expand'); if(ex) ex.style.display='none';
-  modal.classList.add('show'); updateCellClocks();
-  if(s.active){
-    var video=modalCell.querySelector('video');
-    if(video){
-      var wsUrl=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/surv/ws/'+s.path;
-      var hlsUrl=location.origin+'/surv/'+s.path+'/index.m3u8';
-      modalPlayer=playWS(video, wsUrl, function(){ playHLS(video, hlsUrl); });
-    }
-  }
-}
 function closeModal(){ modal.classList.remove('show'); if(modalPlayer){try{modalPlayer.close&&modalPlayer.close();}catch(e){} modalPlayer=null;} if(typeof recStop==='function') recStop(); modalCell.innerHTML=''; modalCell.classList.remove('bare'); if(opsModalTimer){clearInterval(opsModalTimer);opsModalTimer=null;} }
 $('#modalClose').addEventListener('click', closeModal);
 modal.addEventListener('click', function(e){ if(e.target===modal) closeModal(); });
@@ -649,7 +634,7 @@ modalCell.addEventListener('keydown', function(e){ if(e.target.classList.contain
 // recCtx keeps the day + the agent-wide event list (newest-first from the API).
 // segCache memoizes per-stream segment lists for the day (used for modal playback).
 var REC_EV_PAGE = 80; // number of event cards to load per page
-var recCtx = { day:null, selDay:'', availDays:[], eventList:[], eventFilter:'all', segCache:{}, evShown:0 };
+var recCtx = { day:null, selDay:'', availDays:[], eventList:[], eventFilter:'all', segCache:{}, evShown:0, range:null, preset:null };
 function pad2(n){ return (n<10?'0':'')+n; }
 function recDayStr(d){ return ''+d.getFullYear()+pad2(d.getMonth()+1)+pad2(d.getDate()); }
 // Date model for the custom calendar: a single YYYYMMDD string (recSelDay)
@@ -666,7 +651,6 @@ function recSetDateInput(ymd){
   if(recCalOpen) recRenderCal();
 }
 function recDateInputVal(){ return recCtx.selDay||''; }
-function recSegAtIn(segs, sec){ for(var i=0;i<segs.length;i++){ var s=segs[i]; if(sec>=s.start && sec<s.start+s.dur+2) return s; } return null; }
 
 function openRec(){
   var a = selected!==null ? agentById(selected) : null; if(!a) return;
@@ -690,13 +674,44 @@ function recLoadDays(){
 }
 function recLoadDay(){
   var day=recDateInputVal(); if(!day) return;
-  recCtx.day=day; recCtx.segCache={};
+  recCtx.day=day; recCtx.range=null; recCtx.segCache={}; recRangeToken++; // invalidate any in-flight range load
+  recSetActivePreset(day===recDayStr(new Date())?'today':null);
   loadRecEventList(day).then(function(list){
     if(day!==recCtx.day) return; // a newer day was selected mid-flight
     recCtx.eventList=list||[];
     recRenderEventList();
   });
 }
+/* ---- date presets (오늘/어제/이번주/지난주/이번달) ---- */
+var REC_PRESET_LABELS={today:'오늘', yesterday:'어제', week:'이번주', lastweek:'지난주', month:'이번달'};
+var recRangeToken=0;
+function recSetActivePreset(kind){
+  recCtx.preset=kind||null;
+  $$('#recPresets [data-preset]').forEach(function(b){ b.classList.toggle('on', b.dataset.preset===kind); });
+}
+function recPreset(kind){
+  if(!selected) return;
+  var now=new Date();
+  if(kind==='today'){ recSetDateInput(recDayStr(now)); recLoadDay(); return; }
+  if(kind==='yesterday'){ var y=new Date(now); y.setDate(y.getDate()-1); recSetDateInput(recDayStr(y)); recLoadDay(); return; }
+  var from, to, today=recDayStr(now);
+  if(kind==='week'){ var s=new Date(now); s.setDate(s.getDate()-s.getDay()); from=recDayStr(s); to=today; }       // this week (Sun start)
+  else if(kind==='lastweek'){ var e=new Date(now); e.setDate(e.getDate()-e.getDay()-1); var s2=new Date(e); s2.setDate(s2.getDate()-6); from=recDayStr(s2); to=recDayStr(e); }
+  else if(kind==='month'){ from=recDayStr(new Date(now.getFullYear(), now.getMonth(), 1)); to=today; }
+  else return;
+  recLoadRange(from, to, kind);
+}
+function recLoadRange(from, to, kind){
+  recCtx.range={from:from, to:to}; recCtx.day=null; recCtx.segCache={};
+  recSetActivePreset(kind);
+  var lbl=$('#recDateLabel'); if(lbl) lbl.textContent=REC_PRESET_LABELS[kind]||(from+'–'+to);
+  var tok=++recRangeToken;
+  fetch(BASE+'/api/rec-events-list?agent='+encodeURIComponent(selected)+'&from='+from+'&to='+to, {credentials:'same-origin'})
+    .then(function(r){ return r.ok? r.json() : null; })
+    .then(function(j){ if(tok!==recRangeToken) return; recCtx.eventList=(j&&Array.isArray(j.events))?j.events:[]; recRenderEventList(); })
+    .catch(function(){ if(tok!==recRangeToken) return; recCtx.eventList=[]; recRenderEventList(); });
+}
+(function(){ var p=$('#recPresets'); if(p) p.addEventListener('click', function(e){ var b=e.target.closest('[data-preset]'); if(b) recPreset(b.dataset.preset); }); })();
 function loadRecEventList(day){
   if(!selected) return Promise.resolve([]);
   return fetch(BASE+'/api/rec-events-list?agent='+encodeURIComponent(selected)+'&day='+day, {credentials:'same-origin'})
@@ -819,25 +834,6 @@ function recSegsForDay(stream, day){
   return fetch(BASE+'/api/rec?stream='+encodeURIComponent(stream)+'&day='+day).then(function(r){return r.ok?r.json():null;})
     .then(function(d){ var segs=(d&&d.segments)||[]; recCtx.segCache[key]=segs; return segs; })
     .catch(function(){ return []; });
-}
-function openEventModal(stream, t, ch, timeEl){
-  if(!stream) return;
-  var day=recCtx.day;
-  modalCell.classList.add('bare');
-  modalCell.innerHTML='<div class="ev-modal-wrap"><div class="ev-modal-na">불러오는 중…</div></div>';
-  modal.classList.add('show');
-  recSegsForDay(stream, day).then(function(segs){
-    if(!modal.classList.contains('show')) return; // closed while loading
-    var s=recSegAtIn(segs, t);
-    var wrap=modalCell.querySelector('.ev-modal-wrap'); if(!wrap) return;
-    if(!s){ wrap.innerHTML='<div class="ev-modal-na">해당 시각 녹화 구간 없음</div>'; return; }
-    var offset=Math.max(0, t-s.start);
-    var url=BASE+'/api/rec-file?stream='+encodeURIComponent(stream)+'&name='+encodeURIComponent(s.name);
-    wrap.innerHTML='<video controls autoplay playsinline preload="auto"></video>';
-    var v=wrap.querySelector('video'); recModalVideo=v;
-    v.src=url; v.load();
-    v.onloadedmetadata=function(){ try{ v.currentTime=offset; }catch(e){} v.play().catch(function(){}); };
-  });
 }
 function recShiftDay(delta){
   var day=recDateInputVal(); if(!day) return;
