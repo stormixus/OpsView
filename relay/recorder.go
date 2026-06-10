@@ -35,6 +35,7 @@ type Recorder struct {
 
 type recProc struct {
 	cancel context.CancelFunc
+	src    string
 }
 
 const (
@@ -109,41 +110,67 @@ func (r *Recorder) Run() {
 	}
 }
 
+// recordTargets maps each channel's recording OUTPUT path to the stream id to
+// record FROM. A channel with a "<id>@main" stream records the main stream into
+// its base dir and is NOT also recorded from its sub; other channels record their
+// own (sub) stream. Operates on full streamPath()s (agent prefix preserved).
+func recordTargets(active []string) map[string]string {
+	has := map[string]bool{}
+	for _, id := range active {
+		has[id] = true
+	}
+	out := map[string]string{}
+	for _, id := range active {
+		if isMainStreamID(id) {
+			out[baseStreamID(id)] = id
+			continue
+		}
+		if !has[mainStreamID(id)] {
+			out[id] = id
+		}
+	}
+	return out
+}
+
 // reconcile starts a recorder for every active stream and stops recorders for
 // streams that have gone away.
 func (r *Recorder) reconcile() {
-	want := map[string]string{} // path -> stream id (label)
+	var active []string
 	for _, s := range r.hub.allSessions() {
 		for _, st := range s.survProxy.StreamStats() {
-			if !st.Active {
-				continue
+			if st.Active {
+				active = append(active, streamPath(s.id, st.ID))
 			}
-			want[streamPath(s.id, st.ID)] = st.ID
 		}
 	}
+	want := recordTargets(active) // outputBase -> sourceID
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for path := range want {
-		if _, ok := r.recs[path]; !ok {
-			r.startLocked(path)
+	for out, src := range want {
+		if cur, ok := r.recs[out]; !ok {
+			r.startLocked(out, src)
+		} else if cur.src != src {
+			cur.cancel() // source flipped (sub<->main); restart against the new one
+			r.startLocked(out, src)
 		}
 	}
-	for path, p := range r.recs {
-		if _, ok := want[path]; !ok {
+	for out, p := range r.recs {
+		if _, ok := want[out]; !ok {
 			p.cancel()
-			delete(r.recs, path)
+			delete(r.recs, out)
 		}
 	}
 }
 
-// startLocked launches a supervised ffmpeg recorder for one stream path.
-func (r *Recorder) startLocked(path string) {
+// startLocked launches a supervised ffmpeg recorder: records FROM sourcePath's
+// self-HLS INTO outputPath's directory (so a main stream lands in the channel dir).
+func (r *Recorder) startLocked(outputPath, sourcePath string) {
 	ctx, cancel := context.WithCancel(context.Background())
-	r.recs[path] = &recProc{cancel: cancel}
-	outDir := filepath.Join(r.dir, filepath.FromSlash(path))
-	hlsURL := r.selfHLS + "/surv/" + path + "/index.m3u8"
-	go r.supervise(ctx, path, hlsURL, outDir)
-	log.Printf("[rec] recording %s -> %s", path, outDir)
+	r.recs[outputPath] = &recProc{cancel: cancel, src: sourcePath}
+	outDir := filepath.Join(r.dir, filepath.FromSlash(outputPath))
+	hlsURL := r.selfHLS + "/surv/" + sourcePath + "/index.m3u8"
+	go r.supervise(ctx, outputPath, hlsURL, outDir)
+	log.Printf("[rec] recording %s (source %s) -> %s", outputPath, sourcePath, outDir)
 }
 
 // supervise runs ffmpeg and restarts it (with backoff) until ctx is cancelled.

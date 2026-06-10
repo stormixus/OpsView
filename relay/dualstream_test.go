@@ -54,3 +54,23 @@ func TestDesiredStreamIDs(t *testing.T) {
 		t.Errorf("desiredStreamIDs = %v, want %v", got, want)
 	}
 }
+
+func TestRecordTargets(t *testing.T) {
+	cases := []struct {
+		name   string
+		active []string
+		want   map[string]string // outputBase -> sourceID
+	}{
+		{"sub only", []string{"dvr3_ch2"}, map[string]string{"dvr3_ch2": "dvr3_ch2"}},
+		{"main present", []string{"dvr3_ch1", "dvr3_ch1@main"}, map[string]string{"dvr3_ch1": "dvr3_ch1@main"}},
+		{"agent prefixed", []string{"a1/dvr3_ch1", "a1/dvr3_ch1@main"}, map[string]string{"a1/dvr3_ch1": "a1/dvr3_ch1@main"}},
+		{"mixed", []string{"dvr3_ch1", "dvr3_ch1@main", "dvr3_ch2"},
+			map[string]string{"dvr3_ch1": "dvr3_ch1@main", "dvr3_ch2": "dvr3_ch2"}},
+	}
+	for _, c := range cases {
+		got := recordTargets(c.active)
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: recordTargets(%v) = %v, want %v", c.name, c.active, got, c.want)
+		}
+	}
+}
