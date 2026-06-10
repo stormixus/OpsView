@@ -1029,74 +1029,49 @@ function upSyncLiveWindow(){
   up.t1=now; up.t0=now-span;
 }
 // Rail layers: persistent thumb filmstrip + axis (rebuilt occasionally) + playhead overlay.
-var UP_THUMB_STEPS=[15,30,60,120,300,600,900,1800,3600];
 function upRailLayers(){
   if(!upRail._axis){
     upRail.innerHTML='<div class="up-thumbs" id="upRailThumbs"></div><div class="up-axis" id="upRailAxis"></div>';
-    upRail._thumbs=$('#upRailThumbs'); upRail._axis=$('#upRailAxis'); upRail._thumbMap={};
+    upRail._thumbs=$('#upRailThumbs'); upRail._axis=$('#upRailAxis'); upRail._cells=null;
     upRail._playhead=null;
   }
 }
 function upResetRailLayers(){
-  if(upRail._thumbs){ upRail._thumbs.innerHTML=''; upRail._thumbMap={}; }
+  if(upRail._thumbs){ upRail._thumbs.innerHTML=''; upRail._cells=null; }
   if(upRail._playhead){ upRail._playhead.remove(); upRail._playhead=null; }
   if(upRail._axis){ upRail._axis.innerHTML=''; }
-  up._thumbStep=null; up._thumbStepSpan=0;
+  up._sprite=null;
 }
 function upResetThumbs(){ upResetRailLayers(); }
-function upPickThumbStep(span){
-  var ideal=span/9;
-  for(var i=0;i<UP_THUMB_STEPS.length;i++) if(UP_THUMB_STEPS[i]>=ideal) return UP_THUMB_STEPS[i];
-  return UP_THUMB_STEPS[UP_THUMB_STEPS.length-1];
+// The filmstrip is ONE sprite JPEG (n frames tiled) instead of N <img> fetches —
+// a single HTTP round-trip over the tunnel. The sprite tracks the loaded timeline
+// band, so panning within it only repositions cells (no refetch).
+var UP_CELL_W=96, UP_CELL_H=54; // 160x90 sprite cell shown at 96x54 (same 16:9)
+function upDesiredSprite(){
+  if(!up._loaded) return null;
+  var from=up._loaded.from, to=up._loaded.to;
+  if(to<=from) return null;
+  var n=Math.max(4, Math.min(48, Math.round((to-from)*up.pxPerSec/UP_CELL_H)));
+  return { from:from, to:to, n:n };
 }
-// Stable thumb grid (decoupled from tick labels) so panning doesn't churn <img> keys.
-function upThumbStep(){
-  var span=Math.max(60, up.t1-up.t0);
-  if(!up._thumbStep || !up._thumbStepSpan || Math.abs(span-up._thumbStepSpan)>up._thumbStepSpan*0.38){
-    up._thumbStepSpan=span;
-    up._thumbStep=upPickThumbStep(span);
+function upRenderThumbs(H, now){
+  var layer=upRail._thumbs; if(!layer) return;
+  var d=upDesiredSprite();
+  if(!d){ if(up._sprite){ layer.innerHTML=''; upRail._cells=null; up._sprite=null; } return; }
+  if(!up._sprite || up._sprite.from!==d.from || up._sprite.to!==d.to || up._sprite.n!==d.n){
+    up._sprite={ from:d.from, to:d.to, n:d.n, step:(d.to-d.from)/d.n,
+      url:BASE+'/api/rec-sprite?stream='+encodeURIComponent(up.path)+'&start='+Math.round(d.from)+'&end='+Math.round(d.to)+'&n='+d.n };
+    var html='';
+    for(var i=0;i<d.n;i++) html+='<div class="up-thumb" style="background-image:url('+escAttr(up._sprite.url)+');background-position:0 -'+(i*UP_CELL_H)+'px"></div>';
+    layer.innerHTML=html;
+    upRail._cells=[].slice.call(layer.children);
   }
-  return up._thumbStep;
-}
-function upMarkThumbReady(img){
-  if(img.complete && img.naturalWidth>0) img.classList.add('ready');
-}
-// Reconcile thumbnails: reuse by unix time, hide off-screen, prune only outside loaded band.
-function upRenderThumbs(H, step, now){
-  var layer=upRail._thumbs, map=upRail._thumbMap, keep={};
-  var span=Math.max(60, up.t1-up.t0);
-  var pruneLo=(up._loaded?up._loaded.from:up.t0)-span*1.5;
-  var pruneHi=(up._loaded?up._loaded.to:up.t1)+span*1.5;
-  var tStart=Math.ceil(up.t0/step)*step, tEnd=up.t1+step*2;
-  for(var tt=tStart; tt<=tEnd; tt+=step){
-    if(tt>now+step || segmentAt(up.segs,tt)<0) continue;
-    keep[tt]=1;
-    var y=upYat(tt,H), visible=y>=-60&&y<=H+60;
-    var img=map[tt];
-    if(!img){
-      img=document.createElement('img');
-      img.className='up-thumb';
-      img.decoding='async';
-      img.alt='';
-      img.onload=function(){ this.classList.add('ready'); };
-      img.onerror=function(){ this.classList.add('na'); };
-      img.src=BASE+'/api/rec-thumb?stream='+encodeURIComponent(up.path)+'&t='+tt;
-      layer.appendChild(img);
-      map[tt]=img;
-      upMarkThumbReady(img);
-    }
-    img.style.top=(y-27)+'px';
-    img.style.visibility=visible?'visible':'hidden';
-  }
-  for(var k in map){
-    if(keep[k]) continue;
-    var tk=+k;
-    if(tk<pruneLo || tk>pruneHi){
-      if(map[k].parentNode) layer.removeChild(map[k]);
-      delete map[k];
-    } else {
-      map[k].style.visibility='hidden';
-    }
+  var sp=up._sprite, cells=upRail._cells||[];
+  for(var i=0;i<sp.n;i++){
+    var cell=cells[i]; if(!cell) continue;
+    var ti=sp.from+(i+0.5)*sp.step, y=upYat(ti,H);
+    cell.style.top=(y-UP_CELL_H/2)+'px';
+    cell.style.visibility=(y>=-60&&y<=H+60 && ti<=now+sp.step && segmentAt(up.segs,ti)>=0)?'visible':'hidden';
   }
 }
 function upEnsurePlayhead(){
@@ -1182,7 +1157,7 @@ function upRenderRail(opts){
   opts=opts||{};
   upRailLayers();
   var H=upRailH(), now=Math.floor(Date.now()/1000);
-  if(opts.thumbs!==false) upRenderThumbs(H, upThumbStep(), now);
+  if(opts.thumbs!==false) upRenderThumbs(H, now);
   if(opts.axis!==false) upRenderRailAxis(H);
   upRenderPlayhead(H, now);
   upSetBigClock(now);
@@ -1343,7 +1318,7 @@ function upStartRecLoop(){
     if(!up._railBodyTs || ts-up._railBodyTs>200){
       up._railBodyTs=ts;
       upRailLayers();
-      upRenderThumbs(H, upThumbStep(), now);
+      upRenderThumbs(H, now);
       upRenderRailAxis(H);
       upSetBigClock(now);
     }
