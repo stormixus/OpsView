@@ -17,9 +17,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 RUN git clone --depth 1 https://github.com/gyupro/EasyKoreanLpDetector.git
 
-# EasyOCR + YOLOv5(torch.hub) runtime deps
+# EasyOCR + YOLOv5(torch.hub) runtime deps. NOTE: yolov5 master's hubconf imports
+# the `ultralytics` package, so it must be installed even though we load yolov5.
 RUN pip install --no-cache-dir \
-    easyocr opencv-python-headless pillow numpy \
+    easyocr opencv-python-headless pillow numpy ultralytics \
     pandas seaborn requests scipy tqdm pyyaml matplotlib
 
 # warm the torch.hub yolov5 repo cache so runtime load is offline-fast
