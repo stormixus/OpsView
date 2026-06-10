@@ -109,8 +109,12 @@ func (m *SurveillanceManager) migrate() {
 	// (main) recording quality; sub DVRs default to 0. Only on first creation so a
 	// later user toggle-off is never overwritten on restart.
 	if !columnExists(m.db, "channels", "record_hires") {
-		m.db.Exec(`ALTER TABLE channels ADD COLUMN record_hires INTEGER NOT NULL DEFAULT 0`)
-		m.db.Exec(`UPDATE channels SET record_hires=1 WHERE dvr_id IN (SELECT id FROM dvrs WHERE stream_quality='main')`)
+		if _, err := m.db.Exec(`ALTER TABLE channels ADD COLUMN record_hires INTEGER NOT NULL DEFAULT 0`); err != nil {
+			log.Printf("[surv] migrate add record_hires: %v", err)
+		}
+		if _, err := m.db.Exec(`UPDATE channels SET record_hires=1 WHERE dvr_id IN (SELECT id FROM dvrs WHERE stream_quality='main')`); err != nil {
+			log.Printf("[surv] migrate backfill record_hires: %v", err)
+		}
 	}
 }
 
