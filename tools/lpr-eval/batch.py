@@ -61,12 +61,34 @@ def seg_start_unix(path):
     return dt.replace(tzinfo=_TZ).timestamp()
 
 
-def extract_rec_roi(segs, starts, t, roi, upscale, out):
+def calibrate_offset(starts, ev_times):
+    """The segment filenames are in the relay's local wall-clock; whatever TZ I
+    parsed them with may differ from the recorder's by a whole TZ offset. Find the
+    constant shift K that makes the most event times land inside a segment, so this
+    works regardless of the recorder's timezone (no manual TZ guessing)."""
+    if not starts or not ev_times:
+        return 0
+    sample = ev_times[:: max(1, len(ev_times) // 300)]
+    best = (0, -1)
+    for k in range(-26 * 3600, 26 * 3600 + 1, 1800):  # 30-min steps (covers all TZs)
+        hit = 0
+        for t in sample:
+            target = t - k
+            j = bisect.bisect_right(starts, target) - 1
+            if j >= 0 and 0 <= target - starts[j] < 900:
+                hit += 1
+        if hit > best[1]:
+            best = (k, hit)
+    return best[0]
+
+
+def extract_rec_roi(segs, starts, t, delta, roi, upscale, out):
     """ffmpeg: full-res frame from the recording at unix-time t, cropped to ROI."""
-    i = bisect.bisect_right(starts, t) - 1
+    target = t - delta
+    i = bisect.bisect_right(starts, target) - 1
     if i < 0:
         return False
-    off = t - starts[i]
+    off = target - starts[i]
     if off < 0 or off > 3600:  # t not inside this segment
         return False
     x1, y1, x2, y2 = roi
@@ -119,11 +141,16 @@ def main():
     )
 
     segs = starts = None
+    delta = 0
     if rec:
         pairs = sorted((seg_start_unix(p), p) for p in glob.glob(os.path.join(rec, "*.mp4")))
         starts = [s for s, _ in pairs]
         segs = [p for _, p in pairs]
-        print(f"REC mode: {len(segs)} recording segments; extracting full-res frames.")
+        ev_times = [int(os.path.splitext(os.path.basename(p))[0]) for p in files
+                    if os.path.splitext(os.path.basename(p))[0].isdigit()]
+        delta = calibrate_offset(starts, ev_times)
+        print(f"REC mode: {len(segs)} segments; auto-detected recorder offset {delta // 3600:+d}h "
+              f"({delta:+d}s). Extracting full-res frames.")
 
     rows, read, got = [], 0, 0
     for i, p in enumerate(files, 1):
@@ -134,7 +161,7 @@ def main():
                 t = int(base)  # evthumb filename = unix seconds
             except ValueError:
                 continue
-            if not extract_rec_roi(segs, starts, t, roi, upscale, crop):
+            if not extract_rec_roi(segs, starts, t, delta, roi, upscale, crop):
                 continue
             img = cv2.imread(crop)
         else:
