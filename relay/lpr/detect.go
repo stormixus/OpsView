@@ -4,13 +4,18 @@ import "math"
 
 type detection struct {
 	x1, y1, x2, y2 int
-	conf             float32
+	conf           float32
 }
 
 // decodeYoloV9End2End converts open-image-models YOLOv9 end2end ONNX output
 // back to boxes in original image coordinates.
 func decodeYoloV9End2End(raw []float32, rows int, cols int, ratio float64, padW, padH float64, classLabels []string, scoreThreshold float32) []detection {
 	if rows == 0 || cols < 7 {
+		return nil
+	}
+	// the model's declared shape (rows*cols) may exceed the actual data buffer;
+	// guard before indexing so a malformed output can't panic.
+	if len(raw) < rows*cols {
 		return nil
 	}
 	var out []detection

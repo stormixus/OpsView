@@ -38,6 +38,14 @@ func TestDecodeYoloV9End2End(t *testing.T) {
 	}
 }
 
+// A declared shape larger than the actual data buffer must not panic.
+func TestDecodeYoloV9End2EndShortBuffer(t *testing.T) {
+	raw := []float32{0, 10, 20, 110, 60, 0, 0.9} // only 1 row of data
+	if dets := decodeYoloV9End2End(raw, 5, 7, 1.0, 0, 0, nil, 0.25); dets != nil {
+		t.Fatalf("expected nil for short buffer, got %+v", dets)
+	}
+}
+
 func TestHeuristicPlateCrop(t *testing.T) {
 	im := rgbImage{w: 100, h: 100, rgb: make([]byte, 100*100*3)}
 	crop, box := heuristicPlateCrop(im)

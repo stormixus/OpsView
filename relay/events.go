@@ -102,7 +102,7 @@ func (e *eventStore) closeLocked(stream, kind string, startMs, endMs int64, plat
 func (e *eventStore) updateOpenPlate(stream string, tsMs int64, plate string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	
+
 	// 1. Check open events
 	for k, cur := range e.open {
 		if k.stream == stream && cur.startMs == tsMs {
@@ -111,7 +111,7 @@ func (e *eventStore) updateOpenPlate(stream string, tsMs int64, plate string) {
 			return
 		}
 	}
-	
+
 	// 2. Check recently cached events (if closed quickly)
 	day := dayKeyFromMs(tsMs)
 	key := stream + "|" + day

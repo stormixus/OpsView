@@ -33,6 +33,11 @@ type Engine struct {
 	ocrSess     *ort.DynamicAdvancedSession
 	detSize     int
 	ocrOutCount int
+
+	// mu serializes Recognize: one shared Engine is invoked from per-event
+	// goroutines, and onnxruntime DynamicAdvancedSession.Run is not guaranteed
+	// safe for concurrent calls on the same session.
+	mu sync.Mutex
 }
 
 func newEngine(cfg Config) (Recognizer, error) {
@@ -134,8 +139,11 @@ func tensorRowsCols(shape ort.Shape) (rows, cols int, err error) {
 	}
 }
 
-// Recognize detects a plate region then runs OCR on the crop.
+// Recognize detects a plate region then runs OCR on the crop. Serialized: the
+// detector/OCR sessions are shared and onnxruntime Run isn't concurrency-safe.
 func (e *Engine) Recognize(jpeg []byte) (Result, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	im, err := decodeJPEG(jpeg)
 	if err != nil {
 		return Result{}, err

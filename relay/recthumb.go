@@ -58,7 +58,7 @@ func (h *Hub) storeEventThumb(stream string, tsMs int64, jpeg []byte) {
 		log.Printf("[rec-thumb] %s @%d: dropped oversized event thumb (%d bytes)", stream, tsMs/1000, len(jpeg))
 		return
 	}
-	
+
 	// Trigger License Plate Recognition asynchronously
 	go h.runLPR(stream, tsMs, jpeg)
 
@@ -96,7 +96,7 @@ func (h *Hub) runLPR(stream string, tsMs int64, jpeg []byte) {
 	if res.Plate == "" {
 		return
 	}
-	
+
 	// Keep only the last 4 digits of the recognized plate number
 	plate4 := extractLast4Digits(res.Plate)
 	if plate4 == "" {

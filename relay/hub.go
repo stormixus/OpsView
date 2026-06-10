@@ -60,8 +60,8 @@ type Hub struct {
 	hiddenMu     sync.RWMutex
 	hiddenAgents map[string]bool // operator-hidden agent ids (excluded from dashboard)
 
-	rec    *Recorder   // NVR recorder (nil when recording is disabled)
-	events *eventStore // event timeline store (nil when recording is disabled)
+	rec    *Recorder      // NVR recorder (nil when recording is disabled)
+	events *eventStore    // event timeline store (nil when recording is disabled)
 	lpr    lpr.Recognizer // optional in-process plate recognition (nil => env-based default)
 }
 
