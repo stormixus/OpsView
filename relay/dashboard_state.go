@@ -50,12 +50,14 @@ type agentState struct {
 }
 
 type channelMeta struct {
-	DVRID   int64  `json:"dvr_id"`
-	ChNum   int    `json:"ch_num"`
-	Name    string `json:"name"`
-	Order   int    `json:"order"`
-	Enabled bool   `json:"enabled"`
-	Active  bool   `json:"active"`
+	DVRID       int64  `json:"dvr_id"`
+	ChNum       int    `json:"ch_num"`
+	Name        string `json:"name"`
+	Order       int    `json:"order"`
+	Enabled     bool   `json:"enabled"`
+	Active      bool   `json:"active"`
+	Height      int    `json:"height"`
+	RecordHiRes bool   `json:"record_hires"`
 }
 
 type streamState struct {
@@ -154,6 +156,12 @@ func (h *Hub) buildDashboardState() dashboardState {
 		streams := make([]streamState, 0)
 		activeSet := map[string]bool{}
 		for _, st := range s.survProxy.StreamStats() {
+			if isMainStreamID(st.ID) {
+				if st.Active {
+					activeSet[st.ID] = true // keep active flag for recorder/debug
+				}
+				continue // not a user-facing stream row
+			}
 			streams = append(streams, streamState{
 				ID: st.ID, Name: st.Name, Active: st.Active, Codec: st.Codec,
 				WSWatchers: st.WSWatchers, Path: streamPath(s.id, st.ID),
@@ -173,8 +181,10 @@ func (h *Hub) buildDashboardState() dashboardState {
 					counts[ch.DVRID]++
 					channels = append(channels, channelMeta{
 						DVRID: ch.DVRID, ChNum: ch.ChNum, Name: ch.Name, Order: ch.Order,
-						Enabled: ch.Enabled,
-						Active:  activeSet[streamIDFor(ch.DVRID, ch.ChNum)],
+						Enabled:     ch.Enabled,
+						Active:      activeSet[streamIDFor(ch.DVRID, ch.ChNum)],
+						Height:      ch.Height,
+						RecordHiRes: ch.RecordHighRes,
 					})
 				}
 				for _, d := range cfg.DVRs {
