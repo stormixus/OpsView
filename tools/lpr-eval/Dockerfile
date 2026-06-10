@@ -10,8 +10,11 @@
 #     -v /mnt/user/Records/SM-Boutique/dvr3_ch1/.evthumbs:/frames lpr-eval
 FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
 
+# ffmpeg = full-res frame extraction from recordings; tzdata so segment filenames
+# (local-time YYYYMMDD_HHMMSS) map to the right unix time. Seoul to match the DVR.
+ENV TZ=Asia/Seoul
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git libgl1 libglib2.0-0 ca-certificates && rm -rf /var/lib/apt/lists/*
+    git ffmpeg tzdata libgl1 libglib2.0-0 ca-certificates && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 # the repo provides the EasyOCR custom Korean network under lp_models/
