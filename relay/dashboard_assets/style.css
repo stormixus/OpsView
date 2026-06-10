@@ -730,8 +730,10 @@ button{font-family:inherit; cursor:pointer;}
 .up-tr-btn#upPause svg{width:46px; height:46px;}
 .up-tr-btn:hover{transform:scale(1.1);}
 .up-tr-btn:active{transform:scale(.92);}
-.up-tr-ico-pause{display:block;}
-.up-tr-ico-play{display:none;}
+/* scope under .up-tr-btn so these beat the generic `.up-tr-btn svg{display:block}`
+   rule (0,1,1) — otherwise the play icon's display:none loses and BOTH icons show. */
+.up-tr-btn .up-tr-ico-pause{display:block;}
+.up-tr-btn .up-tr-ico-play{display:none;}
 .up-tr-btn.paused .up-tr-ico-pause{display:none;}
 .up-tr-btn.paused .up-tr-ico-play{display:block;}
 .up-state{position:absolute; left:50%; bottom:16px; z-index:3; transform:translateX(-50%); color:#cdd6e0; font-size:12.5px; font-weight:600; background:rgba(0,0,0,.5); padding:4px 10px; border-radius:8px;}
