@@ -60,15 +60,16 @@ type DVRInfo struct {
 
 // ChannelInfo describes a single surveillance channel.
 type ChannelInfo struct {
-	ID      int    `json:"id"`
-	DVRID   int64  `json:"dvr_id"`
-	ChNum   int    `json:"ch_num"`
-	Name    string `json:"name"`
-	Order   int    `json:"order"`
-	Enabled bool   `json:"enabled"`
-	Width   int    `json:"width"`
-	Height  int    `json:"height"`
-	RtspURI string `json:"rtsp_uri,omitempty"`
+	ID            int    `json:"id"`
+	DVRID         int64  `json:"dvr_id"`
+	ChNum         int    `json:"ch_num"`
+	Name          string `json:"name"`
+	Order         int    `json:"order"`
+	Enabled       bool   `json:"enabled"`
+	Width         int    `json:"width"`
+	Height        int    `json:"height"`
+	RtspURI       string `json:"rtsp_uri,omitempty"`
+	RecordHighRes bool   `json:"record_hires"`
 }
 
 // SurvMeta is the MsgSurvMeta payload (relay→publisher): a channel-metadata edit
@@ -77,12 +78,19 @@ type SurvMeta struct {
 	DVRID   int64           `json:"dvr_id"`
 	Order   []int           `json:"order,omitempty"`   // ch_nums in desired display order
 	Renames []ChannelRename `json:"renames,omitempty"` // per-channel name changes
+	Hires   []ChannelHiRes  `json:"hires,omitempty"`   // per-channel high-res record toggles
 }
 
 // ChannelRename is one channel's new display name.
 type ChannelRename struct {
 	ChNum int    `json:"ch_num"`
 	Name  string `json:"name"`
+}
+
+// ChannelHiRes toggles high-res (main-stream) recording for one channel.
+type ChannelHiRes struct {
+	ChNum int  `json:"ch_num"`
+	On    bool `json:"on"`
 }
 
 // AgentControl is the MsgAgentControl payload (relay→publisher): an operator

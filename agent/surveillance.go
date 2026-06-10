@@ -105,6 +105,31 @@ func (m *SurveillanceManager) migrate() {
 			log.Printf("[surv] migrate alter: %v", err)
 		}
 	}
+	// record_hires: added once. Backfill main-stream DVRs to keep their current
+	// (main) recording quality; sub DVRs default to 0. Only on first creation so a
+	// later user toggle-off is never overwritten on restart.
+	if !columnExists(m.db, "channels", "record_hires") {
+		m.db.Exec(`ALTER TABLE channels ADD COLUMN record_hires INTEGER NOT NULL DEFAULT 0`)
+		m.db.Exec(`UPDATE channels SET record_hires=1 WHERE dvr_id IN (SELECT id FROM dvrs WHERE stream_quality='main')`)
+	}
+}
+
+func columnExists(db *sql.DB, table, col string) bool {
+	rows, err := db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt any
+		if rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk) == nil && name == col {
+			return true
+		}
+	}
+	return false
 }
 
 // --- DVR CRUD ---
@@ -125,16 +150,17 @@ type DVRConfig struct {
 }
 
 type ChannelConfig struct {
-	ID          int    `json:"id"`
-	DVRID       int64  `json:"dvr_id"`
-	ChNum       int    `json:"ch_num"`
-	Name        string `json:"name"`
-	Order       int    `json:"order"`
-	Enabled     bool   `json:"enabled"`
-	Width       int    `json:"width"`
-	Height      int    `json:"height"`
-	RtspURI     string `json:"rtsp_uri,omitempty"`
-	SnapshotURI string `json:"snapshot_uri,omitempty"`
+	ID            int    `json:"id"`
+	DVRID         int64  `json:"dvr_id"`
+	ChNum         int    `json:"ch_num"`
+	Name          string `json:"name"`
+	Order         int    `json:"order"`
+	Enabled       bool   `json:"enabled"`
+	Width         int    `json:"width"`
+	Height        int    `json:"height"`
+	RtspURI       string `json:"rtsp_uri,omitempty"`
+	SnapshotURI   string `json:"snapshot_uri,omitempty"`
+	RecordHighRes bool   `json:"record_hires"`
 }
 
 func (m *SurveillanceManager) ListDVRs() ([]DVRConfig, error) {
@@ -254,7 +280,7 @@ func (m *SurveillanceManager) ResetDB() error {
 // --- Channel management ---
 
 func (m *SurveillanceManager) ListChannels(dvrID int64) ([]ChannelConfig, error) {
-	rows, err := m.db.Query(`SELECT id, dvr_id, ch_num, name, display_order, enabled, width, height, rtsp_uri, snapshot_uri FROM channels WHERE dvr_id=? ORDER BY display_order`, dvrID)
+	rows, err := m.db.Query(`SELECT id, dvr_id, ch_num, name, display_order, enabled, width, height, rtsp_uri, snapshot_uri, record_hires FROM channels WHERE dvr_id=? ORDER BY display_order`, dvrID)
 	if err != nil {
 		return nil, err
 	}
@@ -263,11 +289,12 @@ func (m *SurveillanceManager) ListChannels(dvrID int64) ([]ChannelConfig, error)
 	var chs []ChannelConfig
 	for rows.Next() {
 		var ch ChannelConfig
-		var en int
-		if err := rows.Scan(&ch.ID, &ch.DVRID, &ch.ChNum, &ch.Name, &ch.Order, &en, &ch.Width, &ch.Height, &ch.RtspURI, &ch.SnapshotURI); err != nil {
+		var en, hires int
+		if err := rows.Scan(&ch.ID, &ch.DVRID, &ch.ChNum, &ch.Name, &ch.Order, &en, &ch.Width, &ch.Height, &ch.RtspURI, &ch.SnapshotURI, &hires); err != nil {
 			return nil, err
 		}
 		ch.Enabled = en == 1
+		ch.RecordHighRes = hires == 1
 		chs = append(chs, ch)
 	}
 	return chs, rows.Err()
@@ -302,6 +329,26 @@ func (m *SurveillanceManager) RenameChannel(dvrID int64, chNum int, name string)
 		m.onChange()
 	}
 	return err
+}
+
+// SetChannelHiRes toggles high-res (main-stream) recording for one channel,
+// then fires onChange so the new config propagates to the relay.
+func (m *SurveillanceManager) SetChannelHiRes(dvrID int64, chNum int, on bool) error {
+	v := 0
+	if on {
+		v = 1
+	}
+	_, err := m.db.Exec(`UPDATE channels SET record_hires=? WHERE dvr_id=? AND ch_num=?`, v, dvrID, chNum)
+	if err == nil && m.onChange != nil {
+		m.onChange()
+	}
+	return err
+}
+
+func (m *SurveillanceManager) channelHiRes(dvrID int64, chNum int) bool {
+	var v int
+	m.db.QueryRow(`SELECT record_hires FROM channels WHERE dvr_id=? AND ch_num=?`, dvrID, chNum).Scan(&v)
+	return v == 1
 }
 
 func (m *SurveillanceManager) DiscoverChannels(dvrID int64) ([]ChannelConfig, error) {

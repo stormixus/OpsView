@@ -344,7 +344,8 @@ func (a *Agent) sendSurvConfig() {
 				ID: ch.ID, DVRID: ch.DVRID, ChNum: ch.ChNum,
 				Name: ch.Name, Order: ch.Order, Enabled: ch.Enabled,
 				Width: ch.Width, Height: ch.Height,
-				RtspURI: ch.RtspURI,
+				RtspURI:       ch.RtspURI,
+				RecordHighRes: ch.RecordHighRes,
 			})
 		}
 	}
@@ -568,6 +569,11 @@ func (a *Agent) applySurvMeta(payload []byte) {
 	if len(m.Order) > 0 {
 		if err := a.survMgr.ReorderChannels(m.DVRID, m.Order); err != nil {
 			log.Printf("[agent] surv meta reorder dvr %d: %v", m.DVRID, err)
+		}
+	}
+	for _, h := range m.Hires {
+		if err := a.survMgr.SetChannelHiRes(m.DVRID, h.ChNum, h.On); err != nil {
+			log.Printf("[agent] surv meta hires ch %d: %v", h.ChNum, err)
 		}
 	}
 }
