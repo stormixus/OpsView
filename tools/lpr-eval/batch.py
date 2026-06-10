@@ -23,6 +23,7 @@ import os
 import re
 import subprocess
 import sys
+from zoneinfo import ZoneInfo
 
 import cv2
 import easyocr
@@ -30,6 +31,9 @@ import numpy as np
 import torch
 
 _HANGUL = re.compile(r"[가-힣]")
+# segment filenames are LOCAL wall-clock; attach the zone explicitly so unix
+# conversion is correct regardless of the container's system localtime.
+_TZ = ZoneInfo(os.environ.get("TZ", "Asia/Seoul"))
 
 
 def is_korean_plate(text):
@@ -52,8 +56,9 @@ def parse_roi_frac(s):
 
 
 def seg_start_unix(path):
-    # recorder names segments '<YYYYMMDD_HHMMSS>.mp4' in LOCAL time (container TZ must match)
-    return datetime.datetime.strptime(os.path.basename(path)[:15], "%Y%m%d_%H%M%S").timestamp()
+    # recorder names segments '<YYYYMMDD_HHMMSS>.mp4' in LOCAL wall-clock time
+    dt = datetime.datetime.strptime(os.path.basename(path)[:15], "%Y%m%d_%H%M%S")
+    return dt.replace(tzinfo=_TZ).timestamp()
 
 
 def extract_rec_roi(segs, starts, t, roi, upscale, out):
