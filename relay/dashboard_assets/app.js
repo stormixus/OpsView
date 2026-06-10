@@ -470,11 +470,31 @@ function cellHTML(s){
     '<div class="expand"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 3H3v6M21 9V3h-6M3 15v6h6M15 21h6v-6"/></svg></div></div>';
 }
 /* --- real video players for the live grid --- */
-var livePlayers=[];
+// Live cells play only while on-screen. Browsers cap how many H.264 decoders run
+// at once (~16-25); eagerly starting every cell in a big grid left the losers black
+// (whoever grabbed a decoder first won, so the black set shuffled each reload). An
+// IntersectionObserver starts a cell's WS only when it scrolls into view and tears
+// it down — freeing the decoder — when it leaves, keeping concurrent decoders near
+// "what fits on screen".
+var liveObs=null;
+function _cellPlay(cell){
+  if(!cell || cell._player) return;
+  var path=cell.dataset.path; if(!path) return;
+  var video=cell.querySelector('video'); if(!video) return;
+  var wsUrl=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/surv/ws/'+path;
+  var hlsUrl=location.origin+'/surv/'+path+'/index.m3u8';
+  cell._player=playWS(video, wsUrl, function(){ playHLS(video, hlsUrl); });
+}
+function _cellStop(cell){
+  if(!cell) return;
+  if(cell._player){ try{ cell._player.close&&cell._player.close(); }catch(e){} cell._player=null; }
+  var video=cell.querySelector('video'); if(video){ try{ video.removeAttribute('src'); video.load(); }catch(e){} }
+}
 function stopLiveGrid(){
-  livePlayers.forEach(function(p){ try{ p&&p.close&&p.close(); }catch(e){} });
-  livePlayers=[];
-  var g=$('#grid'); if(g){ g.innerHTML=''; delete g.dataset.agent; }
+  if(liveObs){ try{ liveObs.disconnect(); }catch(e){} liveObs=null; }
+  var g=$('#grid'); if(!g) return;
+  $$('#grid .cell').forEach(_cellStop);  // close sockets before dropping the DOM
+  g.innerHTML=''; delete g.dataset.agent;
 }
 function _isIOS(){ return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1); }
 // The smooth low-latency path needs a MediaSource. iOS historically had none (HLS
@@ -548,13 +568,12 @@ function renderGrid(a){
   grid.classList.toggle('editing', liveEditing);
   grid.dataset.agent=a.id;
   var cells=$$('#grid .cell');
-  list.forEach(function(s, i){
-    var video=cells[i] && cells[i].querySelector('video'); if(!video) return;
-    var wsUrl=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/surv/ws/'+s.path;
-    var hlsUrl=location.origin+'/surv/'+s.path+'/index.m3u8';
-    var p=playWS(video, wsUrl, function(){ playHLS(video, hlsUrl); });
-    if(p) livePlayers.push(p);
-  });
+  list.forEach(function(s, i){ if(cells[i]) cells[i].dataset.path=s.path; });
+  // start playback per cell as it enters the viewport; stop (free the decoder) on exit
+  liveObs=new IntersectionObserver(function(entries){
+    entries.forEach(function(en){ if(en.isIntersecting){ _cellPlay(en.target); } else { _cellStop(en.target); } });
+  }, {rootMargin:'100px'});
+  cells.forEach(function(c){ liveObs.observe(c); });
   if(liveEditing) wireLiveEdit(a);
   updateCellClocks();
 }
