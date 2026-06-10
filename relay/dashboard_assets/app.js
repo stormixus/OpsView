@@ -87,7 +87,7 @@ function adaptState(api){
       id:a.id, name:a.name, online:!!a.connected, version:a.version||'',
       dvr:(a.dvrs&&a.dvrs[0]?a.dvrs[0].name:''),
       dvrs:(a.dvrs||[]).map(function(d){return {id:d.id, name:d.name, channels:d.channels};}),
-      chans:(a.channels||[]).map(function(c){return {dvr_id:c.dvr_id, ch_num:c.ch_num, name:c.name, order:c.order, enabled:c.enabled, active:c.active};}),
+      chans:(a.channels||[]).map(function(c){return {dvr_id:c.dvr_id, ch_num:c.ch_num, name:c.name, order:c.order, enabled:c.enabled, active:c.active, record_hires:!!c.record_hires, height:c.height||0};}),
       since_ms: a.since? Date.parse(a.since): now,
       last_publish_ms: a.last_publish_at? Date.parse(a.last_publish_at): now,
       pin_set:!!a.pin_set, publish_count:a.publish_count||0,
@@ -96,12 +96,16 @@ function adaptState(api){
       watchers:(a.watchers||[]).map(function(w){return {id:w.id, ip:_stripPort(w.ip), label:w.label||'', since: w.since?Date.parse(w.since):now};}),
       streams:(a.streams||[]).map(function(s,i){
         var dm=String(s.id).match(/dvr(\d+)/), cm=String(s.id).match(/_ch(\d+)/);
+        var dvrId = dm?+dm[1]:0, chNum = cm?+cm[1]:(i+1);
+        var chMeta = (a.channels||[]).filter(function(c){return c.dvr_id===dvrId && c.ch_num===chNum;})[0];
         return {
           id:s.id, name:s.name||s.id, hue:(i*47)%360,
-          dvrId: dm?+dm[1]:0, ch: cm?+cm[1]:(i+1),
+          dvrId: dvrId, ch: chNum,
           active:!!s.active, codec:s.codec||'h264',
           transport:(s.codec==='h265'?['hls']:['ws','hls']),
-          ws_watchers:s.ws_watchers||0, path:s.path||s.id };}),
+          ws_watchers:s.ws_watchers||0, path:s.path||s.id,
+          hires: !!(chMeta && chMeta.record_hires),
+          h720: !!(chMeta && chMeta.height && chMeta.height <= 720) };}),
       nextWid:0, nextWEvt: now+1e12
     };
   });
@@ -557,7 +561,8 @@ function liveCellHTML(s){
     '<div class="rec'+(off?'':' on')+'"><i></i>REC</div>'+
     '<span class="dot cstat '+(off?'bad':'live')+'"></span>'+
     '<div class="clabel">'+(liveEditing?'<input class="cell-name" data-ch="'+s.ch+'" data-dvr="'+s.dvrId+'" value="'+escAttr(s.name)+'">':'<span class="ch">'+escHtml(s.name)+'</span>')+'<span class="nm">CH'+s.ch+'</span>'+
-      (off?'':'<span class="wn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3"/><path d="M6 20a6 6 0 0 1 12 0"/></svg>'+s.ws_watchers+'</span>')+'</div>'+
+      (off?'':'<span class="wn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="3"/><path d="M6 20a6 6 0 0 1 12 0"/></svg>'+s.ws_watchers+'</span>')+
+      (liveEditing?'<label class="cell-hd'+(s.h720?' is720':'')+'"><input type="checkbox" class="cell-hd-cb" data-ch="'+s.ch+'" data-dvr="'+s.dvrId+'"'+(s.hires?' checked':'')+'>HD'+(s.h720?' <span class="hd720">720p</span>':'')+'</label>':'')+'</div>'+
     '<div class="expand"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 3H3v6M21 9V3h-6M3 15v6h6M15 21h6v-6"/></svg></div></div>';
 }
 function renderGrid(a){
@@ -1829,9 +1834,13 @@ function wireLiveEdit(a){
   var grid = $('#grid');
   grid.classList.add('editing');
   $$('#grid .cell-name').forEach(function(inp){
-    inp.addEventListener('change', function(){ postMeta(selected, parseInt(inp.dataset.dvr), null, [{ ch_num: parseInt(inp.dataset.ch), name: inp.value }]); });
+    inp.addEventListener('change', function(){ postMeta(selected, parseInt(inp.dataset.dvr), null, [{ ch_num: parseInt(inp.dataset.ch), name: inp.value }], null); });
     inp.addEventListener('keydown', function(e){ if (e.key==='Enter') inp.blur(); });
     inp.addEventListener('pointerdown', function(e){ e.stopPropagation(); });
+  });
+  $$('#grid .cell-hd-cb').forEach(function(cb){
+    cb.addEventListener('change', function(){ postMeta(selected, parseInt(cb.dataset.dvr), null, null, [{ ch_num: parseInt(cb.dataset.ch), on: cb.checked }]); });
+    cb.addEventListener('pointerdown', function(e){ e.stopPropagation(); });
   });
   var dragging = null;
   grid.addEventListener('dragstart', function(e){ var c=e.target.closest('.cell'); if(c){ dragging=c; c.classList.add('drag'); } });
@@ -1877,14 +1886,15 @@ function saveLiveOrder(a){
     var dvrId=parseInt(dk), active=byDvr[dvrId];
     var inactive=(a.chans||[]).filter(function(ch){return ch.dvr_id===dvrId && active.indexOf(ch.ch_num)<0;})
       .sort(function(x,y){return (x.order||0)-(y.order||0);}).map(function(ch){return ch.ch_num;});
-    postMeta(selected, dvrId, active.concat(inactive), null);
+    postMeta(selected, dvrId, active.concat(inactive), null, null);
   });
 }
 
-function postMeta(agentId, dvrId, order, renames){
+function postMeta(agentId, dvrId, order, renames, hires){
   var body = { agent_id: agentId, dvr_id: dvrId };
   if (order) body.order = order;
   if (renames) body.renames = renames;
+  if (hires) body.hires = hires;
   fetch('/dashboard/api/channel-meta', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
     .then(function(r){ if (r.status===409) { alert('에이전트 오프라인 — 편집을 적용할 수 없습니다.'); } });
 }

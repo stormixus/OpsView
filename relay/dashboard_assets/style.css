@@ -454,6 +454,10 @@ button{font-family:inherit; cursor:pointer;}
 .grid.editing .cell .expand{display:none;}
 .cell .cell-name{background:rgba(0,0,0,.55);border:1px solid rgba(34,211,238,.5);color:#fff;border-radius:5px;padding:2px 6px;font-size:12px;font-weight:600;max-width:62%;outline:none;}
 .cell .cell-name:focus{border-color:var(--acc,#22d3ee);background:rgba(0,0,0,.8);}
+.cell-hd{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;color:rgba(255,255,255,.85);cursor:pointer;user-select:none;}
+.cell-hd input{margin:0;cursor:pointer;}
+.cell-hd .hd720{font-size:9.5px;font-weight:700;color:#f5b454;}
+.cell-hd.is720{opacity:.85;}
 .drag-badge{position:absolute;top:6px;right:8px;color:rgba(255,255,255,.5);font-size:14px;z-index:3;pointer-events:none;}
 
 /* tenant (지점) management */
