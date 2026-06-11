@@ -1141,7 +1141,11 @@ function upRenderThumbs(H, now){
     cell.style.visibility=vis?'visible':'hidden';
     if(vis && !cell._loaded){
       cell._loaded=true;
-      cell.style.backgroundImage='url('+escAttr(BASE+'/api/rec-thumb?stream='+encodeURIComponent(up.path)+'&t='+Math.round(ti))+')';
+      // NOTE: assigned to a DOM style property, NOT an HTML attribute — do NOT
+      // escAttr/HTML-escape it, or '&t=' becomes '&amp;t=' and the t param is lost
+      // (rec-thumb then can't find the snapshot -> 404). encodeURIComponent already
+      // makes up.path safe; quote the url() value for good measure.
+      cell.style.backgroundImage='url("'+BASE+'/api/rec-thumb?stream='+encodeURIComponent(up.path)+'&t='+Math.round(ti)+'")';
     }
   }
 }
