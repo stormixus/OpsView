@@ -1459,33 +1459,37 @@ function upGap(t){
   if(best!=null){ setTimeout(function(){ if(up.mode==='gap') upSeekTo(best); }, 700); }
 }
 
-function upScrubToClientY(clientY){
-  if(!up.open) return;
-  var H=upRailH(), rect=upRail.getBoundingClientRect();
-  var y=clientY-rect.top;
-  var t=upTat(y, H);
-  var now=Date.now()/1000;
+// Delta scrub (matches the touch handler): time = press-time + (drag distance / rail
+// height) * window span, so the rail scrolls smoothly and the cursor tracks the
+// finger regardless of the window re-centering each frame.
+function upDragScrub(clientY){
+  if(!up.open || !upDrag) return;
+  var H=upRailH(), dy=clientY-upDrag.y0;
+  var now=Math.floor(Date.now()/1000);
+  var t=Math.round(upDrag.base + (dy/H)*upDrag.span); // finger down -> toward now (top)
   if(t>now) t=now;
   up.mode='rec'; upEl.classList.add('up-rec'); $('#upLiveBadge').style.display='none';
   up._scrubbing=true;
   up.cursorT=t; upSyncRecWindow();
-  upRenderPlayhead(H, Math.floor(Date.now()/1000));
+  upRenderPlayhead(H, now);
   upPaintScrub();
 }
 upRail.addEventListener('mousedown', function(e){
   if(!up.open || e.button!==0) return; // _noClick is only for the post-drag click, not new drags
   if(e.target.closest('.up-mark')) return;
   e.preventDefault();
-  upDrag={ y0:e.clientY, moved:false };
+  // anchor the scrub at the press point: time tracks the finger DELTA from here, so
+  // re-centering the window each frame can't feed back into the y->t mapping (the
+  // old absolute upTat() approach feedback-looped: playhead stuck, time crept in ms).
+  upDrag={ y0:e.clientY, base:(up.mode==='live'?Math.floor(Date.now()/1000):up.cursorT), span:up.t1-up.t0, moved:false };
   upRail.classList.add('scrubbing');
   upDrag.wasPlaying=up.mode==='rec' && !upPaused && upVideo && !upVideo.paused;
   if(upDrag.wasPlaying){ try{ upVideo.pause(); }catch(e){} }
-  upScrubToClientY(e.clientY);
 });
 document.addEventListener('mousemove', function(e){
   if(!upDrag) return;
   if(Math.abs(e.clientY-upDrag.y0)>2) upDrag.moved=true;
-  upScrubToClientY(e.clientY);
+  upDragScrub(e.clientY);
 });
 document.addEventListener('mouseup', function(){
   if(!upDrag) return;
