@@ -1129,7 +1129,12 @@ function upRenderThumbs(H, now){
   if(up._thumbSig!==sig){
     up._thumbSig=sig;
     var html='';
-    for(var i=0;i<evs.length;i++) html+='<div class="up-thumb up-evthumb"></div>';
+    for(var i=0;i<evs.length;i++){
+      // each thumbnail carries a connector reaching right to the timeline, with the
+      // event-kind icon (motion/person/vehicle/…) centred on the line.
+      var k=evs[i].kind||'motion';
+      html+='<div class="up-thumb up-evthumb"><span class="up-evconn k-'+escAttr(k)+'" aria-hidden="true">'+(REC_KIND_ICONS[k]||REC_KIND_ICONS.motion||'')+'</span></div>';
+    }
     layer.innerHTML=html;
     upRail._cells=[].slice.call(layer.children);
   }
