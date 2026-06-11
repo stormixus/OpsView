@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -17,6 +18,13 @@ import (
 const (
 	thumbTimeout  = 10 * time.Second
 	thumbCacheCap = 512
+
+	// evThumbNearWindowSec bounds how far rec-thumb will reach for a substitute
+	// event snapshot when the requested second has no exact thumb and no live
+	// segment (capture is throttled, and old events' video is pruned while the
+	// thumbs are kept). Tighter than the event cluster gap so we don't grab a
+	// neighbouring event's snapshot.
+	evThumbNearWindowSec = 60
 
 	// evThumbDir is the hidden per-stream subdir holding pre-stored event-start
 	// JPEG snapshots. Hidden so the .mp4-only recordings listing ignores it.
@@ -44,6 +52,39 @@ func (h *Hub) recRootDir() string {
 // TS (ms) divided by 1000, so rec-thumb?stream=&t=<event.start> finds it.
 func evThumbPath(recDir, stream string, tSec int64) string {
 	return filepath.Join(recDir, filepath.FromSlash(stream), evThumbDir, strconv.FormatInt(tSec, 10)+".jpg")
+}
+
+// nearestEvThumb returns the .evthumbs file whose unix-second name is closest to t
+// within +/- windowSec, or "" if none. Lets rec-thumb still render a timeline
+// event whose exact edge had no stored thumb (throttled capture) and whose video
+// was pruned (thumbs outlive segments under event-differentiated retention).
+func nearestEvThumb(recDir, stream string, t, windowSec int64) string {
+	dir := filepath.Join(recDir, filepath.FromSlash(stream), evThumbDir)
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	var best string
+	bestDiff := windowSec + 1
+	for _, e := range ents {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".jpg") {
+			continue
+		}
+		sec, err := strconv.ParseInt(strings.TrimSuffix(name, ".jpg"), 10, 64)
+		if err != nil {
+			continue
+		}
+		d := sec - t
+		if d < 0 {
+			d = -d
+		}
+		if d <= windowSec && d < bestDiff {
+			bestDiff = d
+			best = filepath.Join(dir, name)
+		}
+	}
+	return best
 }
 
 // storeEventThumb writes a pre-captured event JPEG to disk at the path
@@ -185,6 +226,18 @@ func (h *Hub) HandleDashboardRecThumb(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !found {
+		// No live segment at t (old event, video pruned). Serve the nearest stored
+		// event snapshot so the timeline thumbnail still renders.
+		if recDir := h.recRootDir(); recDir != "" {
+			if p := nearestEvThumb(recDir, stream, t, evThumbNearWindowSec); p != "" {
+				if img, err := os.ReadFile(p); err == nil && len(img) > 0 {
+					w.Header().Set("Content-Type", "image/jpeg")
+					w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+					w.Write(img)
+					return
+				}
+			}
+		}
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}

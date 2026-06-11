@@ -128,3 +128,35 @@ func TestLPRIntegration(t *testing.T) {
 		t.Fatalf("expected plate '8171' in closed event, got %q", closedEvents[0].Plate)
 	}
 }
+
+// TestNearestEvThumb verifies the windowed nearest-snapshot fallback used when an
+// event has no exact thumb and no live segment (throttled capture + pruned video).
+func TestNearestEvThumb(t *testing.T) {
+	recDir := t.TempDir()
+	stream := "agentX/dvr1_ch1"
+	dir := filepath.Join(recDir, filepath.FromSlash(stream), evThumbDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, sec := range []int64{1000, 1050, 1200} {
+		if err := os.WriteFile(filepath.Join(dir, strconv.FormatInt(sec, 10)+".jpg"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// exact hit
+	if got := nearestEvThumb(recDir, stream, 1050, 60); got != filepath.Join(dir, "1050.jpg") {
+		t.Errorf("t=1050: got %q, want 1050.jpg", got)
+	}
+	// nearest within window: 1030 -> 1050 (20s) beats 1000 (30s)
+	if got := nearestEvThumb(recDir, stream, 1030, 60); got != filepath.Join(dir, "1050.jpg") {
+		t.Errorf("t=1030: got %q, want 1050.jpg", got)
+	}
+	// outside window (nearest is 1200, 100s away) -> none
+	if got := nearestEvThumb(recDir, stream, 1300, 60); got != "" {
+		t.Errorf("t=1300: got %q, want \"\" (outside window)", got)
+	}
+	// missing stream dir -> none, no panic
+	if got := nearestEvThumb(recDir, "nope/dvr9_ch9", 1000, 60); got != "" {
+		t.Errorf("missing dir: got %q, want \"\"", got)
+	}
+}
