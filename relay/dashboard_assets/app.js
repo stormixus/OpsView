@@ -273,14 +273,21 @@ function syncSidebarActive(){
 var BASE='/dashboard';
 function pathFor(target){ if(target==='manage') return BASE+'/manage'; return target==='overview' ? BASE : BASE+'/agent/'+encodeURIComponent(target); }
 function go(target){
+  if(up.open) closePlayer(); // leaving the current view closes the deep-linked player
   var path=pathFor(target);
   if(location.pathname.replace(/\/+$/,'')!==path.replace(/\/+$/,'')){ history.pushState({}, '', path); }
   navTo(target);
 }
 function routeFromPath(){
   if(/\/dashboard\/manage\/?$/.test(location.pathname)){ navTo('manage'); return; }
-  var m=location.pathname.match(/\/dashboard\/agent\/(.+?)\/?$/);
-  navTo(m ? decodeURIComponent(m[1]) : 'overview');
+  // /dashboard/agent/<id>[/ch/<stream>[/t/<unix>][/hd]] — agent id is one segment,
+  // the optional rest is the player deep-link.
+  var m=location.pathname.match(/\/dashboard\/agent\/([^/]+)(?:\/(.*))?$/);
+  if(!m){ navTo('overview'); return; }
+  navTo(decodeURIComponent(m[1]));
+  var pr=parsePlayerRoute(m[2]);
+  if(pr){ _pendingPlayer=pr; maybeRestorePlayer(); }   // reopen once streams load
+  else if(up.open){ closePlayer(); }                   // back/forward out of /ch closes it
 }
 window.addEventListener('popstate', routeFromPath);
 
@@ -1267,17 +1274,36 @@ function closePlayer(){
 // Reflect the open player in the URL (?ch=&t=&hd=) so a reload restores exactly
 // this view — same idea as ?dvr= persisting the device filter. t is the recording
 // cursor (omitted for live = "now"); hd marks the high-res live toggle.
-function syncPlayerURL(){
-  var u=new URL(location.href);
-  if(up.open){
-    u.searchParams.set('ch', up.stream);
-    if(up.mode==='rec' && up.cursorT) u.searchParams.set('t', Math.round(up.cursorT)); else u.searchParams.delete('t');
-    if(up.hires && up.hdOn) u.searchParams.set('hd','1'); else u.searchParams.delete('hd');
-  } else { u.searchParams.delete('ch'); u.searchParams.delete('t'); u.searchParams.delete('hd'); }
-  history.replaceState(history.state, '', u.pathname+u.search);
+// The open player lives in the URL PATH (/dashboard/agent/<id>/ch/<stream>[/t/<unix>][/hd])
+// so a reload restores exactly this view. The ?dvr= device filter stays a query.
+function playerPathSuffix(){
+  if(!up.open) return '';
+  var s='/ch/'+encodeURIComponent(up.stream);
+  if(up.mode==='rec' && up.cursorT) s+='/t/'+Math.round(up.cursorT);
+  else if(up.hires && up.hdOn) s+='/hd';
+  return s;
 }
-// Captured once at page load; consumed when the agent's streams arrive.
-var _pendingPlayer=(function(){ var q=new URLSearchParams(location.search), ch=q.get('ch'); return ch?{ch:ch,t:q.get('t'),hd:q.get('hd')==='1'}:null; })();
+function syncPlayerURL(){
+  if(selected===null) return;
+  history.replaceState(history.state, '', pathFor(selected)+playerPathSuffix()+location.search);
+}
+function parsePlayerRoute(sub){
+  if(!sub) return null;
+  var parts=sub.replace(/^\/+|\/+$/g,'').split('/');
+  if(parts[0]!=='ch' || !parts[1]) return null;
+  var p={ch:decodeURIComponent(parts[1]), t:null, hd:false};
+  for(var i=2;i<parts.length;i++){
+    if(parts[i]==='t' && parts[i+1]) p.t=parts[++i];
+    else if(parts[i]==='hd') p.hd=true;
+  }
+  return p;
+}
+function playerRouteFromPath(){
+  var m=location.pathname.match(/\/dashboard\/agent\/([^/]+)(?:\/(.*))?$/);
+  return m ? parsePlayerRoute(m[2]) : null;
+}
+// Captured from the path at load; consumed once the agent's streams arrive.
+var _pendingPlayer=playerRouteFromPath();
 function maybeRestorePlayer(){
   if(!_pendingPlayer || up.open || selected===null) return;
   var a=agentById(selected); if(!a) return;
