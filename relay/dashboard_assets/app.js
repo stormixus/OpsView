@@ -138,8 +138,33 @@ function activeStreams(a){return a.streams.filter(function(s){return s.active;})
 var selDvr='all'; // 'all' or a dvr id (number)
 // The selected DVR filter lives in the URL (?dvr=<id>) so a reload restores it
 // instead of snapping back to 전체 (the filter had no route before).
-function dvrParam(){ var v=new URLSearchParams(location.search).get('dvr'); return (v==null||v==='all') ? 'all' : (+v); }
-function setDvrParam(dvr){ var u=new URL(location.href); if(dvr==='all') u.searchParams.delete('dvr'); else u.searchParams.set('dvr', dvr); history.replaceState(history.state, '', u.pathname+u.search); }
+// The device filter + open player both live in the URL PATH:
+//   /dashboard/agent/<id>[/surv/<deviceId>][/ch/<stream>[/t/<unix>][/hd]]
+// (the filter was renamed dvr -> surv: owners connect NVRs too, not only DVRs).
+// agentURL() emits the whole path; parseAgentSub() reads it back.
+function parseAgentSub(sub){
+  var out={surv:'all', player:null};
+  if(!sub) return out;
+  var parts=sub.replace(/^\/+|\/+$/g,'').split('/'), i=0;
+  if(parts[i]==='surv' && parts[i+1]){ out.surv=parts[i+1]; i+=2; }
+  if(parts[i]==='ch' && parts[i+1]){
+    var p={ch:decodeURIComponent(parts[i+1]), t:null, hd:false}; i+=2;
+    for(;i<parts.length;i++){
+      if(parts[i]==='t' && parts[i+1]) p.t=parts[++i];
+      else if(parts[i]==='hd') p.hd=true;
+    }
+    out.player=p;
+  }
+  return out;
+}
+function agentSubFromPath(){
+  var m=location.pathname.match(/\/dashboard\/agent\/([^/]+)(?:\/(.*))?$/);
+  return m ? parseAgentSub(m[2]) : {surv:'all', player:null};
+}
+function dvrParam(){ var s=agentSubFromPath().surv; return s==='all' ? 'all' : (+s); }
+function agentURL(){ var p=pathFor(selected); if(selDvr!=='all') p+='/surv/'+selDvr; return p+playerPathSuffix(); }
+function syncAgentURL(){ if(selected===null) return; history.replaceState(history.state, '', agentURL()); }
+function setDvrParam(dvr){ syncAgentURL(); } // selDvr already set by caller; rebuild the path
 function dvrName(a, id){ var d=(a.dvrs||[]).filter(function(x){return x.id===id;})[0]; return d? d.name : ('DVR '+id); }
 function streamsForView(a){
   if(selDvr==='all') return a.streams;
@@ -247,7 +272,7 @@ function navTo(target){
   }
   $('#manage-view').classList.remove('active');
   selected = (target==='overview')? null : target;
-  selDvr=dvrParam(); liveEditing=false; var _eb=$('#liveEditBtn'); if(_eb){ _eb.textContent='편집'; _eb.classList.remove('on'); } // restore device filter from URL (?dvr=) on reload; in-app nav has no query -> 'all'
+  selDvr=dvrParam(); liveEditing=false; var _eb=$('#liveEditBtn'); if(_eb){ _eb.textContent='편집'; _eb.classList.remove('on'); } // restore device filter from URL (/surv/<id>) on reload; in-app nav has no suffix -> 'all'
   $('#sidebar').classList.remove('open');
   stopLiveGrid(); // tear down any playing videos before switching context
   if(selected===null){
@@ -284,8 +309,8 @@ function routeFromPath(){
   // the optional rest is the player deep-link.
   var m=location.pathname.match(/\/dashboard\/agent\/([^/]+)(?:\/(.*))?$/);
   if(!m){ navTo('overview'); return; }
-  navTo(decodeURIComponent(m[1]));
-  var pr=parsePlayerRoute(m[2]);
+  navTo(decodeURIComponent(m[1]));                      // navTo reads the surv filter from the path
+  var pr=parseAgentSub(m[2]).player;
   if(pr){ _pendingPlayer=pr; maybeRestorePlayer(); }   // reopen once streams load
   else if(up.open){ closePlayer(); }                   // back/forward out of /ch closes it
 }
@@ -1271,11 +1296,9 @@ function closePlayer(){
   upPaused=false; up._scrubbing=false; upDrag=null; upRail.classList.remove('scrubbing'); upUpdatePauseBtn();
   syncPlayerURL();
 }
-// Reflect the open player in the URL (?ch=&t=&hd=) so a reload restores exactly
-// this view — same idea as ?dvr= persisting the device filter. t is the recording
-// cursor (omitted for live = "now"); hd marks the high-res live toggle.
-// The open player lives in the URL PATH (/dashboard/agent/<id>/ch/<stream>[/t/<unix>][/hd])
-// so a reload restores exactly this view. The ?dvr= device filter stays a query.
+// The open player's path segment (/ch/<stream>[/t/<unix>][/hd]); appended after the
+// optional /surv/<id> filter by agentURL(). t = recording cursor (omitted for live);
+// hd = high-res live toggle. Parsed back by parseAgentSub().
 function playerPathSuffix(){
   if(!up.open) return '';
   var s='/ch/'+encodeURIComponent(up.stream);
@@ -1283,27 +1306,9 @@ function playerPathSuffix(){
   else if(up.hires && up.hdOn) s+='/hd';
   return s;
 }
-function syncPlayerURL(){
-  if(selected===null) return;
-  history.replaceState(history.state, '', pathFor(selected)+playerPathSuffix()+location.search);
-}
-function parsePlayerRoute(sub){
-  if(!sub) return null;
-  var parts=sub.replace(/^\/+|\/+$/g,'').split('/');
-  if(parts[0]!=='ch' || !parts[1]) return null;
-  var p={ch:decodeURIComponent(parts[1]), t:null, hd:false};
-  for(var i=2;i<parts.length;i++){
-    if(parts[i]==='t' && parts[i+1]) p.t=parts[++i];
-    else if(parts[i]==='hd') p.hd=true;
-  }
-  return p;
-}
-function playerRouteFromPath(){
-  var m=location.pathname.match(/\/dashboard\/agent\/([^/]+)(?:\/(.*))?$/);
-  return m ? parsePlayerRoute(m[2]) : null;
-}
+function syncPlayerURL(){ syncAgentURL(); } // player + surv filter share one path builder
 // Captured from the path at load; consumed once the agent's streams arrive.
-var _pendingPlayer=playerRouteFromPath();
+var _pendingPlayer=agentSubFromPath().player;
 function maybeRestorePlayer(){
   if(!_pendingPlayer || up.open || selected===null) return;
   var a=agentById(selected); if(!a) return;
