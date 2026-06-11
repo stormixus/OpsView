@@ -998,6 +998,7 @@ function openPlayer(stream, opts){
   up.pxPerSec=0.08; // reset to the default zoom on every open
   $('#upTitle').textContent=s.name; $('#upSub').textContent=a.name+' · CH'+s.ch;
   upEl.classList.add('show'); upEl.setAttribute('aria-hidden','false');
+  setRailCollapsed(false); // each open starts with the rail expanded
   upPaused=false; upUpdatePauseBtn();
   var hdBtn=$('#upHdBtn'); if(hdBtn){ hdBtn.hidden=!up.hires; hdBtn.classList.toggle('on', up.hdOn); }
   if(rec){
@@ -1541,18 +1542,33 @@ upRail.addEventListener('wheel', upOnWheel, {passive:false});
 // iPhone/touch: no wheel or hover. Swipe vertically (from the right edge) to scrub
 // the timeline — finger down = toward now, finger up = into the past; release to play.
 var upTouch=null;
+// Mobile: collapse the always-on rail off-screen (a thin handle remains); tap the
+// handle to bring it back. Desktop never collapses (swipe is touch-only).
+function setRailCollapsed(c){
+  up.railCollapsed=!!c;
+  upRail.classList.toggle('collapsed', !!c);
+  var h=$('#upRailHandle'); if(h) h.hidden=!c;
+}
 function upTouchStart(e){
   if(!up.open || e.touches.length!==1) return;
+  if(up.railCollapsed) return; // collapsed: only the handle (a tap) interacts
   var x=e.touches[0].clientX, y=e.touches[0].clientY;
   if(y<64) return; // keep clear of the close button row
   if(x < window.innerWidth-220 && !upRail.classList.contains('show')) return; // start in the right zone
-  upTouch={ y:y, base:(up.mode==='live'?Math.floor(Date.now()/1000):up.cursorT), span:up.t1-up.t0, moved:false };
+  upTouch={ x:x, y:y, dir:null, dx:0, base:(up.mode==='live'?Math.floor(Date.now()/1000):up.cursorT), span:up.t1-up.t0, moved:false };
   upRail.classList.add('show');
 }
 function upTouchMove(e){
   if(!upTouch || e.touches.length!==1) return;
+  var x=e.touches[0].clientX, y=e.touches[0].clientY, dx=x-upTouch.x, dy=y-upTouch.y;
+  if(upTouch.dir===null){
+    if(Math.abs(dx)<6 && Math.abs(dy)<6) return; // wait until the gesture has a clear direction
+    upTouch.dir = (Math.abs(dx) > Math.abs(dy)*1.3) ? 'h' : 'v';
+  }
+  if(upTouch.dir==='h'){ e.preventDefault(); upTouch.dx=dx; return; } // horizontal: collapse-swipe candidate, no scrub
+  // vertical: scrub
   e.preventDefault(); // stop the page from scrolling / pull-to-refresh
-  var H=upRailH(), dy=e.touches[0].clientY-upTouch.y;
+  var H=upRailH();
   if(Math.abs(dy)>5) upTouch.moved=true;
   var now=Math.floor(Date.now()/1000);
   var t=Math.round(upTouch.base + (dy/H)*upTouch.span); if(t>now) t=now; // finger down -> toward now
@@ -1561,16 +1577,18 @@ function upTouchMove(e){
 }
 function upTouchEnd(){
   if(!upTouch) return;
-  var moved=upTouch.moved, t=up.cursorT; upTouch=null;
-  if(!moved) return; // a tap -> let the click handler seek at the tapped position
+  var tt=upTouch; upTouch=null;
+  if(tt.dir==='h'){ if(_isMobile() && tt.dx>40) setRailCollapsed(true); return; } // swipe right -> collapse
+  if(!tt.moved) return; // a tap -> let the click handler seek at the tapped position
   up._noClick=true; setTimeout(function(){ up._noClick=false; }, 450);
   var now=Math.floor(Date.now()/1000);
-  if(t>=now-2){ upStartLive(); } else { upSeekTo(t); }
+  if(up.cursorT>=now-2){ upStartLive(); } else { upSeekTo(up.cursorT); }
 }
 upEl.addEventListener('touchstart', upTouchStart, {passive:true});
 upEl.addEventListener('touchmove', upTouchMove, {passive:false});
 upEl.addEventListener('touchend', upTouchEnd);
 upEl.addEventListener('touchcancel', upTouchEnd);
+if($('#upRailHandle')) $('#upRailHandle').addEventListener('click', function(){ setRailCollapsed(false); });
 
 /* ============================================================ RELAY / CONN */
 var relayDownAt=Date.now();

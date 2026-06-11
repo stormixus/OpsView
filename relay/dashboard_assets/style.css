@@ -752,6 +752,11 @@ button{font-family:inherit; cursor:pointer;}
 /* timeline = hover-reveal OVERLAY on the right, floating on top of the full-bleed video */
 .up-rail{position:absolute; right:0; top:0; bottom:0; width:188px; z-index:4; opacity:0; pointer-events:none; transform:translateX(14px); transition:opacity .16s ease, transform .16s ease; background:linear-gradient(90deg, rgba(5,7,10,0), rgba(5,7,10,.80) 36%, rgba(5,7,10,.93)); cursor:default;}
 .up-rail.show{opacity:1; pointer-events:auto; transform:none; cursor:grab;}
+/* mobile: swipe the rail right to collapse it off-screen (a thin handle remains);
+   tap the handle to bring it back. .collapsed wins over .show's transform. */
+.up-rail.show.collapsed{opacity:0; pointer-events:none; transform:translateX(100%);}
+.up-rail-handle{position:absolute; right:0; top:50%; transform:translateY(-50%); width:26px; height:76px; border:0; border-radius:9px 0 0 9px; background:rgba(5,7,10,.82); color:#cfe3ff; z-index:6; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:-2px 0 12px rgba(0,0,0,.5);}
+.up-rail-handle svg{width:16px; height:16px;}
 .up-rail.scrubbing{cursor:grabbing;}
 .up-rail.show .up-axis{cursor:grab;}
 .up-rail.scrubbing .up-axis{cursor:grabbing;}
