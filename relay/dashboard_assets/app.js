@@ -1035,10 +1035,30 @@ function upTogglePause(){
 function upSkipSec(delta){
   if(!up.open) return;
   var now=Math.floor(Date.now()/1000);
-  var base=up.mode==='live'? now : (up.cursorT||now);
-  var t=Math.round(base+delta);
-  if(t>=now-2){ upStartLive(); return; }
-  upSeekTo(t);
+  var from=up.mode==='live'? now : (up.cursorT||now);
+  var to=Math.round(from+delta);
+  if(to>=now-2){ upStartLive(); return; }
+  upAnimateSkip(from, to);
+}
+// Animate the 10s jump: tick the cursor/rail from `from` to `to` (~40ms per second,
+// so 49→48→…→39 slides by) instead of snapping, then load the video at the target.
+// _scrubbing keeps the rec loop from fighting the tween; the video is paused during
+// the slide and loaded once on landing.
+function upAnimateSkip(from, to){
+  if(up._skipAnim){ cancelAnimationFrame(up._skipAnim); up._skipAnim=null; }
+  up.mode='rec'; upEl.classList.add('up-rec'); upRail.classList.add('show'); $('#upLiveBadge').style.display='none';
+  up._scrubbing=true; // own cursorT during the slide (stops the rec loop overwrite)
+  if(upVideo){ try{ upVideo.pause(); }catch(e){} }
+  var dur=Math.min(600, Math.max(180, Math.abs(to-from)*40)), t0=null;
+  function step(ts){
+    if(t0===null) t0=ts;
+    var p=Math.min(1,(ts-t0)/dur);
+    up.cursorT=Math.round(from+(to-from)*p);
+    upSyncRecWindow(); upRenderRail();
+    if(p<1){ up._skipAnim=requestAnimationFrame(step); }
+    else { up._skipAnim=null; up._scrubbing=false; upSeekTo(to); } // land + load video
+  }
+  up._skipAnim=requestAnimationFrame(step);
 }
 function upStartLive(){
   upStopVideo();
@@ -1058,6 +1078,7 @@ function upStopVideo(){
   // stopped video reports 0/stale, so a still-running loop would yank cursorT back
   // to the old segment during a seek (the "rail goes then comes back" glitch).
   if(up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
+  if(up._skipAnim){ cancelAnimationFrame(up._skipAnim); up._skipAnim=null; }
   if(up.player){ try{ up.player.close&&up.player.close(); }catch(e){} up.player=null; }
   upVideo.onended=null; upVideo.onloadedmetadata=null;
   try{ upVideo.pause(); upVideo.removeAttribute('src'); upVideo.load(); }catch(e){}
@@ -1493,6 +1514,7 @@ upRail.addEventListener('mousedown', function(e){
   // old absolute upTat() approach feedback-looped: playhead stuck, time crept in ms).
   upDrag={ y0:e.clientY, base:(up.mode==='live'?Math.floor(Date.now()/1000):up.cursorT), span:up.t1-up.t0, moved:false };
   upRail.classList.add('scrubbing');
+  if(up._skipAnim){ cancelAnimationFrame(up._skipAnim); up._skipAnim=null; } // grabbing interrupts a skip animation
   up._scrubbing=true; // stop the rec loop from overwriting cursorT while dragging
   upDrag.wasPlaying=up.mode==='rec' && !upPaused && upVideo && !upVideo.paused;
   if(upDrag.wasPlaying){ try{ upVideo.pause(); }catch(e){} }
