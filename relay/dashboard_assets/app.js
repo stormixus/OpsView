@@ -1054,6 +1054,10 @@ function upStartLive(){
   upSyncLiveWindow(); upEnsureTimeline(true); clearTimeout(up._liveTimer); upLiveTick();
 }
 function upStopVideo(){
+  // stop the rec loop too: it reads upVideo.currentTime to drive cursorT, and a
+  // stopped video reports 0/stale, so a still-running loop would yank cursorT back
+  // to the old segment during a seek (the "rail goes then comes back" glitch).
+  if(up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
   if(up.player){ try{ up.player.close&&up.player.close(); }catch(e){} up.player=null; }
   upVideo.onended=null; upVideo.onloadedmetadata=null;
   try{ upVideo.pause(); upVideo.removeAttribute('src'); upVideo.load(); }catch(e){}
@@ -1367,6 +1371,7 @@ function upSeekTo(t,_retried){
   clearTimeout(up._liveTimer); // stop the 1s LIVE re-render so it can't fight the REC rAF over t0/t1
   up.cursorT=t;
   syncPlayerURL(); // keep ?t= in sync with the recording cursor for reload-restore
+  upSyncRecWindow(); upRenderRail(); // snap the rail to t immediately (don't wait for the segment load)
   upStopVideo();
   var seg=up.segs[i], seq=++up._seekSeq;
   upResolveSegName(seg.start).then(function(name){
