@@ -1049,14 +1049,21 @@ function upAnimateSkip(from, to){
   up.mode='rec'; upEl.classList.add('up-rec'); upRail.classList.add('show'); $('#upLiveBadge').style.display='none';
   up._scrubbing=true; // own cursorT during the slide (stops the rec loop overwrite)
   if(upVideo){ try{ upVideo.pause(); }catch(e){} }
-  var dur=Math.min(600, Math.max(180, Math.abs(to-from)*40)), t0=null;
+  // At the default zoom (~12.5s/px) a 10s span is <1px — the rail can't visibly
+  // move. So momentarily zoom IN (sin bump) so the skipped seconds occupy a real
+  // slice of the rail and scroll past the fixed playhead, then zoom back out to the
+  // original level by the end (no rescale jump on landing).
+  var basePx=up.pxPerSec, secs=Math.max(1,Math.abs(to-from));
+  var peakPx=Math.min(8, Math.max(basePx, (upTrackH()*0.45)/secs)); // span ~45% of the rail at peak
+  var dur=Math.min(650, Math.max(300, secs*45)), t0=null;
   function step(ts){
     if(t0===null) t0=ts;
     var p=Math.min(1,(ts-t0)/dur);
     up.cursorT=Math.round(from+(to-from)*p);
+    up.pxPerSec=basePx+(peakPx-basePx)*Math.sin(p*Math.PI); // zoom in then back to base
     upSyncRecWindow(); upRenderRail();
     if(p<1){ up._skipAnim=requestAnimationFrame(step); }
-    else { up._skipAnim=null; up._scrubbing=false; upSeekTo(to); } // land + load video
+    else { up.pxPerSec=basePx; up._skipAnim=null; up._scrubbing=false; upSeekTo(to); } // restore zoom, land + load
   }
   up._skipAnim=requestAnimationFrame(step);
 }
