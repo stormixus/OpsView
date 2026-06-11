@@ -1292,6 +1292,9 @@ function upLiveTick(){
 function closePlayer(){
   if(!up.open) return;
   up.open=false; upStopVideo();
+  // Move focus out before hiding: the close button keeps focus when clicked, and
+  // aria-hidden on a focused element's ancestor warns (and is an a11y bug).
+  if(upEl.contains(document.activeElement)){ try{ document.activeElement.blur(); }catch(e){} }
   upEl.classList.remove('show'); upEl.setAttribute('aria-hidden','true');
   if(up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
   clearTimeout(up._liveTimer);
