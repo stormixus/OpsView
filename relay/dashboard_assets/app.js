@@ -1416,7 +1416,10 @@ function upResolveSegName(segStart){
 function upStartRecLoop(){
   if(up._raf) cancelAnimationFrame(up._raf);
   function loop(){
-    if(!up.open || up.mode!=='rec' || upPaused){ up._raf=null; return; }
+    // while scrubbing, the drag OWNS up.cursorT — the playback loop must not write
+    // it back from upVideo.currentTime, or the drag appears frozen (rail won't move,
+    // time just tracks playback). This was the real bug behind "drag does nothing".
+    if(!up.open || up.mode!=='rec' || upPaused || up._scrubbing){ up._raf=null; return; }
     if(up._curSeg){
       up.cursorT=up._curSeg.start + (upVideo.currentTime||0);
       // reached the live edge? hand back to LIVE.
@@ -1483,6 +1486,7 @@ upRail.addEventListener('mousedown', function(e){
   // old absolute upTat() approach feedback-looped: playhead stuck, time crept in ms).
   upDrag={ y0:e.clientY, base:(up.mode==='live'?Math.floor(Date.now()/1000):up.cursorT), span:up.t1-up.t0, moved:false };
   upRail.classList.add('scrubbing');
+  up._scrubbing=true; // stop the rec loop from overwriting cursorT while dragging
   upDrag.wasPlaying=up.mode==='rec' && !upPaused && upVideo && !upVideo.paused;
   if(upDrag.wasPlaying){ try{ upVideo.pause(); }catch(e){} }
 });
