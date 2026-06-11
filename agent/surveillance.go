@@ -88,6 +88,13 @@ func (m *SurveillanceManager) migrate() {
 			height INTEGER NOT NULL DEFAULT 0,
 			UNIQUE(dvr_id, ch_num)
 		)`,
+		`CREATE TABLE IF NOT EXISTS device_keys (
+			stable_key INTEGER PRIMARY KEY,
+			serial TEXT NOT NULL DEFAULT '',
+			mac    TEXT NOT NULL DEFAULT '',
+			addr   TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL DEFAULT (datetime('now'))
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := m.db.Exec(s); err != nil {
@@ -134,6 +141,53 @@ func columnExists(db *sql.DB, table, col string) bool {
 		}
 	}
 	return false
+}
+
+// resolveStableKey returns the stable device key for a DVR's natural identity,
+// matching an existing key by serial -> mac -> addr (first non-empty facet that
+// hits wins) and enriching that row's empty facets; on no match it allocates
+// max(stable_key)+1 and inserts a new row. Keys are never reused, and the table
+// is preserved across ResetDB, so the same physical device always maps to the
+// same key.
+func (m *SurveillanceManager) resolveStableKey(serial, mac, addr string) (int64, error) {
+	match := func(col, val string) (int64, bool) {
+		if val == "" {
+			return 0, false
+		}
+		var k int64
+		// col is a fixed identifier ("serial"/"mac"/"addr"), never user input.
+		if err := m.db.QueryRow(`SELECT stable_key FROM device_keys WHERE `+col+`=? LIMIT 1`, val).Scan(&k); err == nil {
+			return k, true
+		}
+		return 0, false
+	}
+	for _, f := range []struct{ col, val string }{{"serial", serial}, {"mac", mac}, {"addr", addr}} {
+		if k, ok := match(f.col, f.val); ok {
+			m.enrichDeviceKey(k, serial, mac, addr)
+			return k, nil
+		}
+	}
+	var maxKey sql.NullInt64
+	m.db.QueryRow(`SELECT MAX(stable_key) FROM device_keys`).Scan(&maxKey)
+	key := int64(1)
+	if maxKey.Valid {
+		key = maxKey.Int64 + 1
+	}
+	if _, err := m.db.Exec(`INSERT INTO device_keys (stable_key, serial, mac, addr) VALUES (?,?,?,?)`, key, serial, mac, addr); err != nil {
+		return 0, err
+	}
+	return key, nil
+}
+
+// enrichDeviceKey fills any empty facet of an existing device_keys row from the
+// supplied values without ever changing the stable_key. Empty supplied values
+// leave the stored facet untouched.
+func (m *SurveillanceManager) enrichDeviceKey(key int64, serial, mac, addr string) {
+	m.db.Exec(`UPDATE device_keys SET
+		serial = CASE WHEN serial='' THEN ? ELSE serial END,
+		mac    = CASE WHEN mac='' THEN ? ELSE mac END,
+		addr   = CASE WHEN addr='' THEN ? ELSE addr END
+		WHERE stable_key=?`, serial, mac, addr, key)
 }
 
 // --- DVR CRUD ---
