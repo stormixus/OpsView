@@ -55,10 +55,12 @@ func runServer() (stop func()) {
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: mux}
 
-	// Try to setup UPnP
-	go func() {
-		setupUPNP(cfg.Port)
-	}()
+	// UPnP port-forwarding is opt-in (RELAY_UPNP=1): it only helps direct-IP
+	// setups. Behind a tunnel (the default deployment) it's unnecessary, and SSDP
+	// discovery fails noisily inside Docker — so skip it unless explicitly enabled.
+	if os.Getenv("RELAY_UPNP") == "1" {
+		go setupUPNP(cfg.Port)
+	}
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
