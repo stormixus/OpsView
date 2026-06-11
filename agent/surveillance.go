@@ -667,6 +667,8 @@ type isAPIDeviceInfo struct {
 	XMLName           xml.Name `xml:"DeviceInfo"`
 	AnalogChannelNum  int      `xml:"analogChannelNum"`
 	DigitalChannelNum int      `xml:"digitalChannelNum"`
+	SerialNumber      string   `xml:"serialNumber"`
+	MACAddress        string   `xml:"macAddress"`
 }
 
 type isAPIChannelList struct {
@@ -693,6 +695,38 @@ type isAPIVideoInputList struct {
 type isAPIVideoInput struct {
 	ID   int    `xml:"id"`
 	Name string `xml:"inputPort>name"`
+}
+
+// fetchDeviceIdentity best-effort fetches a DVR's hardware serial + MAC from
+// ISAPI /System/deviceInfo. Returns empty strings on any failure (device
+// offline, or non-ISAPI like Dahua/ONVIF) so the caller falls back to addr.
+func (m *SurveillanceManager) fetchDeviceIdentity(addr string, port int, username, password, protocol string) (serial, mac string) {
+	if protocol != "" && protocol != "isapi" {
+		return "", "" // serial source is ISAPI-specific; others ride the addr fallback
+	}
+	u := fmt.Sprintf("http://%s:%d/ISAPI/System/deviceInfo", addr, port)
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return "", ""
+	}
+	req.SetBasicAuth(username, password)
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return "", ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return "", ""
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", ""
+	}
+	var info isAPIDeviceInfo
+	if xml.Unmarshal(body, &info) != nil {
+		return "", ""
+	}
+	return info.SerialNumber, info.MACAddress
 }
 
 func (m *SurveillanceManager) discoverFromDVRISAPI(dvr DVRConfig) ([]ChannelConfig, error) {

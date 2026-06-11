@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"encoding/xml"
+	"testing"
+)
 
 func TestResolveStableKeyAllocatesAndMatches(t *testing.T) {
 	m := newTestSurvManager(t)
@@ -105,5 +108,19 @@ func TestResetDBPreservesDeviceKeysAndReusesKey(t *testing.T) {
 	}
 	if k3, _ := m.resolveStableKey("SER-NEW", "", "8.8.8.8"); k3 != k+1 {
 		t.Errorf("new device key = %d, want %d", k3, k+1)
+	}
+}
+
+func TestDeviceInfoParsesSerialAndMAC(t *testing.T) {
+	body := []byte(`<?xml version="1.0"?><DeviceInfo><serialNumber>DS-7208-123</serialNumber><macAddress>a4:14:37:aa:bb:cc</macAddress><analogChannelNum>8</analogChannelNum></DeviceInfo>`)
+	var info isAPIDeviceInfo
+	if err := xml.Unmarshal(body, &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.SerialNumber != "DS-7208-123" {
+		t.Errorf("serial = %q", info.SerialNumber)
+	}
+	if info.MACAddress != "a4:14:37:aa:bb:cc" {
+		t.Errorf("mac = %q", info.MACAddress)
 	}
 }
