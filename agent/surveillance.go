@@ -123,6 +123,7 @@ func (m *SurveillanceManager) migrate() {
 			log.Printf("[surv] migrate backfill record_hires: %v", err)
 		}
 	}
+	m.seedDeviceKeys()
 }
 
 func columnExists(db *sql.DB, table, col string) bool {
@@ -188,6 +189,21 @@ func (m *SurveillanceManager) enrichDeviceKey(key int64, serial, mac, addr strin
 		mac    = CASE WHEN mac='' THEN ? ELSE mac END,
 		addr   = CASE WHEN addr='' THEN ? ELSE addr END
 		WHERE stable_key=?`, serial, mac, addr, key)
+}
+
+// seedDeviceKeys gives every existing DVR a stable key equal to its current id,
+// once, so existing stream ids (dvr<id>_ch<n>) and on-disk recordings keep the
+// same path after this feature lands (zero recording migration). Idempotent:
+// only runs while device_keys is empty.
+func (m *SurveillanceManager) seedDeviceKeys() {
+	var n int
+	m.db.QueryRow(`SELECT COUNT(*) FROM device_keys`).Scan(&n)
+	if n > 0 {
+		return
+	}
+	if _, err := m.db.Exec(`INSERT INTO device_keys (stable_key, addr) SELECT id, addr FROM dvrs`); err != nil {
+		log.Printf("[surv] seed device_keys: %v", err)
+	}
 }
 
 // --- DVR CRUD ---
@@ -320,6 +336,8 @@ func (m *SurveillanceManager) ResetDB() error {
 	if _, err := tx.Exec(`DELETE FROM channels`); err != nil {
 		return err
 	}
+	// NOTE: device_keys is intentionally NOT cleared here — it is the persistent
+	// serial->stable_key memory that lets a re-added DVR reuse its id.
 	if _, err := tx.Exec(`DELETE FROM dvrs`); err != nil {
 		return err
 	}
