@@ -3,8 +3,7 @@ package main
 import "testing"
 
 func TestISAPIEventDVRs(t *testing.T) {
-	m := NewSurveillanceManager()
-	defer m.Shutdown()
+	m := newTestSurvManager(t)
 
 	// Add ISAPI DVR
 	isapiDVR, err := m.AddDVR("isapi-dvr", "10.0.0.1", 80, "", 0, "u", "p", "isapi", 30, "main")

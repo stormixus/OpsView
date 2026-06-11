@@ -268,12 +268,23 @@ func (m *SurveillanceManager) AddDVR(name, addr string, port int, extAddr string
 	if streamQuality == "" {
 		streamQuality = "sub"
 	}
-	res, err := m.db.Exec(`INSERT INTO dvrs (name, addr, port, ext_addr, ext_port, username, password, protocol, refresh_rate, stream_quality) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		name, addr, port, extAddr, extPort, username, password, protocol, refreshRate, streamQuality)
+	serial, mac := m.fetchDeviceIdentity(addr, port, username, password, protocol)
+	id, err := m.resolveStableKey(serial, mac, addr)
 	if err != nil {
 		return DVRConfig{}, err
 	}
-	id, _ := res.LastInsertId()
+	// Insert with the explicit stable id. ON CONFLICT handles re-adding a device
+	// whose row still exists (same id) — update its connection fields, don't dup.
+	_, err = m.db.Exec(`INSERT INTO dvrs (id, name, addr, port, ext_addr, ext_port, username, password, protocol, refresh_rate, stream_quality)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET name=excluded.name, addr=excluded.addr, port=excluded.port,
+			ext_addr=excluded.ext_addr, ext_port=excluded.ext_port, username=excluded.username,
+			password=excluded.password, protocol=excluded.protocol, refresh_rate=excluded.refresh_rate,
+			stream_quality=excluded.stream_quality`,
+		id, name, addr, port, extAddr, extPort, username, password, protocol, refreshRate, streamQuality)
+	if err != nil {
+		return DVRConfig{}, err
+	}
 	if m.onChange != nil {
 		m.onChange()
 	}
@@ -710,7 +721,7 @@ func (m *SurveillanceManager) fetchDeviceIdentity(addr string, port int, usernam
 		return "", ""
 	}
 	req.SetBasicAuth(username, password)
-	resp, err := m.client.Do(req)
+	resp, err := m.shortClient.Do(req)
 	if err != nil {
 		return "", ""
 	}

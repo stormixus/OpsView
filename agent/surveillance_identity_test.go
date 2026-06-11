@@ -124,3 +124,23 @@ func TestDeviceInfoParsesSerialAndMAC(t *testing.T) {
 		t.Errorf("mac = %q", info.MACAddress)
 	}
 }
+
+func TestAddDVRUsesStableKeyAsID(t *testing.T) {
+	m := newTestSurvManager(t)
+	// offline device (deviceInfo unreachable at port 1) -> keyed by addr. AddDVR
+	// must still assign dvrs.id = the resolved stable key (here 1, first allocation).
+	d, err := m.AddDVR("cam", "127.0.0.1", 1, "", 0, "u", "p", "isapi", 2000, "sub")
+	if err != nil {
+		t.Fatalf("AddDVR: %v", err)
+	}
+	var key int64
+	m.db.QueryRow(`SELECT stable_key FROM device_keys WHERE addr=?`, "127.0.0.1").Scan(&key)
+	if d.ID != key {
+		t.Errorf("dvr id = %d, device_keys key = %d (must match)", d.ID, key)
+	}
+	var rowID int64
+	m.db.QueryRow(`SELECT id FROM dvrs WHERE addr=?`, "127.0.0.1").Scan(&rowID)
+	if rowID != key {
+		t.Errorf("dvrs.id = %d, want %d", rowID, key)
+	}
+}

@@ -2,9 +2,11 @@ package main
 
 import (
 	"database/sql"
+	"net/http"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
 
 func newTestSurvManager(t *testing.T) *SurveillanceManager {
@@ -16,7 +18,12 @@ func newTestSurvManager(t *testing.T) *SurveillanceManager {
 	}
 	db.SetMaxOpenConns(1) // mirror NewSurveillanceManager
 	t.Cleanup(func() { db.Close() })
-	m := &SurveillanceManager{db: db, dbPath: path}
+	m := &SurveillanceManager{
+		db:          db,
+		dbPath:      path,
+		client:      &http.Client{Timeout: 500 * time.Millisecond},
+		shortClient: &http.Client{Timeout: 500 * time.Millisecond},
+	}
 	m.migrate()
 	return m
 }
