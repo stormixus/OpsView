@@ -762,6 +762,9 @@ button{font-family:inherit; cursor:pointer;}
 /* inline thumbnail filmstrip — kept in DOM while panning; fade in when loaded */
 /* one cell of the shared sprite filmstrip (background-position picks the frame) */
 .up-thumb{position:absolute; left:6px; width:96px; height:54px; border-radius:5px; border:1px solid rgba(255,255,255,.12); background-color:#0a0f15; background-repeat:no-repeat; background-size:96px auto; box-shadow:0 2px 8px rgba(0,0,0,.45); transition:top .06s linear; will-change:top;}
+/* event-anchored thumbnail (one per motion/event) = full snapshot, cover-fit; a
+   subtle accent border distinguishes it from the old sprite-sheet cells. */
+.up-evthumb{background-size:cover; background-position:center; border-color:rgba(34,211,238,.55);}
 /* gray recording rail + blue motion/event marks (Scrypted-style) */
 .up-cov{position:absolute; right:22px; width:5px; border-radius:3px; background:linear-gradient(180deg, #7d848d 0%, #636a73 100%); box-shadow:inset 0 0 0 1px rgba(255,255,255,.07);}
 .up-tick{position:absolute; right:29px; width:6px; height:1px; background:rgba(255,255,255,.16);}

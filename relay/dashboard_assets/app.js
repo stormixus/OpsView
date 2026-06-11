@@ -126,6 +126,7 @@ function applyRealRender(){
     if(!a){ go('overview'); return; }
     renderAgentHeader(a); renderStatus(a); renderWatchers(a); renderStreams(a);
     if(curTab==='live' && !$('#grid').dataset.agent){ renderGrid(a); }
+    maybeRestorePlayer(); // reopen the deep-linked player (?ch=) once its stream has loaded
   }
 }
 
@@ -975,6 +976,7 @@ function openPlayer(stream, opts){
   } else {
     up.mode='live'; upStartLive();
   }
+  syncPlayerURL();
 }
 function upUpdatePauseBtn(){
   var btn=$('#upPause'); if(!btn) return;
@@ -1077,38 +1079,38 @@ function upResetRailLayers(){
   if(upRail._thumbs){ upRail._thumbs.innerHTML=''; upRail._cells=null; }
   if(upRail._playhead){ upRail._playhead.remove(); upRail._playhead=null; }
   if(upRail._axis){ upRail._axis.innerHTML=''; }
-  up._sprite=null;
+  up._thumbSig=null;
 }
 function upResetThumbs(){ upResetRailLayers(); }
 // The filmstrip is ONE sprite JPEG (n frames tiled) instead of N <img> fetches —
 // a single HTTP round-trip over the tunnel. The sprite tracks the loaded timeline
 // band, so panning within it only repositions cells (no refetch).
-var UP_CELL_W=96, UP_CELL_H=54; // 160x90 sprite cell shown at 96x54 (same 16:9)
-function upDesiredSprite(){
-  if(!up._loaded) return null;
-  var from=up._loaded.from, to=up._loaded.to;
-  if(to<=from) return null;
-  var n=Math.max(4, Math.min(48, Math.round((to-from)*up.pxPerSec/UP_CELL_H)));
-  return { from:from, to:to, n:n };
-}
+var UP_CELL_W=96, UP_CELL_H=54; // thumbnail shown at 96x54 (16:9)
+// Event-anchored thumbnails: one per motion/event at its time, sourced from the
+// pre-stored event snapshot (.evthumbs, served by rec-thumb?t=<event.start>) — NOT
+// a continuous filmstrip. Quiet stretches show no thumbnails (just the coverage
+// bar, ticks and playhead). Snapshots load lazily as each event scrolls into view.
 function upRenderThumbs(H, now){
   var layer=upRail._thumbs; if(!layer) return;
-  var d=upDesiredSprite();
-  if(!d){ if(up._sprite){ layer.innerHTML=''; upRail._cells=null; up._sprite=null; } return; }
-  if(!up._sprite || up._sprite.from!==d.from || up._sprite.to!==d.to || up._sprite.n!==d.n){
-    up._sprite={ from:d.from, to:d.to, n:d.n, step:(d.to-d.from)/d.n,
-      url:BASE+'/api/rec-sprite?stream='+encodeURIComponent(up.path)+'&start='+Math.round(d.from)+'&end='+Math.round(d.to)+'&n='+d.n };
+  var evs=up.events||[];
+  var sig=up.path+'|'+evs.map(function(e){return Math.round(e.start);}).join(',');
+  if(up._thumbSig!==sig){
+    up._thumbSig=sig;
     var html='';
-    for(var i=0;i<d.n;i++) html+='<div class="up-thumb" style="background-image:url('+escAttr(up._sprite.url)+');background-position:0 -'+(i*UP_CELL_H)+'px"></div>';
+    for(var i=0;i<evs.length;i++) html+='<div class="up-thumb up-evthumb"></div>';
     layer.innerHTML=html;
     upRail._cells=[].slice.call(layer.children);
   }
-  var sp=up._sprite, cells=upRail._cells||[];
-  for(var i=0;i<sp.n;i++){
+  var cells=upRail._cells||[];
+  for(var i=0;i<evs.length;i++){
     var cell=cells[i]; if(!cell) continue;
-    var ti=sp.from+(i+0.5)*sp.step, y=upYat(ti,H);
+    var ti=evs[i].start, y=upYat(ti,H), vis=(y>=-60&&y<=H+60);
     cell.style.top=(y-UP_CELL_H/2)+'px';
-    cell.style.visibility=(y>=-60&&y<=H+60 && ti<=now+sp.step && segmentAt(up.segs,ti)>=0)?'visible':'hidden';
+    cell.style.visibility=vis?'visible':'hidden';
+    if(vis && !cell._loaded){
+      cell._loaded=true;
+      cell.style.backgroundImage='url('+escAttr(BASE+'/api/rec-thumb?stream='+encodeURIComponent(up.path)+'&t='+Math.round(ti))+')';
+    }
   }
 }
 function upEnsurePlayhead(){
@@ -1260,6 +1262,31 @@ function closePlayer(){
   up.mode='live'; upEl.classList.remove('up-rec'); upRail.classList.remove('show');
   upPrev.hidden=true; up._curSeg=null; up._loaded=null; up._fetching=false; upResetThumbs();
   upPaused=false; up._scrubbing=false; upDrag=null; upRail.classList.remove('scrubbing'); upUpdatePauseBtn();
+  syncPlayerURL();
+}
+// Reflect the open player in the URL (?ch=&t=&hd=) so a reload restores exactly
+// this view — same idea as ?dvr= persisting the device filter. t is the recording
+// cursor (omitted for live = "now"); hd marks the high-res live toggle.
+function syncPlayerURL(){
+  var u=new URL(location.href);
+  if(up.open){
+    u.searchParams.set('ch', up.stream);
+    if(up.mode==='rec' && up.cursorT) u.searchParams.set('t', Math.round(up.cursorT)); else u.searchParams.delete('t');
+    if(up.hires && up.hdOn) u.searchParams.set('hd','1'); else u.searchParams.delete('hd');
+  } else { u.searchParams.delete('ch'); u.searchParams.delete('t'); u.searchParams.delete('hd'); }
+  history.replaceState(history.state, '', u.pathname+u.search);
+}
+// Captured once at page load; consumed when the agent's streams arrive.
+var _pendingPlayer=(function(){ var q=new URLSearchParams(location.search), ch=q.get('ch'); return ch?{ch:ch,t:q.get('t'),hd:q.get('hd')==='1'}:null; })();
+function maybeRestorePlayer(){
+  if(!_pendingPlayer || up.open || selected===null) return;
+  var a=agentById(selected); if(!a) return;
+  var p=_pendingPlayer, hasStream=(a.streams||[]).some(function(x){return x.id===p.ch||x.path===p.ch;});
+  if(!hasStream && !p.t) return; // live needs an active stream — wait for the next poll to bring it
+  openPlayer(p.ch, p.t?{mode:'rec',t:+p.t}:{});
+  if(up.open && p.hd && up.hires){ up.hdOn=true; var b=$('#upHdBtn'); if(b) b.classList.toggle('on',true);
+    if(up.mode==='live'){ if(up.player&&up.player.close)up.player.close(); upStartLive(); } }
+  _pendingPlayer=null;
 }
 $('#uplayerClose').addEventListener('click', closePlayer);
 $('#upBack10').addEventListener('click', function(e){ e.stopPropagation(); upSkipSec(-10); });
@@ -1270,6 +1297,7 @@ if($('#upHdBtn')) $('#upHdBtn').addEventListener('click', function(){
   up.hdOn=!up.hdOn;
   this.classList.toggle('on', up.hdOn);
   if(up.mode==='live'){ if(up.player&&up.player.close)up.player.close(); upStartLive(); }
+  syncPlayerURL();
 });
 upEl.addEventListener('click', function(e){ if(e.target===upEl) closePlayer(); });
 document.addEventListener('keydown', function(e){ if(e.key==='Escape' && up.open) closePlayer(); });
@@ -1294,6 +1322,7 @@ function upSeekTo(t,_retried){
   $('#upLiveBadge').style.display='none'; $('#upState').textContent='';
   clearTimeout(up._liveTimer); // stop the 1s LIVE re-render so it can't fight the REC rAF over t0/t1
   up.cursorT=t;
+  syncPlayerURL(); // keep ?t= in sync with the recording cursor for reload-restore
   upStopVideo();
   var seg=up.segs[i], seq=++up._seekSeq;
   upResolveSegName(seg.start).then(function(name){
