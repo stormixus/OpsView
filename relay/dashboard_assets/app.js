@@ -1366,6 +1366,8 @@ function upSeekTo(t,_retried){
     }
     upGap(t); return;
   }
+  var seg=up.segs[i]; // capture BEFORE upSyncRecWindow() — it can reload up.segs (via
+                      // upEnsureTimeline), which would make up.segs[i] stale/undefined -> black video.
   up.mode='rec'; upEl.classList.add('up-rec'); upRail.classList.add('show');
   $('#upLiveBadge').style.display='none'; $('#upState').textContent='';
   clearTimeout(up._liveTimer); // stop the 1s LIVE re-render so it can't fight the REC rAF over t0/t1
@@ -1373,7 +1375,7 @@ function upSeekTo(t,_retried){
   syncPlayerURL(); // keep ?t= in sync with the recording cursor for reload-restore
   upSyncRecWindow(); upRenderRail(); // snap the rail to t immediately (don't wait for the segment load)
   upStopVideo();
-  var seg=up.segs[i], seq=++up._seekSeq;
+  var seq=++up._seekSeq;
   upResolveSegName(seg.start).then(function(name){
     if(seq!==up._seekSeq || !up.open) return; // superseded by a newer seek (rapid scrub/wheel)
     if(!name){ upGap(t); return; }
