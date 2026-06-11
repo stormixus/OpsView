@@ -972,7 +972,7 @@ var up = {
   open:false, stream:null, name:'', sub:'', codec:'h264', path:'',
   mode:'live',            // 'live' | 'rec' | 'gap'
   player:null,            // live WS/HLS handle (has .close)
-  t0:0, t1:0, pxPerSec:0.08, // window (unix sec): t0=oldest, t1=newest(now). rail renders newest at TOP. ~12.5s/px
+  t0:0, t1:0, pxPerSec:1.0, // window (unix sec): t0=oldest, t1=newest(now). rail renders newest at TOP. ~1s/px (tight: 10s skip visible, precise scrub; ~10-15min/screen)
   segs:[], events:[],     // from rec-timeline
   cursorT:0,
   hires:false, hdOn:false,
@@ -995,7 +995,7 @@ function openPlayer(stream, opts){
   }
   up.open=true; up.stream=s.id; up.path=s.path; up.codec=s.codec; up.name=s.name; up.sub=a.name;
   up.hires=!!s.hires; up.hdOn=false;
-  up.pxPerSec=0.08; // reset to the default zoom on every open
+  up.pxPerSec=1.0; // reset to the default zoom on every open (~1s/px — tight enough that a 10s skip and fine scrub are visible)
   $('#upTitle').textContent=s.name; $('#upSub').textContent=a.name+' · CH'+s.ch;
   upEl.classList.add('show'); upEl.setAttribute('aria-hidden','false');
   setRailCollapsed(false); // each open starts with the rail expanded
