@@ -507,13 +507,14 @@ function cellHTML(s){
     '<div class="expand"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 3H3v6M21 9V3h-6M3 15v6h6M15 21h6v-6"/></svg></div></div>';
 }
 /* --- real video players for the live grid --- */
-// Live cells play only while on-screen. Browsers cap how many H.264 decoders run
-// at once (~16-25); eagerly starting every cell in a big grid left the losers black
-// (whoever grabbed a decoder first won, so the black set shuffled each reload). An
-// IntersectionObserver starts a cell's WS only when it scrolls into view and tears
-// it down — freeing the decoder — when it leaves, keeping concurrent decoders near
-// "what fits on screen".
-var liveObs=null;
+// Browsers cap how many H.264 decoders run at once (~16-25); eagerly starting every
+// cell in a big grid left the losers black (whoever grabbed a decoder first won, so the
+// black set shuffled each reload). The grid keeps at most liveCap() cells decoding and
+// rotates the live window (gridrotate.js) so every on-screen cell cycles through a live
+// turn; a rotated-out cell freezes its last frame instead of going black. An
+// IntersectionObserver excludes scrolled-off cells from the rotation pool.
+var LIVE_CAP_DESKTOP=12, LIVE_CAP_MOBILE=4, ROTATE_DWELL_MS=5000;
+function liveCap(){ return _isMobile()?LIVE_CAP_MOBILE:LIVE_CAP_DESKTOP; }
 function _cellPlay(cell){
   if(!cell || cell._player) return;
   var path=cell.dataset.path; if(!path) return;
@@ -521,14 +522,76 @@ function _cellPlay(cell){
   var wsUrl=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/surv/ws/'+path;
   var hlsUrl=location.origin+'/surv/'+path+'/index.m3u8';
   cell._player=playWS(video, wsUrl, function(){ playHLS(video, hlsUrl); });
+  _cellUnfreeze(cell);
 }
 function _cellStop(cell){
   if(!cell) return;
   if(cell._player){ try{ cell._player.close&&cell._player.close(); }catch(e){} cell._player=null; }
-  var video=cell.querySelector('video'); if(video){ try{ video.removeAttribute('src'); video.load(); }catch(e){} }
+  var video=cell.querySelector('video');
+  if(video){
+    if(cell._unfreezeHide){ video.removeEventListener('timeupdate', cell._unfreezeHide); cell._unfreezeHide=null; }
+    try{ video.removeAttribute('src'); video.load(); }catch(e){}
+  }
 }
+// _cellFreeze paints the cell's current video frame onto a <canvas> overlay so the cell
+// keeps showing a recent still after its decoder is torn down. Call BEFORE _cellStop
+// (which blanks the <video>). No-op until the video has decoded a frame.
+function _cellFreeze(cell){
+  if(!cell) return;
+  var video=cell.querySelector('video'); if(!video || !video.videoWidth || video.readyState<2) return;
+  var cv=cell.querySelector('canvas.cellfreeze');
+  if(!cv){ cv=document.createElement('canvas'); cv.className='cellfreeze'; cell.insertBefore(cv, video.nextSibling); }
+  cv.width=video.videoWidth; cv.height=video.videoHeight;
+  try{ cv.getContext('2d').drawImage(video,0,0,cv.width,cv.height); cv.style.display=''; }catch(e){}
+}
+// _cellUnfreeze hides the frozen still once the freshly-started video produces a frame,
+// avoiding a black flash between teardown and the first decoded frame.
+function _cellUnfreeze(cell){
+  var cv=cell&&cell.querySelector('canvas.cellfreeze'); if(!cv || cv.style.display==='none') return;
+  var video=cell.querySelector('video'); if(!video){ cv.style.display='none'; return; }
+  if(cell._unfreezeHide) video.removeEventListener('timeupdate', cell._unfreezeHide); // no listener pileup across rotations
+  cell._unfreezeHide=function(){ cv.style.display='none'; video.removeEventListener('timeupdate', cell._unfreezeHide); cell._unfreezeHide=null; };
+  video.addEventListener('timeupdate', cell._unfreezeHide);
+}
+// The live-grid rotation scheduler. eligible = on-screen cells (the rotation pool);
+// start = current window offset; timer ticks the window forward every ROTATE_DWELL_MS.
+var gridSched=null;
+function gridRotate(advance){
+  if(!gridSched || up.open) return; // player overlay covers the grid — don't decode under it
+  var pool=gridSched.eligible, cap=liveCap();
+  if(advance) gridSched.start=nextStart(pool.length, cap, gridSched.start);
+  var liveSet=new Set(); liveWindow(pool.length, cap, gridSched.start).forEach(function(i){ if(pool[i]) liveSet.add(pool[i]); });
+  pool.forEach(function(c){ if(!liveSet.has(c) && c._player){ _cellFreeze(c); _cellStop(c); } });
+  liveSet.forEach(function(c){ if(!c._player) _cellPlay(c); });
+}
+function startLiveGrid(cells){
+  stopGridSched();
+  gridSched={ eligible:[], start:0, timer:null, obs:null };
+  // Track on-screen cells for ALL platforms now: the pool is whatever's visible, and
+  // rotation caps concurrent decoders within it.
+  gridSched.obs=new IntersectionObserver(function(entries){
+    if(!gridSched) return;
+    entries.forEach(function(en){
+      var c=en.target, i=gridSched.eligible.indexOf(c);
+      if(en.isIntersecting){ if(i<0) gridSched.eligible.push(c); }
+      else { if(i>=0) gridSched.eligible.splice(i,1); if(c._player){ _cellFreeze(c); _cellStop(c); } }
+    });
+    gridRotate(false); // re-evaluate the live window immediately on a visibility change
+  }, {rootMargin:'100px'});
+  cells.forEach(function(c){ gridSched.obs.observe(c); });
+  gridSched.timer=setInterval(function(){ gridRotate(true); }, ROTATE_DWELL_MS);
+}
+function stopGridSched(){
+  if(!gridSched) return;
+  if(gridSched.timer) clearInterval(gridSched.timer);
+  if(gridSched.obs){ try{ gridSched.obs.disconnect(); }catch(e){} }
+  gridSched=null;
+}
+// suspendLiveGrid frees every grid decoder (freezing each cell's last frame) when the
+// player overlay opens over the grid; gridRotate stays a no-op until it closes.
+function suspendLiveGrid(){ $$('#grid .cell').forEach(function(c){ if(c._player){ _cellFreeze(c); _cellStop(c); } }); }
 function stopLiveGrid(){
-  if(liveObs){ try{ liveObs.disconnect(); }catch(e){} liveObs=null; }
+  stopGridSched();
   var g=$('#grid'); if(!g) return;
   $$('#grid .cell').forEach(_cellStop);  // close sockets before dropping the DOM
   g.innerHTML=''; delete g.dataset.agent;
@@ -611,16 +674,7 @@ function renderGrid(a){
   grid.dataset.agent=a.id;
   var cells=$$('#grid .cell');
   list.forEach(function(s, i){ if(cells[i]) cells[i].dataset.path=s.path; });
-  if(_isMobile()){
-    // mobile: start a cell only when it enters the viewport; free the decoder on exit
-    liveObs=new IntersectionObserver(function(entries){
-      entries.forEach(function(en){ if(en.isIntersecting){ _cellPlay(en.target); } else { _cellStop(en.target); } });
-    }, {rootMargin:'100px'});
-    cells.forEach(function(c){ liveObs.observe(c); });
-  } else {
-    // desktop: play them all at once (original behavior — plenty of decoders)
-    cells.forEach(_cellPlay);
-  }
+  startLiveGrid(cells); // rotate a capped set of live decoders across the cells
   if(liveEditing) wireLiveEdit(a);
   updateCellClocks();
 }
@@ -998,6 +1052,7 @@ function openPlayer(stream, opts){
   up.pxPerSec=1.0; // reset to the default zoom on every open (~1s/px — tight enough that a 10s skip and fine scrub are visible)
   $('#upTitle').textContent=s.name; $('#upSub').textContent=a.name+' · CH'+s.ch;
   upEl.classList.add('show'); upEl.setAttribute('aria-hidden','false');
+  suspendLiveGrid(); // free grid decoders for the player; gridRotate idles while up.open
   setRailCollapsed(false); // each open starts with the rail expanded
   upPaused=false; upUpdatePauseBtn();
   var hdBtn=$('#upHdBtn'); if(hdBtn){ hdBtn.hidden=!up.hires; hdBtn.classList.toggle('on', up.hdOn); }
@@ -1333,6 +1388,7 @@ function closePlayer(){
   up.mode='live'; upEl.classList.remove('up-rec'); upRail.classList.remove('show');
   upPrev.hidden=true; up._curSeg=null; up._loaded=null; up._fetching=false; upResetThumbs();
   upPaused=false; up._scrubbing=false; upDrag=null; upRail.classList.remove('scrubbing'); upUpdatePauseBtn();
+  if(curTab==='live' && $('#grid').dataset.agent) gridRotate(false); // resume grid rotation under the closed overlay
   syncPlayerURL();
 }
 // The open player's path segment (/ch/<stream>[/t/<unix>][/hd]); appended after the

@@ -410,6 +410,10 @@ button{font-family:inherit; cursor:pointer;}
 
 /* real video fill for live grid cells */
 .cell .cellvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000;z-index:0;}
+/* Frozen last frame: painted before a rotated-out cell's decoder is torn down so the
+   cell shows a recent still instead of going black. Sits above the (now blanked)
+   video, below the labels. */
+.cell .cellfreeze{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000;z-index:1;}
 .modal-cell .cellvid{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:0;}
 .cell .clabel,.cell .cstat,.cell .rec,.cell .ts,.cell .expand,.cell .wn{z-index:2;}
 
