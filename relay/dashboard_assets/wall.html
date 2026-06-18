@@ -1,2 +1,18 @@
-<!doctype html><meta charset="utf-8"><title>Live Wall</title>
-<body style="margin:0;background:#000"><script src="/dashboard/assets/wall.js"></script></body>
+<!doctype html>
+<html lang="ko"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Live Wall</title>
+<link rel="stylesheet" href="/dashboard/assets/style.css">
+</head><body class="wallbody">
+<div class="wallwrap">
+  <video id="wallvid" class="wallvid" muted autoplay playsinline></video>
+  <div id="wallgrid" class="wallgrid"></div>
+  <div id="wallmsg" class="wallmsg">로딩…</div>
+</div>
+<div id="wallbig" class="wallbig">
+  <video id="wallbigvid" class="wallbigvid" muted autoplay playsinline></video>
+  <div class="wbig-bar"><span class="wbig-name"></span><button class="wbig-close">✕</button></div>
+</div>
+<script src="/dashboard/assets/wsplayer.js"></script>
+<script src="/dashboard/assets/wall.js"></script>
+</body></html>
