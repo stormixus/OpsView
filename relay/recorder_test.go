@@ -112,12 +112,11 @@ func TestSegmentsForExport(t *testing.T) {
 }
 
 func TestRecordTargetsExcludesWall(t *testing.T) {
-	got := recordTargets([]string{"dvr1_ch1", "wall", "SM-Boutique/wall", "SM-Boutique/dvr1_ch2"})
-	if _, ok := got["wall"]; ok {
-		t.Error("wall (live-only mosaic) must not be a record target")
-	}
-	if _, ok := got["SM-Boutique/wall"]; ok {
-		t.Error("agent-prefixed wall must not be a record target")
+	got := recordTargets([]string{"dvr1_ch1", "wall", "walldvr3", "SM-Boutique/wall", "SM-Boutique/walldvr2", "SM-Boutique/dvr1_ch2"})
+	for _, bad := range []string{"wall", "walldvr3", "SM-Boutique/wall", "SM-Boutique/walldvr2"} {
+		if _, ok := got[bad]; ok {
+			t.Errorf("%q (live-only mosaic) must not be a record target", bad)
+		}
 	}
 	if got["dvr1_ch1"] != "dvr1_ch1" {
 		t.Errorf("normal channel should record itself, got %q", got["dvr1_ch1"])

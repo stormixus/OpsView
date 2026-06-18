@@ -73,7 +73,7 @@ func desiredStreamIDs(channels []proto.ChannelInfo) map[string]bool {
 type SurvProxy struct {
 	mu       sync.RWMutex
 	streams  map[string]*streamEntry // "ch1", "ch2", ...
-	mosaic   *mosaicState            // running live-wall composite, if any (guarded by mu)
+	mosaics  map[string]*mosaicState // running live-wall composites keyed by wall id (guarded by mu)
 	configMu sync.Mutex              // serializes HandleSurvConfig runs
 }
 
@@ -87,6 +87,7 @@ type StreamInfo struct {
 func NewSurvProxy() *SurvProxy {
 	return &SurvProxy{
 		streams: make(map[string]*streamEntry),
+		mosaics: make(map[string]*mosaicState),
 	}
 }
 
@@ -222,16 +223,10 @@ func (sp *SurvProxy) HandleSurvConfig(payload []byte) {
 		sp.StopChannel(id)
 	}
 
-	// Keep a running wall matched to the live channel set (no-op if none running).
-	sp.mu.RLock()
-	running := sp.mosaic != nil
-	var wallAgent string
-	if running {
-		wallAgent = sp.mosaic.agentID
-	}
-	sp.mu.RUnlock()
-	if running {
-		sp.EnsureMosaic(wallAgent)
+	// Keep every running wall matched to the live channel set (no-op if none).
+	wallAgent, wallIDs := sp.runningWalls()
+	for _, wid := range wallIDs {
+		sp.EnsureMosaic(wallAgent, wid)
 	}
 }
 
@@ -354,10 +349,12 @@ func (sp *SurvProxy) StopAll() {
 		sp.stopEntryLocked(entry)
 		delete(sp.streams, id)
 	}
-	if sp.mosaic != nil && sp.mosaic.cancel != nil {
-		sp.mosaic.cancel()
+	for id, m := range sp.mosaics {
+		if m.cancel != nil {
+			m.cancel()
+		}
+		delete(sp.mosaics, id)
 	}
-	sp.mosaic = nil
 	log.Printf("[surv] all streams stopped")
 }
 

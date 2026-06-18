@@ -25,12 +25,28 @@ func TestMosaicLayout(t *testing.T) {
 func TestMosaicInputIDs(t *testing.T) {
 	stats := []StreamStat{
 		{ID: "dvr1_ch10"}, {ID: "dvr1_ch2"}, {ID: "dvr1_ch2@main"},
-		{ID: "dvr3_ch1"}, {ID: "wall"}, {ID: "dvr1_ch1"},
+		{ID: "dvr3_ch1"}, {ID: "wall"}, {ID: "walldvr1"}, {ID: "dvr1_ch1"},
 	}
-	got := mosaicInputIDs(stats)
+	// dvrNum 0 = whole agent (all base channels, no @main / wall*)
+	got := mosaicInputIDs(stats, 0)
 	want := []string{"dvr1_ch1", "dvr1_ch2", "dvr1_ch10", "dvr3_ch1"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("mosaicInputIDs = %v, want %v (numeric ch sort, no @main/wall)", got, want)
+		t.Fatalf("mosaicInputIDs(0) = %v, want %v (numeric ch sort, no @main/wall*)", got, want)
+	}
+	// dvrNum 1 = only DVR 1's channels
+	got1 := mosaicInputIDs(stats, 1)
+	want1 := []string{"dvr1_ch1", "dvr1_ch2", "dvr1_ch10"}
+	if !reflect.DeepEqual(got1, want1) {
+		t.Fatalf("mosaicInputIDs(1) = %v, want %v (DVR-1 scoped)", got1, want1)
+	}
+}
+
+func TestMosaicWallDVR(t *testing.T) {
+	cases := map[string]int{"wall": 0, "walldvr1": 1, "walldvr12": 12, "walldvr0": -1, "wallx": -1, "dvr1_ch1": -1, "walldvr": -1}
+	for id, want := range cases {
+		if got := mosaicWallDVR(id); got != want {
+			t.Fatalf("mosaicWallDVR(%q) = %d, want %d", id, got, want)
+		}
 	}
 }
 

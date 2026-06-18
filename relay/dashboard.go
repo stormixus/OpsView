@@ -450,14 +450,11 @@ func (h *Hub) HandleWallLayout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such agent", http.StatusNotFound)
 		return
 	}
-	s.survProxy.EnsureMosaic(agent)
-	s.survProxy.mu.RLock()
-	m := s.survProxy.mosaic
+	s.survProxy.EnsureMosaic(agent, "wall") // dashboard uses the whole-agent wall
 	out := resp{Enabled: true, Agent: agent}
-	if m != nil {
-		out.Rows, out.Cols, out.FPS, out.Cells = m.rows, m.cols, m.fps, m.cells
+	if rows, cols, fps, cells, ok := s.survProxy.WallLayout("wall"); ok {
+		out.Rows, out.Cols, out.FPS, out.Cells = rows, cols, fps, cells
 	}
-	s.survProxy.mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)
 }

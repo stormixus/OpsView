@@ -44,11 +44,16 @@ func dvrChOf(id string) (dvr, ch int, ok bool) {
 // mosaicInputIDs picks the base channel stream ids to compose — excluding main
 // (@main) streams and the wall itself — sorted by (dvr, ch); unparseable ids
 // sort last by id.
-func mosaicInputIDs(stats []StreamStat) []string {
+func mosaicInputIDs(stats []StreamStat, dvrNum int) []string {
 	var out []string
 	for _, s := range stats {
-		if s.ID == "wall" || isMainStreamID(s.ID) {
+		if strings.HasPrefix(s.ID, "wall") || isMainStreamID(s.ID) {
 			continue
+		}
+		if dvrNum > 0 {
+			if d, _, ok := dvrChOf(s.ID); !ok || d != dvrNum {
+				continue // scope to one DVR
+			}
 		}
 		out = append(out, s.ID)
 	}
@@ -161,30 +166,50 @@ type mosaicState struct {
 
 func mosaicSig(ids []string) string { return strings.Join(ids, ",") }
 
-// EnsureMosaic (re)builds the agent's live-wall composite to match its current
-// channel set. Idempotent: a no-op when nothing changed, a restart when the set
-// changed, a no-op when there are no base channels.
-func (sp *SurvProxy) EnsureMosaic(agentID string) {
+// mosaicWallDVR parses the DVR scope from a wall stream id: "wall" -> 0 (whole
+// agent, used by the dashboard), "walldvr<N>" -> N (one DVR, used by the viewer
+// so each DVR tab shows only its own cameras). Returns -1 for a non-wall id.
+func mosaicWallDVR(wallID string) int {
+	if wallID == "wall" {
+		return 0
+	}
+	if strings.HasPrefix(wallID, "walldvr") {
+		if n, err := strconv.Atoi(strings.TrimPrefix(wallID, "walldvr")); err == nil && n > 0 {
+			return n
+		}
+	}
+	return -1
+}
+
+// EnsureMosaic (re)builds the live-wall composite identified by wallID ("wall" =
+// whole agent, "walldvr<N>" = one DVR) to match its current channel set.
+// Idempotent: no-op when unchanged, restart when the set changed, stop when empty.
+// Multiple walls (one per watched DVR) can run concurrently, keyed by wallID.
+func (sp *SurvProxy) EnsureMosaic(agentID, wallID string) {
+	dvrNum := mosaicWallDVR(wallID)
+	if dvrNum < 0 {
+		return // not a recognized wall id
+	}
 	stats := sp.StreamStats()
-	ids := mosaicInputIDs(stats)
+	ids := mosaicInputIDs(stats, dvrNum)
 	if len(ids) == 0 {
-		sp.stopMosaic()
+		sp.stopMosaicID(wallID)
 		return
 	}
 	sig := mosaicSig(ids)
 
 	sp.mu.Lock()
-	if sp.mosaic != nil && sp.mosaic.sig == sig {
+	if m := sp.mosaics[wallID]; m != nil && m.sig == sig {
 		sp.mu.Unlock()
 		return // already running with this exact channel set
 	}
-	// (re)build: drop any prior mosaic + wall entry first
-	if sp.mosaic != nil && sp.mosaic.cancel != nil {
-		sp.mosaic.cancel()
+	// (re)build: drop any prior mosaic + entry for this wallID first
+	if m := sp.mosaics[wallID]; m != nil && m.cancel != nil {
+		m.cancel()
 	}
-	if e, ok := sp.streams["wall"]; ok {
+	if e, ok := sp.streams[wallID]; ok {
 		sp.stopEntryLocked(e)
-		delete(sp.streams, "wall")
+		delete(sp.streams, wallID)
 	}
 
 	rows, cols := mosaicLayout(len(ids))
@@ -205,40 +230,52 @@ func (sp *SurvProxy) EnsureMosaic(agentID string) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	entry := &streamEntry{id: "wall", name: "wall", wsHub: newSurvWSHub(), cancel: cancel, proxy: sp}
-	sp.streams["wall"] = entry
-	sp.mosaic = &mosaicState{sig: sig, rows: rows, cols: cols, fps: fps, cells: cells, cancel: cancel, agentID: agentID}
+	entry := &streamEntry{id: wallID, name: wallID, wsHub: newSurvWSHub(), cancel: cancel, proxy: sp}
+	sp.streams[wallID] = entry
+	sp.mosaics[wallID] = &mosaicState{sig: sig, rows: rows, cols: cols, fps: fps, cells: cells, cancel: cancel, agentID: agentID}
 	sp.mu.Unlock()
 
 	go entry.superviseEncode(ctx, mosaicArgs(inputs, rows, cols, cellW, cellH, fps))
 	go sp.reapMosaicWhenIdle(entry)
-	log.Printf("[mosaic] %s: wall %dx%d (%d ch) <- self-HLS", agentID, rows, cols, len(ids))
+	log.Printf("[mosaic] %s: %s %dx%d (%d ch) <- self-HLS", agentID, wallID, rows, cols, len(ids))
 }
 
-// stopMosaic cancels and removes a running wall.
-func (sp *SurvProxy) stopMosaic() {
+// stopMosaicID cancels and removes one running wall.
+func (sp *SurvProxy) stopMosaicID(wallID string) {
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
-	if sp.mosaic != nil && sp.mosaic.cancel != nil {
-		sp.mosaic.cancel()
+	if m := sp.mosaics[wallID]; m != nil && m.cancel != nil {
+		m.cancel()
 	}
-	sp.mosaic = nil
-	if e, ok := sp.streams["wall"]; ok {
+	delete(sp.mosaics, wallID)
+	if e, ok := sp.streams[wallID]; ok {
 		sp.stopEntryLocked(e)
-		delete(sp.streams, "wall")
+		delete(sp.streams, wallID)
 	}
 }
 
-// WallLayout snapshots the running mosaic's grid shape and ordered cells, so a
-// client can place a click-target overlay that lines up with the composited
-// tiles. ok is false when no mosaic is running.
-func (sp *SurvProxy) WallLayout() (rows, cols, fps int, cells []mosaicCell, ok bool) {
+// runningWalls snapshots the ids of all live walls (for config-change rebuilds)
+// plus the agent they belong to.
+func (sp *SurvProxy) runningWalls() (agentID string, wallIDs []string) {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
-	if sp.mosaic == nil {
+	for id, m := range sp.mosaics {
+		wallIDs = append(wallIDs, id)
+		agentID = m.agentID
+	}
+	return agentID, wallIDs
+}
+
+// WallLayout snapshots a running wall's grid shape and ordered cells, so a client
+// can place a click-target overlay that lines up with the composited tiles. ok is
+// false when that wall is not running.
+func (sp *SurvProxy) WallLayout(wallID string) (rows, cols, fps int, cells []mosaicCell, ok bool) {
+	sp.mu.RLock()
+	defer sp.mu.RUnlock()
+	m := sp.mosaics[wallID]
+	if m == nil {
 		return 0, 0, 0, nil, false
 	}
-	m := sp.mosaic
 	return m.rows, m.cols, m.fps, m.cells, true
 }
 
@@ -252,7 +289,7 @@ func (sp *SurvProxy) reapMosaicWhenIdle(self *streamEntry) {
 	defer tick.Stop()
 	for range tick.C {
 		sp.mu.RLock()
-		e := sp.streams["wall"]
+		e := sp.streams[self.id]
 		sp.mu.RUnlock()
 		if e != self { // replaced by a rebuild, or removed -> this reaper is stale
 			return
@@ -269,8 +306,8 @@ func (sp *SurvProxy) reapMosaicWhenIdle(self *streamEntry) {
 			continue
 		}
 		if time.Since(idleSince) >= grace {
-			sp.stopMosaic()
-			log.Printf("[mosaic] wall idle — stopped")
+			sp.stopMosaicID(self.id)
+			log.Printf("[mosaic] %s idle — stopped", self.id)
 			return
 		}
 	}

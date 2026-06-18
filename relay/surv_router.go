@@ -45,8 +45,8 @@ func (h *Hub) ServeSurvWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such agent", http.StatusNotFound)
 		return
 	}
-	if rest == "wall" {
-		s.survProxy.EnsureMosaic(agentID) // lazy-start the composite on first viewer
+	if strings.HasPrefix(rest, "wall") {
+		s.survProxy.EnsureMosaic(agentID, rest) // lazy-start the composite on first viewer
 	}
 	r2 := r.Clone(r.Context())
 	r2.URL.Path = "/surv/ws/" + rest
@@ -84,8 +84,12 @@ func (h *Hub) ServeWallLayout(w http.ResponseWriter, r *http.Request) {
 	if agent == "" {
 		agent = "default"
 	}
-	s.survProxy.EnsureMosaic(agent)
-	if rows, cols, fps, cells, ok := s.survProxy.WallLayout(); ok {
+	wallID := r.URL.Query().Get("wall")
+	if wallID == "" {
+		wallID = "wall" // whole-agent default; viewer passes walldvr<N> for per-DVR
+	}
+	s.survProxy.EnsureMosaic(agent, wallID)
+	if rows, cols, fps, cells, ok := s.survProxy.WallLayout(wallID); ok {
 		out.Rows, out.Cols, out.FPS, out.Cells = rows, cols, fps, cells
 	}
 	json.NewEncoder(w).Encode(out)

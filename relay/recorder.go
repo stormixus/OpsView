@@ -121,7 +121,11 @@ func recordTargets(active []string) map[string]string {
 	}
 	out := map[string]string{}
 	for _, id := range active {
-		if id == "wall" || strings.HasSuffix(id, "/wall") {
+		seg := id
+		if i := strings.LastIndex(id, "/"); i >= 0 {
+			seg = id[i+1:]
+		}
+		if strings.HasPrefix(seg, "wall") {
 			continue // live-only mosaic composite: no HLS to record from, and redundant
 		}
 		if isMainStreamID(id) {
@@ -141,11 +145,11 @@ func (r *Recorder) reconcile() {
 	var active []string
 	for _, s := range r.hub.allSessions() {
 		for _, st := range s.survProxy.StreamStats() {
-			// The live-wall mosaic ("wall") is a WS-only composite with no HLS muxer,
-			// so it must never be recorded (recording reads a stream's self-HLS, which
-			// 503s for the wall and loops ffmpeg forever). It's also redundant — every
-			// channel it tiles is already recorded on its own.
-			if st.Active && st.ID != "wall" {
+			// The live-wall mosaics ("wall", "walldvr<N>") are WS-only composites with
+			// no HLS muxer, so they must never be recorded (recording reads a stream's
+			// self-HLS, which 503s for a wall and loops ffmpeg forever). They're also
+			// redundant — every channel they tile is already recorded on its own.
+			if st.Active && !strings.HasPrefix(st.ID, "wall") {
 				active = append(active, streamPath(s.id, st.ID))
 			}
 		}
