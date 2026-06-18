@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -69,4 +70,34 @@ func TestWallEnv(t *testing.T) {
 			t.Fatalf("fps clamp = %d, want 30", wallFPS())
 		}
 	})
+}
+
+func TestMosaicArgs(t *testing.T) {
+	args := mosaicArgs([]string{"http://a/0.m3u8", "http://a/1.m3u8"}, 1, 2, 640, 360, 15)
+	joined := strings.Join(args, " ")
+	// both inputs present
+	if !strings.Contains(joined, "-i http://a/0.m3u8") || !strings.Contains(joined, "-i http://a/1.m3u8") {
+		t.Fatalf("missing inputs: %s", joined)
+	}
+	// per-input scale+pad+tpad and a 2-up xstack at x offsets 0 and 640
+	if !strings.Contains(joined, "scale=640:360") || !strings.Contains(joined, "tpad=stop=-1:stop_mode=clone") {
+		t.Fatalf("missing scale/tpad: %s", joined)
+	}
+	if !strings.Contains(joined, "xstack=inputs=2:layout=0_0|640_0") {
+		t.Fatalf("missing/incorrect xstack layout: %s", joined)
+	}
+	// NVENC + Annex-B pipe + AUD bsf
+	for _, want := range []string{"h264_nvenc", "h264_metadata=aud=insert", "-f h264 pipe:1"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q in: %s", want, joined)
+		}
+	}
+}
+
+func TestEvenDown(t *testing.T) {
+	for in, want := range map[int]int{640: 640, 641: 640, 0: 0, 7: 6} {
+		if got := evenDown(in); got != want {
+			t.Fatalf("evenDown(%d) = %d, want %d", in, got, want)
+		}
+	}
 }

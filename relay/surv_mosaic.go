@@ -88,4 +88,55 @@ func wallFPS() int {
 	return n
 }
 
-var _ = fmt.Sprintf // retained for later steps in this file
+func evenDown(x int) int {
+	if x < 0 {
+		return 0
+	}
+	return x - x%2
+}
+
+// mosaicArgs builds the ffmpeg invocation. Inputs are CUDA-decoded self-HLS;
+// each is letterboxed into a cell and held on its last frame after EOF (tpad),
+// then tiled with xstack and NVENC-encoded to an AUD-delimited Annex-B pipe.
+func mosaicArgs(inputURLs []string, rows, cols, cellW, cellH, fps int) []string {
+	args := []string{"-hide_banner", "-loglevel", "error"}
+	for _, u := range inputURLs {
+		args = append(args,
+			"-rw_timeout", "15000000",
+			"-hwaccel", "cuda",
+			"-i", u,
+		)
+	}
+	var fc strings.Builder
+	for i := range inputURLs {
+		fmt.Fprintf(&fc,
+			"[%d:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%d,tpad=stop=-1:stop_mode=clone,setsar=1[v%d];",
+			i, cellW, cellH, cellW, cellH, fps, i)
+	}
+	for i := range inputURLs {
+		fmt.Fprintf(&fc, "[v%d]", i)
+	}
+	fc.WriteString("xstack=inputs=" + strconv.Itoa(len(inputURLs)) + ":layout=")
+	for i := range inputURLs {
+		if i > 0 {
+			fc.WriteByte('|')
+		}
+		x := (i % cols) * cellW
+		y := (i / cols) * cellH
+		fmt.Fprintf(&fc, "%d_%d", x, y)
+	}
+	fc.WriteString("[out]")
+
+	args = append(args,
+		"-filter_complex", fc.String(),
+		"-map", "[out]",
+		"-an",
+		"-r", strconv.Itoa(fps),
+		"-c:v", "h264_nvenc", "-preset", "p4", "-tune", "ll",
+		"-b:v", "4M", "-maxrate", "6M", "-bufsize", "6M",
+		"-g", strconv.Itoa(fps*2), "-bf", "0",
+		"-bsf:v", "h264_metadata=aud=insert",
+		"-f", "h264", "pipe:1",
+	)
+	return args
+}
