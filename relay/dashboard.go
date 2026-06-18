@@ -422,6 +422,61 @@ func (h *Hub) HandleDashboardStatic(w http.ResponseWriter, r *http.Request) {
 	w.Write(b)
 }
 
+// HandleWallLayout returns the live-wall mosaic layout for the given agent.
+// Guarded by authedDashboard; when !wallEnabled() returns {enabled:false}.
+func (h *Hub) HandleWallLayout(w http.ResponseWriter, r *http.Request) {
+	if !h.authedDashboard(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	type resp struct {
+		Enabled bool         `json:"enabled"`
+		Agent   string       `json:"agent"`
+		Rows    int          `json:"rows"`
+		Cols    int          `json:"cols"`
+		FPS     int          `json:"fps"`
+		Cells   []mosaicCell `json:"cells"`
+	}
+	if !wallEnabled() {
+		json.NewEncoder(w).Encode(resp{Enabled: false})
+		return
+	}
+	agent := r.URL.Query().Get("agent")
+	if agent == "" {
+		agent = "default"
+	}
+	s := h.sessionByID(agent)
+	if s == nil {
+		http.Error(w, "no such agent", http.StatusNotFound)
+		return
+	}
+	s.survProxy.EnsureMosaic(agent)
+	s.survProxy.mu.RLock()
+	m := s.survProxy.mosaic
+	out := resp{Enabled: true, Agent: agent}
+	if m != nil {
+		out.Rows, out.Cols, out.FPS, out.Cells = m.rows, m.cols, m.fps, m.cells
+	}
+	s.survProxy.mu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
+}
+
+// HandleWallPage serves the live-wall HTML page. Guarded by authedDashboard.
+func (h *Hub) HandleWallPage(w http.ResponseWriter, r *http.Request) {
+	if !h.authedDashboard(r) {
+		http.Redirect(w, r, "/dashboard", http.StatusFound)
+		return
+	}
+	b, err := dashboardAssets.ReadFile("dashboard_assets/wall.html")
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(b)
+}
+
 // registerDashboard wires routes onto mux only when the dashboard is enabled.
 func (h *Hub) registerDashboard(mux *http.ServeMux) {
 	if !h.dashboardEnabled() {
@@ -448,6 +503,8 @@ func (h *Hub) registerDashboard(mux *http.ServeMux) {
 	mux.HandleFunc("/dashboard/api/lpr-frames", h.HandleDashboardLPRFrames)
 	mux.HandleFunc("/dashboard/api/agents", h.HandleDashboardAgents)
 	mux.HandleFunc("/dashboard/api/password", h.HandleDashboardPassword)
+	mux.HandleFunc("/dashboard/wall", h.HandleWallPage)
+	mux.HandleFunc("/dashboard/api/wall-layout", h.HandleWallLayout)
 	mux.HandleFunc("/dashboard", h.HandleDashboardStatic)
 	mux.HandleFunc("/dashboard/", h.HandleDashboardStatic)
 }
