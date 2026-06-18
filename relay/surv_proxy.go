@@ -113,7 +113,11 @@ func (sp *SurvProxy) HandleSurvConfig(payload []byte) {
 	type pendingCh struct {
 		chID, name, rtspURL string
 	}
+	type pendingTC struct {
+		chID, name, mainID string
+	}
 	perDVR := make(map[int64][]pendingCh)
+	var pendingTranscode []pendingTC
 
 	for _, ch := range cfg.Channels {
 		if !ch.Enabled {
@@ -125,17 +129,29 @@ func (sp *SurvProxy) HandleSurvConfig(payload []byte) {
 		}
 		chID := fmt.Sprintf("dvr%d_ch%d", ch.DVRID, ch.ChNum)
 		desired[chID] = true
+		// transcode-live: an HD channel's live feed is the relay's NVENC downscale
+		// of its main stream (queued below), NOT a second (sub) RTSP pull from the
+		// DVR — so skip the sub stream for those channels to halve DVR connections.
+		transcodeLive := ch.RecordHighRes && transcodeEnabledForChannel(chID)
 
 		sp.mu.RLock()
 		_, exists := sp.streams[chID]
 		sp.mu.RUnlock()
 
 		if !exists {
-			perDVR[ch.DVRID] = append(perDVR[ch.DVRID], pendingCh{
-				chID:    chID,
-				name:    ch.Name,
-				rtspURL: survRTSPURLForChannel(dvr, ch, false),
-			})
+			if transcodeLive {
+				pendingTranscode = append(pendingTranscode, pendingTC{
+					chID:   chID,
+					name:   ch.Name,
+					mainID: mainStreamID(chID),
+				})
+			} else {
+				perDVR[ch.DVRID] = append(perDVR[ch.DVRID], pendingCh{
+					chID:    chID,
+					name:    ch.Name,
+					rtspURL: survRTSPURLForChannel(dvr, ch, false),
+				})
+			}
 		} else {
 			// Stream already running: refresh its display name so a rename in a
 			// re-sent config takes effect live. Without this the name was frozen at
@@ -182,6 +198,14 @@ func (sp *SurvProxy) HandleSurvConfig(payload []byte) {
 		}(channels)
 	}
 	wg.Wait()
+
+	// Start transcode-live sources after their main streams are up: each reads its
+	// main stream's self-HLS and NVENC-downscales it into the live WS hub under the
+	// base id. Only queued for channels not already running, so this is idempotent.
+	for _, t := range pendingTranscode {
+		srcURL := relaySelfHLSBase() + "/surv/" + t.mainID + "/index.m3u8"
+		sp.StartTranscodeChannel(t.chID, t.name, srcURL)
+	}
 
 	// Stop channels no longer in config
 	sp.mu.RLock()
