@@ -2025,7 +2025,25 @@
       }
     }
 
-    async function selectDVR(id) {
+    let _relayPendingTimer = null;
+    function relayConfigured() {
+      return !!(localStorage.getItem('opsview_relay_ip') && localStorage.getItem('opsview_ops_mode') === 'relay');
+    }
+    // While the relay (Ops) connection is still coming up on cold load, don't flash
+    // the heavy per-channel grid — paint a connecting placeholder so the first real
+    // render is the wall (the surv-config handler re-runs selectDVR once connected).
+    function showCctvConnecting() {
+      const msg = '<div class="cctv-no-channels">⟳ 연결 중…</div>';
+      ['cctvGrid', 'mixedCctvGrid'].forEach(gid => {
+        const g = document.getElementById(gid);
+        if (!g) return;
+        teardownWallIn(g);
+        g.classList.remove('cctv-wall', 'grid-2', 'grid-3', 'grid-4', 'cols-3', 'cols-4');
+        g.innerHTML = msg;
+      });
+    }
+
+    async function selectDVR(id, forceLocal) {
       // Stop previous RTSP streams when switching DVRs
       if (activeDvrId && activeDvrId !== id) {
         const prevDvr = dvrs.find(d => d.id === activeDvrId);
@@ -2037,6 +2055,7 @@
       }
       activeDvrId = id;
       localStorage.setItem('opsview_active_dvr', id);
+      if (_relayPendingTimer) { clearTimeout(_relayPendingTimer); _relayPendingTimer = null; }
       renderDVRTabs();
       hideDVRForm();
 
@@ -2061,6 +2080,19 @@
           mixedRenderedDvrId = null;
         }
         updateCCTVStatus();
+        return;
+      }
+
+      // Relay configured but not connected yet → connecting placeholder instead of
+      // the per-channel flash. The surv-config handler re-runs selectDVR once
+      // connected (→ wall); fall back to per-channel if the relay never comes up.
+      if (!forceLocal && dvr && !dvr._remote && relayConfigured() && !opsConnected) {
+        showCctvConnecting();
+        cctvRenderedDvrId = null; mixedRenderedDvrId = null;
+        _relayPendingTimer = setTimeout(() => {
+          _relayPendingTimer = null;
+          if (!opsConnected && activeDvrId === id) selectDVR(id, true);
+        }, 8000);
         return;
       }
 
