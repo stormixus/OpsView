@@ -221,6 +221,18 @@ func (sp *SurvProxy) HandleSurvConfig(payload []byte) {
 	for _, id := range toStop {
 		sp.StopChannel(id)
 	}
+
+	// Keep a running wall matched to the live channel set (no-op if none running).
+	sp.mu.RLock()
+	running := sp.mosaic != nil
+	var wallAgent string
+	if running {
+		wallAgent = sp.mosaic.agentID
+	}
+	sp.mu.RUnlock()
+	if running {
+		sp.EnsureMosaic(wallAgent)
+	}
 }
 
 // StartChannel connects to an RTSP URL and begins producing HLS segments.
@@ -342,6 +354,10 @@ func (sp *SurvProxy) StopAll() {
 		sp.stopEntryLocked(entry)
 		delete(sp.streams, id)
 	}
+	if sp.mosaic != nil && sp.mosaic.cancel != nil {
+		sp.mosaic.cancel()
+	}
+	sp.mosaic = nil
 	log.Printf("[surv] all streams stopped")
 }
 

@@ -44,6 +44,9 @@ func (h *Hub) ServeSurvWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such agent", http.StatusNotFound)
 		return
 	}
+	if rest == "wall" {
+		s.survProxy.EnsureMosaic(agentID) // lazy-start the composite on first viewer
+	}
 	r2 := r.Clone(r.Context())
 	r2.URL.Path = "/surv/ws/" + rest
 	s.survProxy.ServeWS(w, r2)
