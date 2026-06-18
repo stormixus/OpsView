@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -37,17 +36,18 @@ func TestMosaicInputIDs(t *testing.T) {
 
 func TestWallEnv(t *testing.T) {
 	t.Run("defaults", func(t *testing.T) {
-		os.Unsetenv("RELAY_WALL")
-		os.Unsetenv("RELAY_WALL_RES")
-		os.Unsetenv("RELAY_WALL_FPS")
+		t.Setenv("RELAY_WALL", "")
+		t.Setenv("RELAY_WALL_RES", "")
+		t.Setenv("RELAY_WALL_FPS", "")
 		if wallEnabled() {
 			t.Fatal("wall should be disabled by default")
 		}
 		if w, h := wallDims(); w != 1920 || h != 1080 {
 			t.Fatalf("default dims = %dx%d, want 1920x1080", w, h)
 		}
-		if wallFPS() != 15 {
-			t.Fatalf("default fps = %d, want 15", wallFPS())
+		got := wallFPS()
+		if got != 15 {
+			t.Fatalf("default fps = %d, want 15", got)
 		}
 	})
 	t.Run("overrides", func(t *testing.T) {

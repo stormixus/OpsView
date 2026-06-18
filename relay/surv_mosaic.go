@@ -211,7 +211,7 @@ func (sp *SurvProxy) EnsureMosaic(agentID string) {
 	sp.mu.Unlock()
 
 	go entry.superviseEncode(ctx, mosaicArgs(inputs, rows, cols, cellW, cellH, fps))
-	go sp.reapMosaicWhenIdle("wall")
+	go sp.reapMosaicWhenIdle(entry)
 	log.Printf("[mosaic] %s: wall %dx%d (%d ch) <- self-HLS", agentID, rows, cols, len(ids))
 }
 
@@ -232,19 +232,22 @@ func (sp *SurvProxy) stopMosaic() {
 // reapMosaicWhenIdle stops the wall after a grace period with no WS watchers, so
 // the GPU is idle when nobody is looking. Exits once it stops the mosaic (a new
 // viewer lazy-restarts it).
-func (sp *SurvProxy) reapMosaicWhenIdle(id string) {
+func (sp *SurvProxy) reapMosaicWhenIdle(self *streamEntry) {
 	const grace = 30 * time.Second
 	idleSince := time.Time{}
 	tick := time.NewTicker(10 * time.Second)
 	defer tick.Stop()
 	for range tick.C {
 		sp.mu.RLock()
-		e, ok := sp.streams[id]
+		e := sp.streams["wall"]
 		sp.mu.RUnlock()
-		if !ok || e.wsHub == nil {
-			return // mosaic gone
+		if e != self { // replaced by a rebuild, or removed -> this reaper is stale
+			return
 		}
-		if e.wsHub.ClientCount() > 0 {
+		if self.wsHub == nil {
+			return
+		}
+		if self.wsHub.ClientCount() > 0 {
 			idleSince = time.Time{}
 			continue
 		}
@@ -254,7 +257,7 @@ func (sp *SurvProxy) reapMosaicWhenIdle(id string) {
 		}
 		if time.Since(idleSince) >= grace {
 			sp.stopMosaic()
-			log.Printf("[mosaic] %s idle — stopped", id)
+			log.Printf("[mosaic] wall idle — stopped")
 			return
 		}
 	}
