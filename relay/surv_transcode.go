@@ -4,11 +4,14 @@ import (
 	"context"
 	"io"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/opsview/opsview/proto"
 )
 
 // Relay-side transcode-live (experimental, opt-in via RELAY_TRANSCODE_DVR).
@@ -31,21 +34,19 @@ const (
 	transcodeWidth = 640 // height is derived to preserve aspect (scale=W:-2)
 )
 
-// transcodeDVRPrefix returns the stream-id prefix that opts a DVR into
-// transcode-live, or "" when RELAY_TRANSCODE_DVR is unset. A numeric value is the
-// DVR id ("3" -> "dvr3_"); a value already shaped like "dvr3" is accepted too.
-func transcodeDVRPrefix() string {
+// transcodeEnabledFor reports whether this DVR is opted into transcode-live.
+// RELAY_TRANSCODE_DVR is either the numeric DVR id (matched against the channel's
+// "dvrN_chM" stream id) or the DVR's host/IP (matched against the LAN addr the
+// relay pulls RTSP from). Unset disables transcode-live entirely.
+func transcodeEnabledFor(chID string, dvr proto.DVRInfo) bool {
 	v := strings.TrimSpace(os.Getenv("RELAY_TRANSCODE_DVR"))
 	if v == "" {
-		return ""
+		return false
 	}
 	if isAllDigits(v) {
-		return "dvr" + v + "_"
+		return strings.HasPrefix(chID, "dvr"+v+"_")
 	}
-	if !strings.HasSuffix(v, "_") {
-		return v + "_"
-	}
-	return v
+	return hostOnly(dvr.Addr) == v || hostOnly(dvr.ExtAddr) == v
 }
 
 func isAllDigits(s string) bool {
@@ -60,11 +61,16 @@ func isAllDigits(s string) bool {
 	return true
 }
 
-// transcodeEnabledForChannel reports whether the given base stream id belongs to
-// a DVR opted into transcode-live.
-func transcodeEnabledForChannel(chID string) bool {
-	p := transcodeDVRPrefix()
-	return p != "" && strings.HasPrefix(chID, p)
+// hostOnly strips an optional :port from an address.
+func hostOnly(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return ""
+	}
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		return h
+	}
+	return addr
 }
 
 // relaySelfHLSBase is the relay's own HLS origin — the transcode ffmpeg reads the

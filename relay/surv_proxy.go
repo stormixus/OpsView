@@ -132,7 +132,7 @@ func (sp *SurvProxy) HandleSurvConfig(payload []byte) {
 		// transcode-live: an HD channel's live feed is the relay's NVENC downscale
 		// of its main stream (queued below), NOT a second (sub) RTSP pull from the
 		// DVR — so skip the sub stream for those channels to halve DVR connections.
-		transcodeLive := ch.RecordHighRes && transcodeEnabledForChannel(chID)
+		transcodeLive := ch.RecordHighRes && transcodeEnabledFor(chID, dvr)
 
 		sp.mu.RLock()
 		_, exists := sp.streams[chID]

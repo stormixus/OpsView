@@ -4,6 +4,8 @@ import (
 	"os"
 	"reflect"
 	"testing"
+
+	"github.com/opsview/opsview/proto"
 )
 
 // splitNALUnits must split an Annex-B byte run into complete NAL units (start
@@ -58,23 +60,40 @@ func TestNalType(t *testing.T) {
 	}
 }
 
-// The transcode-live opt-in is per-DVR via RELAY_TRANSCODE_DVR. A numeric value
-// is the DVR id and matches that DVR's "dvr<id>_ch<n>" stream ids; unset disables
-// it entirely (zero behavior change).
-func TestTranscodeEnabledForChannel(t *testing.T) {
-	t.Setenv("RELAY_TRANSCODE_DVR", "3")
-	if !transcodeEnabledForChannel("dvr3_ch1") {
-		t.Fatal("dvr3_ch1 should be transcode-enabled when RELAY_TRANSCODE_DVR=3")
-	}
-	if transcodeEnabledForChannel("dvr30_ch1") {
-		t.Fatal("dvr30_ch1 must not match prefix dvr3_ (boundary)")
-	}
-	if transcodeEnabledForChannel("dvr2_ch1") {
-		t.Fatal("dvr2_ch1 should not be enabled")
-	}
+// The transcode-live opt-in is per-DVR via RELAY_TRANSCODE_DVR: either the numeric
+// DVR id (matched against "dvr<id>_ch<n>" stream ids) or the DVR's host/IP (matched
+// against its LAN addr). Unset disables it entirely (zero behavior change).
+func TestTranscodeEnabledFor(t *testing.T) {
+	dvr := proto.DVRInfo{Addr: "192.168.0.169:554"}
+	other := proto.DVRInfo{Addr: "192.168.0.200"}
 
-	os.Unsetenv("RELAY_TRANSCODE_DVR")
-	if transcodeEnabledForChannel("dvr3_ch1") {
-		t.Fatal("unset RELAY_TRANSCODE_DVR must disable transcode-live")
-	}
+	t.Run("numeric id matches stream-id prefix", func(t *testing.T) {
+		t.Setenv("RELAY_TRANSCODE_DVR", "3")
+		if !transcodeEnabledFor("dvr3_ch1", dvr) {
+			t.Fatal("dvr3_ch1 should match RELAY_TRANSCODE_DVR=3")
+		}
+		if transcodeEnabledFor("dvr30_ch1", dvr) {
+			t.Fatal("dvr30_ch1 must not match prefix dvr3_ (boundary)")
+		}
+		if transcodeEnabledFor("dvr2_ch1", dvr) {
+			t.Fatal("dvr2_ch1 should not match")
+		}
+	})
+
+	t.Run("IP matches the DVR addr regardless of port", func(t *testing.T) {
+		t.Setenv("RELAY_TRANSCODE_DVR", "192.168.0.169")
+		if !transcodeEnabledFor("dvr7_ch1", dvr) {
+			t.Fatal("channel on 192.168.0.169 should match by IP")
+		}
+		if transcodeEnabledFor("dvr8_ch1", other) {
+			t.Fatal("channel on a different DVR must not match")
+		}
+	})
+
+	t.Run("unset disables", func(t *testing.T) {
+		os.Unsetenv("RELAY_TRANSCODE_DVR")
+		if transcodeEnabledFor("dvr3_ch1", dvr) {
+			t.Fatal("unset RELAY_TRANSCODE_DVR must disable transcode-live")
+		}
+	})
 }

@@ -2,6 +2,11 @@ services:
   relay:
     container_name: OpsView-relay
     image: ghcr.io/stormixus/opsview-relay:latest
+    # GPU passthrough for NVENC transcode-live (opt-in). On Unraid with the Nvidia
+    # plugin, set RELAY_RUNTIME=nvidia in relay/.env. Default runc = no GPU, normal
+    # behavior. NVIDIA_VISIBLE_DEVICES must also be set (e.g. all) for the GPU to
+    # actually appear inside the container.
+    runtime: ${RELAY_RUNTIME:-runc}
     ports:
       - "${RELAY_EXTERNAL_PORT:-28186}:8080"
     environment:
@@ -44,6 +49,15 @@ services:
       - RELAY_LPR_OCR_CONFIG=${RELAY_LPR_OCR_CONFIG:-/data/lpr/models/plate-ocr.yaml}
       - RELAY_LPR_DET_CONF=${RELAY_LPR_DET_CONF:-}
       - RELAY_LPR_MIN_CONF=${RELAY_LPR_MIN_CONF:-}
+      # Experimental NVENC transcode-live: for the named DVR (numeric id or its
+      # LAN IP, e.g. 192.168.0.169), HD channels pull ONLY the main stream and the
+      # relay GPU-downscales it for the live grid — halving DVR connections. Empty
+      # = off. Requires RELAY_RUNTIME=nvidia + NVIDIA_VISIBLE_DEVICES below.
+      - RELAY_TRANSCODE_DVR=${RELAY_TRANSCODE_DVR:-}
+      # Exposed to the container only when RELAY_RUNTIME=nvidia. Set to "all" (or a
+      # GPU UUID) in relay/.env; capabilities need video+compute for NVENC+CUDA.
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-}
+      - NVIDIA_DRIVER_CAPABILITIES=${NVIDIA_DRIVER_CAPABILITIES:-all}
     volumes:
       - relay-data:/data
       # Recordings live here. Default = a docker volume; on Unraid set
