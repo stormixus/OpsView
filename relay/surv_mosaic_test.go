@@ -101,3 +101,12 @@ func TestEvenDown(t *testing.T) {
 		}
 	}
 }
+
+func TestMosaicSig(t *testing.T) {
+	if mosaicSig([]string{"dvr1_ch1", "dvr1_ch2"}) != "dvr1_ch1,dvr1_ch2" {
+		t.Fatal("sig should join ids with commas")
+	}
+	if mosaicSig(nil) != "" {
+		t.Fatal("empty sig for no inputs")
+	}
+}

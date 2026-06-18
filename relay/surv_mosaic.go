@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"sort"
@@ -140,3 +142,91 @@ func mosaicArgs(inputURLs []string, rows, cols, cellW, cellH, fps int) []string 
 	)
 	return args
 }
+
+type mosaicCell struct {
+	I    int    `json:"i"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type mosaicState struct {
+	sig        string
+	rows, cols int
+	fps        int
+	cells      []mosaicCell
+	cancel     context.CancelFunc
+}
+
+func mosaicSig(ids []string) string { return strings.Join(ids, ",") }
+
+// EnsureMosaic (re)builds the agent's live-wall composite to match its current
+// channel set. Idempotent: a no-op when nothing changed, a restart when the set
+// changed, a no-op when there are no base channels.
+func (sp *SurvProxy) EnsureMosaic(agentID string) {
+	stats := sp.StreamStats()
+	ids := mosaicInputIDs(stats)
+	if len(ids) == 0 {
+		sp.stopMosaic()
+		return
+	}
+	sig := mosaicSig(ids)
+
+	sp.mu.Lock()
+	if sp.mosaic != nil && sp.mosaic.sig == sig {
+		sp.mu.Unlock()
+		return // already running with this exact channel set
+	}
+	// (re)build: drop any prior mosaic + wall entry first
+	if sp.mosaic != nil && sp.mosaic.cancel != nil {
+		sp.mosaic.cancel()
+	}
+	if e, ok := sp.streams["wall"]; ok {
+		sp.stopEntryLocked(e)
+		delete(sp.streams, "wall")
+	}
+
+	rows, cols := mosaicLayout(len(ids))
+	w, h := wallDims()
+	fps := wallFPS()
+	cellW := evenDown(w / cols)
+	cellH := evenDown(h / rows)
+
+	inputs := make([]string, len(ids))
+	cells := make([]mosaicCell, len(ids))
+	nameByID := map[string]string{}
+	for _, s := range stats {
+		nameByID[s.ID] = s.Name
+	}
+	for i, id := range ids {
+		inputs[i] = relaySelfHLSBase() + "/surv/" + streamPath(agentID, id) + "/index.m3u8"
+		cells[i] = mosaicCell{I: i, ID: id, Name: nameByID[id]}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	entry := &streamEntry{id: "wall", name: "wall", wsHub: newSurvWSHub(), cancel: cancel, proxy: sp}
+	sp.streams["wall"] = entry
+	sp.mosaic = &mosaicState{sig: sig, rows: rows, cols: cols, fps: fps, cells: cells, cancel: cancel}
+	sp.mu.Unlock()
+
+	go entry.superviseEncode(ctx, mosaicArgs(inputs, rows, cols, cellW, cellH, fps))
+	go sp.reapMosaicWhenIdle("wall")
+	log.Printf("[mosaic] %s: wall %dx%d (%d ch) <- self-HLS", agentID, rows, cols, len(ids))
+}
+
+// stopMosaic cancels and removes a running wall.
+func (sp *SurvProxy) stopMosaic() {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if sp.mosaic != nil && sp.mosaic.cancel != nil {
+		sp.mosaic.cancel()
+	}
+	sp.mosaic = nil
+	if e, ok := sp.streams["wall"]; ok {
+		sp.stopEntryLocked(e)
+		delete(sp.streams, "wall")
+	}
+}
+
+// reapMosaicWhenIdle is implemented in Task 6 (idle reaper). Temporary stub so
+// this task builds; replaced next task.
+func (sp *SurvProxy) reapMosaicWhenIdle(id string) {}

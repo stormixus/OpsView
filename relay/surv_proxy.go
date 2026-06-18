@@ -73,6 +73,7 @@ func desiredStreamIDs(channels []proto.ChannelInfo) map[string]bool {
 type SurvProxy struct {
 	mu       sync.RWMutex
 	streams  map[string]*streamEntry // "ch1", "ch2", ...
+	mosaic   *mosaicState            // running live-wall composite, if any (guarded by mu)
 	configMu sync.Mutex              // serializes HandleSurvConfig runs
 }
 
