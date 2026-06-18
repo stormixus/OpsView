@@ -514,18 +514,46 @@ function cellHTML(s){
 // turn; a rotated-out cell freezes its last frame instead of going black. An
 // IntersectionObserver excludes scrolled-off cells from the rotation pool.
 var LIVE_CAP_DESKTOP=12, LIVE_CAP_MOBILE=4, ROTATE_DWELL_MS=5000;
+// Zombie-live: a started cell whose feed dies (socket drop or silent stall) is torn
+// down and reconnected with backoff, forever, as long as it should be live — instead
+// of going black and staying black. LIVE_STALL_MS = max gap with no frame progress
+// before we rebuild; WATCHDOG_MS = how often we check.
+var LIVE_STALL_MS=8000, WATCHDOG_MS=3000, LIVE_BACKOFF_MAX=15000;
 function liveCap(){ return _isMobile()?LIVE_CAP_MOBILE:LIVE_CAP_DESKTOP; }
+function _bufEnd(v){ try{ return v.buffered.length? v.buffered.end(v.buffered.length-1):0; }catch(e){ return 0; } }
+function _cellShouldBeLive(cell){ return !!gridSched && !up.open && !!cell && cell._wantLive===true; }
 function _cellPlay(cell){
   if(!cell || cell._player) return;
   var path=cell.dataset.path; if(!path) return;
   var video=cell.querySelector('video'); if(!video) return;
   var wsUrl=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/surv/ws/'+path;
   var hlsUrl=location.origin+'/surv/'+path+'/index.m3u8';
-  cell._player=playWS(video, wsUrl, function(){ playHLS(video, hlsUrl); });
+  cell._liveProg={v:-1, at:Date.now()};
+  cell._player=playWS(video, wsUrl,
+    function(){ playHLS(video, hlsUrl); },   // pre-init: fall back to HLS
+    function(){ _cellReconnect(cell); });    // post-init death: zombie reconnect
   _cellUnfreeze(cell);
+}
+// _cellReconnect tears down a dead live cell and, if it still belongs in the live
+// window, schedules a fresh _cellPlay after an exponential backoff (last frame stays
+// frozen meanwhile). Rotated-out / overlay-covered cells are left to rest.
+function _cellReconnect(cell){
+  if(!cell) return;
+  if(cell._player){ try{ cell._player.close&&cell._player.close(); }catch(e){} cell._player=null; }
+  if(!_cellShouldBeLive(cell)) return;
+  _cellFreeze(cell);
+  var b=cell._liveBackoff||0;
+  cell._liveBackoff = b? Math.min(b*2, LIVE_BACKOFF_MAX) : 1000;
+  if(cell._reconnTimer) clearTimeout(cell._reconnTimer);
+  cell._reconnTimer=setTimeout(function(){
+    cell._reconnTimer=null;
+    if(_cellShouldBeLive(cell) && !cell._player) _cellPlay(cell);
+  }, cell._liveBackoff);
 }
 function _cellStop(cell){
   if(!cell) return;
+  cell._wantLive=false;
+  if(cell._reconnTimer){ clearTimeout(cell._reconnTimer); cell._reconnTimer=null; }
   if(cell._player){ try{ cell._player.close&&cell._player.close(); }catch(e){} cell._player=null; }
   var video=cell.querySelector('video');
   if(video){
@@ -561,12 +589,34 @@ function gridRotate(advance){
   var pool=gridSched.eligible, cap=liveCap();
   if(advance) gridSched.start=nextStart(pool.length, cap, gridSched.start);
   var liveSet=new Set(); liveWindow(pool.length, cap, gridSched.start).forEach(function(i){ if(pool[i]) liveSet.add(pool[i]); });
-  pool.forEach(function(c){ if(!liveSet.has(c) && c._player){ _cellFreeze(c); _cellStop(c); } });
+  pool.forEach(function(c){
+    var want=liveSet.has(c);
+    c._wantLive=want; // authoritative: drives the watchdog + reconnect gate
+    if(!want){
+      if(c._reconnTimer){ clearTimeout(c._reconnTimer); c._reconnTimer=null; }
+      if(c._player){ _cellFreeze(c); _cellStop(c); }
+    }
+  });
   liveSet.forEach(function(c){ if(!c._player) _cellPlay(c); });
+}
+// gridWatchdog rebuilds any live cell whose feed has frozen — socket still open but
+// no new frames (half-dead connection the onEnd path can't see). Healthy cells reset
+// their backoff so the next real failure retries fast.
+function gridWatchdog(){
+  if(!gridSched || up.open) return;
+  var now=Date.now();
+  gridSched.eligible.forEach(function(c){
+    if(!c._wantLive || !c._player) return;
+    var video=c.querySelector('video'); if(!video) return;
+    var prog=Math.max(video.currentTime||0, _bufEnd(video));
+    var p=c._liveProg||(c._liveProg={v:-1,at:now});
+    if(prog>p.v+0.01){ p.v=prog; p.at=now; c._liveBackoff=0; }
+    else if(now-p.at>LIVE_STALL_MS){ p.at=now; _cellReconnect(c); }
+  });
 }
 function startLiveGrid(cells){
   stopGridSched();
-  gridSched={ eligible:[], start:0, timer:null, obs:null };
+  gridSched={ eligible:[], start:0, timer:null, wd:null, obs:null };
   // Track on-screen cells for ALL platforms now: the pool is whatever's visible, and
   // rotation caps concurrent decoders within it.
   gridSched.obs=new IntersectionObserver(function(entries){
@@ -579,13 +629,32 @@ function startLiveGrid(cells){
     gridRotate(false); // re-evaluate the live window immediately on a visibility change
   }, {rootMargin:'100px'});
   cells.forEach(function(c){ gridSched.obs.observe(c); });
-  gridSched.timer=setInterval(function(){ gridRotate(true); }, ROTATE_DWELL_MS);
+  // Background tabs are throttled hard; skip ticking there and let _installGridResume
+  // kick a fresh pass on return instead of churning reconnects in the background.
+  gridSched.timer=setInterval(function(){ if(!document.hidden) gridRotate(true); }, ROTATE_DWELL_MS);
+  gridSched.wd=setInterval(function(){ if(!document.hidden) gridWatchdog(); }, WATCHDOG_MS);
+  _installGridResume();
 }
 function stopGridSched(){
   if(!gridSched) return;
   if(gridSched.timer) clearInterval(gridSched.timer);
+  if(gridSched.wd) clearInterval(gridSched.wd);
   if(gridSched.obs){ try{ gridSched.obs.disconnect(); }catch(e){} }
   gridSched=null;
+}
+// On tab re-show / network recovery, reset backoffs and immediately re-evaluate the
+// grid so a long-idle viewer snaps back to live (and the Ops snapshot refreshes)
+// instead of waiting out a backoff or a stale poll. Installed once.
+var _gridResumeInstalled=false;
+function _installGridResume(){
+  if(_gridResumeInstalled) return; _gridResumeInstalled=true;
+  function kick(){
+    if(!gridSched || up.open) return;
+    gridSched.eligible.forEach(function(c){ c._liveBackoff=0; if(c._reconnTimer){ clearTimeout(c._reconnTimer); c._reconnTimer=null; } });
+    gridRotate(false); gridWatchdog();
+  }
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden){ kick(); if(typeof refreshOpsSnap==='function') refreshOpsSnap(); } });
+  window.addEventListener('online', kick);
 }
 // suspendLiveGrid frees every grid decoder (freezing each cell's last frame) when the
 // player overlay opens over the grid; gridRotate stays a no-op until it closes.
@@ -613,19 +682,25 @@ function _msCtor(){
 function _wsUsable(){ return !!_msCtor(); }
 function _hx(n){ return (n<16?'0':'')+n.toString(16); }
 function codecFromInit(d){ for(var i=0;i+8<d.length;i++){ if(d[i]===0x61&&d[i+1]===0x76&&d[i+2]===0x63&&d[i+3]===0x43) return 'avc1.'+_hx(d[i+5])+_hx(d[i+6])+_hx(d[i+7]); } return null; }
-function playWS(video, wsUrl, onFail){
+// playWS(video, wsUrl, onFail, onEnd): onFail fires when the stream never starts
+// (pre-init) so the caller can fall back to HLS; onEnd fires when a live stream
+// that HAD started later dies (socket close/error/decode error) so the caller can
+// reconnect ("zombie" live). A deliberate close() suppresses both.
+function playWS(video, wsUrl, onFail, onEnd){
   var MS=_msCtor();
   if(!MS){ onFail&&onFail(); return null; }
   var managed=(typeof window.ManagedMediaSource!=='undefined' && MS===window.ManagedMediaSource);
-  var ms=new MS(), sb=null, ws=null, gotInit=false, failed=false, q=[], srcEl=null, objUrl=URL.createObjectURL(ms);
+  var ms=new MS(), sb=null, ws=null, gotInit=false, closed=false, q=[], srcEl=null, objUrl=URL.createObjectURL(ms);
   function cleanup(){
     try{ws&&ws.close();}catch(e){}
     try{if(ms.readyState==='open')ms.endOfStream();}catch(e){}
     try{if(srcEl&&srcEl.parentNode)srcEl.parentNode.removeChild(srcEl);}catch(e){}
     try{URL.revokeObjectURL(objUrl);}catch(e){}
   }
-  function fail(){ if(failed)return; failed=true; clearTimeout(tm); cleanup(); onFail&&onFail(); }
-  function flush(){ if(!sb||sb.updating||!q.length)return; try{sb.appendBuffer(q.shift());}catch(err){ if(err&&err.name==='QuotaExceededError'){ try{ if(sb.buffered.length){var e=sb.buffered.end(sb.buffered.length-1); if(e>8)sb.remove(0,e-4);} }catch(e2){} } else fail(); } }
+  function fail(){ if(closed)return; closed=true; clearTimeout(tm); cleanup(); onFail&&onFail(); }
+  function end(){ if(closed)return; closed=true; clearTimeout(tm); cleanup(); onEnd&&onEnd(); }
+  function die(){ if(gotInit) end(); else fail(); } // post-init death -> reconnect; pre-init -> HLS
+  function flush(){ if(!sb||sb.updating||!q.length)return; try{sb.appendBuffer(q.shift());}catch(err){ if(err&&err.name==='QuotaExceededError'){ try{ if(sb.buffered.length){var e=sb.buffered.end(sb.buffered.length-1); if(e>8)sb.remove(0,e-4);} }catch(e2){} } else die(); } }
   // ManagedMediaSource (iOS) must attach via a <source> child + disableRemotePlayback;
   // classic MediaSource attaches via video.src.
   if(managed){ video.disableRemotePlayback=true; srcEl=document.createElement('source'); srcEl.type='video/mp4'; srcEl.src=objUrl; video.appendChild(srcEl); }
@@ -634,20 +709,20 @@ function playWS(video, wsUrl, onFail){
   ms.addEventListener('sourceopen', function(){
     try{ ws=new WebSocket(wsUrl); }catch(e){ fail(); return; }
     ws.binaryType='arraybuffer';
-    ws.onmessage=function(ev){ if(failed)return; var data=new Uint8Array(ev.data);
+    ws.onmessage=function(ev){ if(closed)return; var data=new Uint8Array(ev.data);
       if(!gotInit){ gotInit=true; clearTimeout(tm); var codec=codecFromInit(data); var mime=codec?'video/mp4; codecs="'+codec+'"':'';
         if(!codec||!MS.isTypeSupported(mime)){ fail(); return; }
         try{ sb=ms.addSourceBuffer(mime); }catch(e){ fail(); return; }
         sb.mode='sequence';
         sb.addEventListener('updateend', function(){ flush(); video.play().catch(function(){}); });
-        sb.addEventListener('error', fail);
+        sb.addEventListener('error', die);
       }
       q.push(data); flush();
     };
-    ws.onerror=fail; ws.onclose=function(){ if(!gotInit) fail(); };
+    ws.onerror=die; ws.onclose=die;
   });
   video.play().catch(function(){});
-  return {close:cleanup};
+  return {close:function(){ if(closed)return; closed=true; clearTimeout(tm); cleanup(); }};
 }
 function playHLS(video, hlsUrl){ if(video.canPlayType('application/vnd.apple.mpegurl')){ video.src=hlsUrl; video.play().catch(function(){}); } }
 function liveCellHTML(s){
@@ -1126,8 +1201,21 @@ function upStartLive(){
   var wsPath = liveWsPath(up.path, up.hires, up.hdOn);
   var wsUrl=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/surv/ws/'+wsPath;
   var hlsUrl=location.origin+'/surv/'+up.path+'/index.m3u8';
-  up.player=playWS(upVideo, wsUrl, function(){ playHLS(upVideo, hlsUrl); });
+  up._liveProg={v:-1, at:Date.now()};
+  up.player=playWS(upVideo, wsUrl,
+    function(){ playHLS(upVideo, hlsUrl); },
+    function(){ upLiveReconnect(); });
   upSyncLiveWindow(); upEnsureTimeline(true); clearTimeout(up._liveTimer); upLiveTick();
+}
+// Zombie-live for the fullscreen single view: a dead live feed is rebuilt with
+// backoff as long as the player is open and still in LIVE mode (switching to REC or
+// closing cancels it via upStopVideo).
+function upLiveReconnect(){
+  if(up.player){ try{ up.player.close&&up.player.close(); }catch(e){} up.player=null; }
+  if(!up.open || up.mode!=='live') return;
+  var b=up._liveBackoff||0; up._liveBackoff = b? Math.min(b*2, LIVE_BACKOFF_MAX) : 1000;
+  clearTimeout(up._liveReconn);
+  up._liveReconn=setTimeout(function(){ up._liveReconn=null; if(up.open && up.mode==='live') upStartLive(); }, up._liveBackoff);
 }
 function upStopVideo(){
   // stop the rec loop too: it reads upVideo.currentTime to drive cursorT, and a
@@ -1135,6 +1223,7 @@ function upStopVideo(){
   // to the old segment during a seek (the "rail goes then comes back" glitch).
   if(up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
   if(up._skipAnim){ cancelAnimationFrame(up._skipAnim); up._skipAnim=null; }
+  if(up._liveReconn){ clearTimeout(up._liveReconn); up._liveReconn=null; }
   if(up.player){ try{ up.player.close&&up.player.close(); }catch(e){} up.player=null; }
   upVideo.onended=null; upVideo.onloadedmetadata=null;
   try{ upVideo.pause(); upVideo.removeAttribute('src'); upVideo.load(); }catch(e){}
@@ -1373,6 +1462,14 @@ upEl.addEventListener('mouseleave', function(){ if(up.mode!=='rec') upRail.class
 function upLiveTick(){
   if(!up.open || up.mode!=='live') return;
   upSyncLiveWindow(); upEnsureTimeline(); upRenderRail();
+  // single-view stall watchdog: rebuild a frozen live feed (socket still open, no
+  // new frames), and reset the backoff while it's healthy so failures retry fast.
+  if(up.player && upVideo){
+    var prog=Math.max(upVideo.currentTime||0, _bufEnd(upVideo));
+    var p=up._liveProg||(up._liveProg={v:-1,at:Date.now()});
+    if(prog>p.v+0.01){ p.v=prog; p.at=Date.now(); up._liveBackoff=0; }
+    else if(Date.now()-p.at>LIVE_STALL_MS){ p.at=Date.now(); upLiveReconnect(); }
+  }
   up._liveTimer=setTimeout(upLiveTick,1000);
 }
 
