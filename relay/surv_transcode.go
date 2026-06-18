@@ -183,6 +183,12 @@ func transcodeArgs(srcHLSURL string) []string {
 // superviseTranscode runs ffmpeg and restarts it (with backoff) until ctx is
 // cancelled, feeding its Annex-B stdout into the channel's WS hub.
 func (e *streamEntry) superviseTranscode(ctx context.Context, srcHLSURL string) {
+	e.superviseEncode(ctx, transcodeArgs(srcHLSURL))
+}
+
+// superviseEncode runs ffmpeg with the given args, feeding its Annex-B stdout into
+// the channel's WS hub, and restarts it with backoff until ctx is cancelled.
+func (e *streamEntry) superviseEncode(ctx context.Context, args []string) {
 	backoff := 3 * time.Second
 	for {
 		select {
@@ -191,20 +197,18 @@ func (e *streamEntry) superviseTranscode(ctx context.Context, srcHLSURL string) 
 		default:
 		}
 		started := time.Now()
-		cmd := exec.CommandContext(ctx, "ffmpeg", transcodeArgs(srcHLSURL)...)
+		cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 		stdout, err := cmd.StdoutPipe()
 		if err == nil {
 			if err = cmd.Start(); err == nil {
-				e.ingestAnnexB(stdout) // blocks until the pipe closes
+				e.ingestAnnexB(stdout)
 				err = cmd.Wait()
 			}
 		}
 		if ctx.Err() != nil {
 			return
 		}
-		log.Printf("[transcode] %s: ffmpeg exited (%v) — restarting in %s", e.id, err, backoff)
-		// A long, healthy run before exit resets the backoff so a transient blip
-		// doesn't slow future recovery.
+		log.Printf("[encode] %s: ffmpeg exited (%v) — restarting in %s", e.id, err, backoff)
 		if time.Since(started) > 30*time.Second {
 			backoff = 3 * time.Second
 		}
