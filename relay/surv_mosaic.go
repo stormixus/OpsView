@@ -229,6 +229,19 @@ func (sp *SurvProxy) stopMosaic() {
 	}
 }
 
+// WallLayout snapshots the running mosaic's grid shape and ordered cells, so a
+// client can place a click-target overlay that lines up with the composited
+// tiles. ok is false when no mosaic is running.
+func (sp *SurvProxy) WallLayout() (rows, cols, fps int, cells []mosaicCell, ok bool) {
+	sp.mu.RLock()
+	defer sp.mu.RUnlock()
+	if sp.mosaic == nil {
+		return 0, 0, 0, nil, false
+	}
+	m := sp.mosaic
+	return m.rows, m.cols, m.fps, m.cells, true
+}
+
 // reapMosaicWhenIdle stops the wall after a grace period with no WS watchers, so
 // the GPU is idle when nobody is looking. Exits once it stops the mosaic (a new
 // viewer lazy-restarts it).

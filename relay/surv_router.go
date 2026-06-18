@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 )
@@ -50,4 +51,42 @@ func (h *Hub) ServeSurvWS(w http.ResponseWriter, r *http.Request) {
 	r2 := r.Clone(r.Context())
 	r2.URL.Path = "/surv/ws/" + rest
 	s.survProxy.ServeWS(w, r2)
+}
+
+// ServeWallLayout returns the live-wall grid layout as JSON for a client's
+// click-target overlay (ungated, same as the wall WS/HLS surface):
+// GET /surv/walllayout?agent=<id>. Triggers EnsureMosaic so the layout reflects
+// the running composite; returns {"enabled":false} when RELAY_WALL is off.
+func (h *Hub) ServeWallLayout(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+	agent := r.URL.Query().Get("agent")
+	s := h.sessionByID(agent)
+	if s == nil {
+		s = h.defaultSession()
+	}
+	if s == nil {
+		http.Error(w, "no such agent", http.StatusNotFound)
+		return
+	}
+	out := struct {
+		Enabled bool         `json:"enabled"`
+		Rows    int          `json:"rows"`
+		Cols    int          `json:"cols"`
+		FPS     int          `json:"fps"`
+		Cells   []mosaicCell `json:"cells"`
+	}{}
+	if !wallEnabled() {
+		json.NewEncoder(w).Encode(out) // enabled:false
+		return
+	}
+	out.Enabled = true
+	if agent == "" {
+		agent = "default"
+	}
+	s.survProxy.EnsureMosaic(agent)
+	if rows, cols, fps, cells, ok := s.survProxy.WallLayout(); ok {
+		out.Rows, out.Cols, out.FPS, out.Cells = rows, cols, fps, cells
+	}
+	json.NewEncoder(w).Encode(out)
 }

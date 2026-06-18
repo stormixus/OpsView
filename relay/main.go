@@ -46,7 +46,8 @@ func runServer() (stop func()) {
 	mux.HandleFunc("/api/surv", hub.HandleSurvConfig)
 	mux.HandleFunc("/api/surv/streams", hub.HandleSurvStreams)
 	mux.HandleFunc("/api/snapshot", hub.HandleSnapshot)
-	mux.HandleFunc("/surv/ws/", hub.ServeSurvWS) // fMP4-over-WebSocket (more specific than /surv/)
+	mux.HandleFunc("/surv/walllayout", hub.ServeWallLayout) // live-wall overlay layout (exact path, beats /surv/)
+	mux.HandleFunc("/surv/ws/", hub.ServeSurvWS)            // fMP4-over-WebSocket (more specific than /surv/)
 	mux.HandleFunc("/surv/", hub.ServeSurvHLS)
 	hub.registerDashboard(mux)
 	if cfg.DashboardToken != "" {
