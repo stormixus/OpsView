@@ -110,3 +110,19 @@ func TestSegmentsForExport(t *testing.T) {
 		t.Fatalf("expected nil for empty range, got %+v", got)
 	}
 }
+
+func TestRecordTargetsExcludesWall(t *testing.T) {
+	got := recordTargets([]string{"dvr1_ch1", "wall", "SM-Boutique/wall", "SM-Boutique/dvr1_ch2"})
+	if _, ok := got["wall"]; ok {
+		t.Error("wall (live-only mosaic) must not be a record target")
+	}
+	if _, ok := got["SM-Boutique/wall"]; ok {
+		t.Error("agent-prefixed wall must not be a record target")
+	}
+	if got["dvr1_ch1"] != "dvr1_ch1" {
+		t.Errorf("normal channel should record itself, got %q", got["dvr1_ch1"])
+	}
+	if got["SM-Boutique/dvr1_ch2"] != "SM-Boutique/dvr1_ch2" {
+		t.Errorf("agent-prefixed channel should record itself, got %q", got["SM-Boutique/dvr1_ch2"])
+	}
+}
