@@ -54,6 +54,12 @@ services:
       # relay GPU-downscales it for the live grid — halving DVR connections. Empty
       # = off. Requires RELAY_RUNTIME=nvidia + NVIDIA_VISIBLE_DEVICES below.
       - RELAY_TRANSCODE_DVR=${RELAY_TRANSCODE_DVR:-}
+      # Experimental live wall: relay GPU-composites all of an agent's channels
+      # into ONE stream at /dashboard/wall (viewer decodes 1 video — no browser
+      # decoder cap). Requires RELAY_RUNTIME=nvidia + NVIDIA_VISIBLE_DEVICES.
+      - RELAY_WALL=${RELAY_WALL:-}
+      - RELAY_WALL_RES=${RELAY_WALL_RES:-1080p}
+      - RELAY_WALL_FPS=${RELAY_WALL_FPS:-15}
       # Exposed to the container only when RELAY_RUNTIME=nvidia. Set to "all" (or a
       # GPU UUID) in relay/.env; capabilities need video+compute for NVENC+CUDA.
       - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-}
