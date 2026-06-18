@@ -114,6 +114,22 @@
       width: calc(25% - 1.51px);
     }
 
+    /* === Relay live wall (GPU mosaic) === */
+    /* The wrap is locked to the mosaic's 16:9 and centered; the video fills it
+       (object-fit:fill, no letterbox bars) so the 1fr overlay cells sit exactly on
+       the composited tiles. */
+    .cctv-grid.cctv-wall { display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+    .wall-wrap { position: relative; aspect-ratio: 16 / 9; max-width: 100%; max-height: 100%; background: #000; border-radius: 6px; overflow: hidden; }
+    .wall-video { width: 100%; height: 100%; object-fit: fill; background: #000; display: block; }
+    .wall-overlay { position: absolute; inset: 0; display: grid; pointer-events: none; }
+    .wall-cell { pointer-events: auto; border: 1px solid rgba(255,255,255,0.05); position: relative; cursor: pointer; }
+    .wall-cell:hover { border-color: rgba(80,160,255,0.7); background: rgba(80,160,255,0.10); }
+    .wall-cell-name { position: absolute; left: 5px; bottom: 5px; font-size: 11px; color: #fff; text-shadow: 0 1px 3px #000; background: rgba(0,0,0,0.45); padding: 1px 5px; border-radius: 3px; pointer-events: none; max-width: 92%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .wall-expand { position: fixed; inset: 0; background: #000; z-index: 1000; display: flex; }
+    .wall-expand video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+    .wall-expand-bar { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; color: #fff; background: linear-gradient(rgba(0,0,0,0.6), transparent); }
+    .wall-expand-bar button { background: rgba(0,0,0,0.4); color: #fff; border: 0; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 15px; }
+
     /* === CCTV Cell === */
     .cctv-cell {
       position: relative; 
@@ -2559,6 +2575,131 @@
       }, 12000);
     }
 
+    // === Relay live wall (GPU mosaic) ===
+    // One composited stream from the relay replaces N per-channel decodes, so weak
+    // viewers (e.g. the N100) show every camera instantly instead of choking on 30+
+    // simultaneous H.264 decoders — the relay does decode+compose+encode on its GPU.
+    let wallPlayerState = null, wallExpandState = null;
+
+    function wallBufEnd(v) {
+      try { return v.buffered.length ? v.buffered.end(v.buffered.length - 1) : 0; } catch (e) { return 0; }
+    }
+
+    // fetchWallLayout caches the relay's mosaic layout (grid shape + ordered cells)
+    // so the overlay's click targets line up exactly with the composited tiles.
+    async function fetchWallLayout(dvr) {
+      const { ip, port, scheme } = resolveRelayHLSEndpoint(dvr);
+      const aid = window.survRemoteConfig && window.survRemoteConfig.agent_id;
+      const scopeKey = aid || '';
+      const q = aid ? '?agent=' + encodeURIComponent(aid) : '';
+      let layout;
+      try {
+        const r = await fetch(scheme + '://' + ip + ':' + port + '/surv/walllayout' + q);
+        layout = await r.json();
+      } catch (e) {
+        layout = { enabled: false };
+      }
+      layout._scope = scopeKey;
+      window._wallLayout = layout;
+      return layout;
+    }
+
+    function teardownWall() {
+      if (wallPlayerState) { try { wallPlayerState.close(); } catch (e) {} wallPlayerState = null; }
+      closeWallExpand();
+    }
+
+    // startWallPlayer plays the wall WS stream with forever-reconnect + a stall
+    // watchdog (rebuild a frozen feed), so the wall self-heals like the per-cell grid.
+    function startWallPlayer(video, wsUrl) {
+      teardownWall();
+      let player = null, backoff = 0, reconnTimer = null, lastT = -1, lastAt = Date.now();
+      const play = () => {
+        if (player) { try { player.close(); } catch (e) {} player = null; }
+        player = playRelayCCTVWS(video, wsUrl, () => schedule());
+      };
+      const schedule = () => {
+        backoff = backoff ? Math.min(backoff * 2, 15000) : 1000;
+        clearTimeout(reconnTimer); reconnTimer = setTimeout(play, backoff);
+      };
+      const watchdog = setInterval(() => {
+        const t = Math.max(video.currentTime || 0, wallBufEnd(video));
+        if (t > lastT + 0.01) { lastT = t; lastAt = Date.now(); backoff = 0; }
+        else if (Date.now() - lastAt > 8000) { lastAt = Date.now(); play(); }
+      }, 3000);
+      wallPlayerState = {
+        close() {
+          clearTimeout(reconnTimer); clearInterval(watchdog);
+          if (player) { try { player.close(); } catch (e) {} player = null; }
+        }
+      };
+      play();
+    }
+
+    function renderRelayWall(dvr, grid, layout) {
+      grid.classList.remove('grid-2', 'grid-3', 'grid-4');
+      grid.classList.add('cctv-wall');
+      const { ip, port, scheme } = resolveRelayHLSEndpoint(dvr);
+      const aid = window.survRemoteConfig && window.survRemoteConfig.agent_id;
+      const scope = aid ? encodeURIComponent(aid) + '/' : '';
+      const wsUrl = (scheme === 'https' ? 'wss' : 'ws') + '://' + ip + ':' + port + '/surv/ws/' + scope + 'wall';
+
+      grid.innerHTML = '<div class="wall-wrap"><video class="wall-video" autoplay muted playsinline></video><div class="wall-overlay"></div></div>';
+      const video = grid.querySelector('.wall-video');
+      const overlay = grid.querySelector('.wall-overlay');
+      overlay.style.gridTemplateColumns = 'repeat(' + layout.cols + ',1fr)';
+      overlay.style.gridTemplateRows = 'repeat(' + layout.rows + ',1fr)';
+      (layout.cells || []).forEach(c => {
+        const btn = document.createElement('div');
+        btn.className = 'wall-cell';
+        const nm = document.createElement('span');
+        nm.className = 'wall-cell-name';
+        nm.textContent = c.name || c.id;
+        btn.appendChild(nm);
+        btn.addEventListener('dblclick', () => expandWallChannel(dvr, c));
+        overlay.appendChild(btn);
+      });
+      startWallPlayer(video, wsUrl);
+    }
+
+    function expandWallChannel(dvr, cell) {
+      const m = /^dvr(\d+)_ch(\d+)$/.exec(cell.id || '');
+      if (!m) return;
+      openWallExpand(dvr, parseInt(m[1]), parseInt(m[2]), cell.name || cell.id);
+    }
+
+    function openWallExpand(dvr, streamDvrId, chNum, name) {
+      closeWallExpand();
+      const { ip, port, scheme } = resolveRelayHLSEndpoint(dvr);
+      const ov = document.createElement('div');
+      ov.className = 'wall-expand';
+      const v = document.createElement('video');
+      v.autoplay = true; v.muted = true; v.playsInline = true;
+      const bar = document.createElement('div');
+      bar.className = 'wall-expand-bar';
+      const label = document.createElement('span');
+      label.textContent = name + ' (CH' + chNum + ')';
+      const closeBtn = document.createElement('button');
+      closeBtn.textContent = '✕';
+      bar.appendChild(label); bar.appendChild(closeBtn);
+      ov.appendChild(v); ov.appendChild(bar);
+      document.body.appendChild(ov);
+      playRelayCCTV(v, scheme, ip, port, streamDvrId, chNum);
+      const onKey = (e) => { if (e.key === 'Escape') closeWallExpand(); };
+      document.addEventListener('keydown', onKey);
+      closeBtn.onclick = () => closeWallExpand();
+      ov.addEventListener('dblclick', (e) => { if (e.target === ov || e.target === v) closeWallExpand(); });
+      wallExpandState = { el: ov, onKey, video: v };
+    }
+
+    function closeWallExpand() {
+      if (!wallExpandState) return;
+      const s = wallExpandState; wallExpandState = null;
+      document.removeEventListener('keydown', s.onKey);
+      teardownCellPlayer(s.video);
+      if (s.el && s.el.parentNode) s.el.parentNode.removeChild(s.el);
+    }
+
     function renderCCTVGrid(dvr) {
       const grid = document.getElementById('cctvGrid');
       cctvRenderedDvrId = dvr ? dvr.id : null;
@@ -2568,6 +2709,8 @@
       gridCtx = null;
       collapseCell(true);
       cleanupAllStreams(true);
+      teardownWall(); // tear down any prior live-wall player before re-rendering
+      grid.classList.remove('cctv-wall');
       if (sortableInstance) { sortableInstance.destroy(); sortableInstance = null; }
 
       const enabled = cctvChannels.filter(ch => ch.enabled);
@@ -2587,6 +2730,23 @@
 
       const useRelayHLS = shouldUseRelayHLS(dvr);
       const streamDvrId = relayStreamDvrId(dvr);
+
+      // Relay live wall: one GPU-composited stream replaces N per-channel decodes
+      // (weak clients choke on 30+ concurrent decoders). Falls back to the
+      // per-channel grid when the relay has no wall (RELAY_WALL off).
+      if (useRelayHLS) {
+        const scopeKey = (window.survRemoteConfig && window.survRemoteConfig.agent_id) || '';
+        const wl = window._wallLayout;
+        if (wl && wl._scope === scopeKey) {
+          if (wl.enabled && wl.cells && wl.cells.length) { renderRelayWall(dvr, grid, wl); return; }
+          // wall disabled on the relay -> fall through to the per-channel grid below
+        } else {
+          grid.innerHTML = '<div class="cctv-no-channels">Wall…</div>';
+          const rid = dvr ? dvr.id : null;
+          fetchWallLayout(dvr).then(() => { if (cctvRenderedDvrId === rid) renderCCTVGrid(dvr); });
+          return;
+        }
+      }
 
       enabled.forEach(ch => {
         const cell = document.createElement('div');
@@ -3843,6 +4003,7 @@
       if (!cfg) return;
       console.log('[surv] remote config:', cfg.dvrs?.length, 'DVRs,', cfg.channels?.length, 'channels');
       window.survRemoteConfig = cfg;
+      window._wallLayout = null; // channel set may have changed -> re-fetch wall layout on next render
 
       const remoteDvrs = [];
       let localAdded = false;
