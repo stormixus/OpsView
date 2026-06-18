@@ -95,9 +95,14 @@ func TestMosaicArgs(t *testing.T) {
 	if !strings.Contains(joined, "-i http://a/0.m3u8") || !strings.Contains(joined, "-i http://a/1.m3u8") {
 		t.Fatalf("missing inputs: %s", joined)
 	}
-	// per-input scale+pad+tpad and a 2-up xstack at x offsets 0 and 640
-	if !strings.Contains(joined, "scale=640:360") || !strings.Contains(joined, "tpad=stop=-1:stop_mode=clone") {
-		t.Fatalf("missing scale/tpad: %s", joined)
+	// per-input cover (scale-up + center-crop, no letterbox) + tpad, 2-up xstack
+	if !strings.Contains(joined, "scale=640:360:force_original_aspect_ratio=increase") ||
+		!strings.Contains(joined, "crop=640:360") ||
+		!strings.Contains(joined, "tpad=stop=-1:stop_mode=clone") {
+		t.Fatalf("missing cover scale/crop/tpad: %s", joined)
+	}
+	if strings.Contains(joined, "pad=640:360") {
+		t.Fatalf("should fill (crop), not letterbox (pad): %s", joined)
 	}
 	if !strings.Contains(joined, "xstack=inputs=2:layout=0_0|640_0") {
 		t.Fatalf("missing/incorrect xstack layout: %s", joined)

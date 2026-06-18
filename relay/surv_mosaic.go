@@ -117,8 +117,11 @@ func mosaicArgs(inputURLs []string, rows, cols, cellW, cellH, fps int) []string 
 	}
 	var fc strings.Builder
 	for i := range inputURLs {
+		// Fill the cell ("cover"): scale up to cover cellWxcellH preserving aspect,
+		// then center-crop the overflow — no black letterbox bars, no distortion
+		// (a sliver of the edges is cropped instead).
 		fmt.Fprintf(&fc,
-			"[%d:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%d,tpad=stop=-1:stop_mode=clone,setsar=1[v%d];",
+			"[%d:v]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,fps=%d,tpad=stop=-1:stop_mode=clone,setsar=1[v%d];",
 			i, cellW, cellH, cellW, cellH, fps, i)
 	}
 	for i := range inputURLs {
