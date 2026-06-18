@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"reflect"
 	"testing"
 )
@@ -31,4 +32,41 @@ func TestMosaicInputIDs(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("mosaicInputIDs = %v, want %v (numeric ch sort, no @main/wall)", got, want)
 	}
+}
+
+func TestWallEnv(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		os.Unsetenv("RELAY_WALL")
+		os.Unsetenv("RELAY_WALL_RES")
+		os.Unsetenv("RELAY_WALL_FPS")
+		if wallEnabled() {
+			t.Fatal("wall should be disabled by default")
+		}
+		if w, h := wallDims(); w != 1920 || h != 1080 {
+			t.Fatalf("default dims = %dx%d, want 1920x1080", w, h)
+		}
+		if wallFPS() != 15 {
+			t.Fatalf("default fps = %d, want 15", wallFPS())
+		}
+	})
+	t.Run("overrides", func(t *testing.T) {
+		t.Setenv("RELAY_WALL", "1")
+		t.Setenv("RELAY_WALL_RES", "720p")
+		t.Setenv("RELAY_WALL_FPS", "10")
+		if !wallEnabled() {
+			t.Fatal("RELAY_WALL=1 should enable")
+		}
+		if w, h := wallDims(); w != 1280 || h != 720 {
+			t.Fatalf("720p dims = %dx%d, want 1280x720", w, h)
+		}
+		if wallFPS() != 10 {
+			t.Fatalf("fps = %d, want 10", wallFPS())
+		}
+	})
+	t.Run("fps clamp", func(t *testing.T) {
+		t.Setenv("RELAY_WALL_FPS", "999")
+		if wallFPS() != 30 {
+			t.Fatalf("fps clamp = %d, want 30", wallFPS())
+		}
+	})
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -63,6 +64,28 @@ func mosaicInputIDs(stats []StreamStat) []string {
 		return out[i] < out[j]
 	})
 	return out
+}
+
+func wallEnabled() bool { return os.Getenv("RELAY_WALL") == "1" }
+
+// wallDims is the mosaic canvas. 720p halves bandwidth (better remote); 1080p is
+// crisper per-tile (LAN). Detail comes from click-to-enlarge regardless.
+func wallDims() (w, h int) {
+	if strings.TrimSpace(os.Getenv("RELAY_WALL_RES")) == "720p" {
+		return 1280, 720
+	}
+	return 1920, 1080
+}
+
+func wallFPS() int {
+	n, err := strconv.Atoi(strings.TrimSpace(os.Getenv("RELAY_WALL_FPS")))
+	if err != nil || n <= 0 {
+		return 15
+	}
+	if n > 30 {
+		return 30
+	}
+	return n
 }
 
 var _ = fmt.Sprintf // retained for later steps in this file
