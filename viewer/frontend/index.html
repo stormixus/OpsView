@@ -2587,11 +2587,15 @@
 
     // fetchWallLayout caches the relay's mosaic layout (grid shape + ordered cells)
     // so the overlay's click targets line up exactly with the composited tiles.
+    function wallIdForDvr(dvr) { return 'walldvr' + relayStreamDvrId(dvr); }
+    function wallScopeKey(dvr) {
+      return ((window.survRemoteConfig && window.survRemoteConfig.agent_id) || '') + '|' + relayStreamDvrId(dvr);
+    }
     async function fetchWallLayout(dvr) {
       const { ip, port, scheme } = resolveRelayHLSEndpoint(dvr);
       const aid = window.survRemoteConfig && window.survRemoteConfig.agent_id;
-      const scopeKey = aid || '';
-      const q = aid ? '?agent=' + encodeURIComponent(aid) : '';
+      const scopeKey = wallScopeKey(dvr);
+      const q = '?agent=' + encodeURIComponent(aid || '') + '&wall=' + encodeURIComponent(wallIdForDvr(dvr));
       let layout;
       try {
         const r = await fetch(scheme + '://' + ip + ':' + port + '/surv/walllayout' + q);
@@ -2642,7 +2646,7 @@
       const { ip, port, scheme } = resolveRelayHLSEndpoint(dvr);
       const aid = window.survRemoteConfig && window.survRemoteConfig.agent_id;
       const scope = aid ? encodeURIComponent(aid) + '/' : '';
-      const wsUrl = (scheme === 'https' ? 'wss' : 'ws') + '://' + ip + ':' + port + '/surv/ws/' + scope + 'wall';
+      const wsUrl = (scheme === 'https' ? 'wss' : 'ws') + '://' + ip + ':' + port + '/surv/ws/' + scope + wallIdForDvr(dvr);
 
       grid.innerHTML = '<div class="wall-wrap"><video class="wall-video" autoplay muted playsinline></video><div class="wall-overlay"></div></div>';
       const video = grid.querySelector('.wall-video');
@@ -2735,7 +2739,7 @@
       // (weak clients choke on 30+ concurrent decoders). Falls back to the
       // per-channel grid when the relay has no wall (RELAY_WALL off).
       if (useRelayHLS) {
-        const scopeKey = (window.survRemoteConfig && window.survRemoteConfig.agent_id) || '';
+        const scopeKey = wallScopeKey(dvr); // per-DVR: each tab shows only its cameras
         const wl = window._wallLayout;
         if (wl && wl._scope === scopeKey) {
           if (wl.enabled && wl.cells && wl.cells.length) { renderRelayWall(dvr, grid, wl); return; }
