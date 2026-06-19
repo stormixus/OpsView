@@ -2723,16 +2723,17 @@
     // postWallOrder persists a wall's tile order/membership on the relay, which
     // recomposes the mosaic. Cached per wall id so an unchanged list (e.g. a plain
     // re-render of a group wall) doesn't churn a rebuild — only a real change posts.
-    function postWallOrder(dvr, order, wallId) {
+    function postWallOrder(dvr, order, wallId, cols) {
       wallId = wallId || wallIdForDvr(dvr);
       window._wallGroupCache = window._wallGroupCache || {};
-      const sig = (order || []).join(',');
+      const sig = (order || []).join(',') + '|' + (cols || 0);
       if (window._wallGroupCache[wallId] === sig) return;
       window._wallGroupCache[wallId] = sig;
       const { ip, port, scheme } = resolveRelayHLSEndpoint(dvr);
       const aid = window.survRemoteConfig && window.survRemoteConfig.agent_id;
       const url = scheme + '://' + ip + ':' + port + '/surv/wallorder?agent=' +
-        encodeURIComponent(aid || '') + '&wall=' + encodeURIComponent(wallId);
+        encodeURIComponent(aid || '') + '&wall=' + encodeURIComponent(wallId) +
+        (cols ? '&cols=' + cols : '');
       fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(order || []) })
         .then(() => { window._wallLayout = null; }) // changed -> re-fetch layout next render
         .catch(() => { window._wallGroupCache[wallId] = null; }); // failed -> allow retry
@@ -2746,10 +2747,10 @@
       const sid = relayStreamDvrId(dvr);
       const wallId = 'wallgd' + sid;
       const ids = channels.map(ch => 'dvr' + sid + '_ch' + ch.ch_num);
-      const cols = Math.ceil(Math.sqrt(ids.length));
+      const cols = Math.min(3, ids.length); // collage main grid is 3-wide (matches the old layout)
       const rows = Math.ceil(ids.length / cols);
       const layout = { rows, cols, cells: channels.map((ch, i) => ({ i: i, id: ids[i], name: ch.name })) };
-      postWallOrder(dvr, ids, wallId); // define the group's membership on the relay
+      postWallOrder(dvr, ids, wallId, cols); // define membership + column count on the relay
       renderRelayWall(dvr, grid, layout, wallId);
     }
 
