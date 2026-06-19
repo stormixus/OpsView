@@ -3162,8 +3162,16 @@
           const fit = computeSmartFit(W, H, nLeft, rightCols);
           cols = fit.cols; rows = fit.rows;
         }
-        // Move the divider so the right column is exactly `rightCols` tiles wide.
-        const leftFrac = rightCols > 0 ? cols / (cols + rightCols) : 1;
+        // Size the left region so the wall fills it WITHOUT stretch: width = wall
+        // aspect ((cols*16):(rows*9)) * height. (Per-channel grid keeps the old
+        // cols/(cols+rightCols) divider.) Capped so the right column keeps room.
+        let leftFrac;
+        if (isWall && rightCols > 0) {
+          const mosaicAR = (cols * 16) / (rows * 9);
+          leftFrac = Math.max(0.35, Math.min(0.82, (mosaicAR * H) / W));
+        } else {
+          leftFrac = rightCols > 0 ? cols / (cols + rightCols) : 1;
+        }
         left.style.flexBasis = (leftFrac * 100) + '%';
         const cellH = (H - 2 * pad - (rows - 1) * gap) / rows; // height of one left row
         if (!isWall) {
