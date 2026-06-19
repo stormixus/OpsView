@@ -2646,6 +2646,9 @@
     function teardownWallIn(grid) {
       const v = grid && grid.querySelector('.wall-video');
       if (v && v._wallPlayer) { try { v._wallPlayer.close(); } catch (e) {} v._wallPlayer = null; }
+      if (grid && grid.querySelector('.wall-overlay') && window._wallSortable) {
+        try { window._wallSortable.destroy(); } catch (e) {} window._wallSortable = null;
+      }
       closeWallExpand();
     }
 
@@ -2692,6 +2695,7 @@
       (layout.cells || []).forEach(c => {
         const btn = document.createElement('div');
         btn.className = 'wall-cell';
+        btn.dataset.id = c.id;
         const nm = document.createElement('span');
         nm.className = 'wall-cell-name';
         nm.textContent = c.name || c.id;
@@ -2700,6 +2704,31 @@
         overlay.appendChild(btn);
       });
       startWallPlayer(video, wsUrl);
+
+      // Drag-to-reorder tiles: the wall is ONE relay-composited stream, so the order
+      // lives on the relay — POST the new order and it recomposes the mosaic. `delay`
+      // separates a click/dblclick (expand) from a drag (reorder).
+      if (window._wallSortable) { try { window._wallSortable.destroy(); } catch (e) {} }
+      window._wallSortable = new Sortable(overlay, {
+        animation: 200, draggable: '.wall-cell', delay: 130, delayOnTouchOnly: false,
+        ghostClass: 'sortable-ghost', chosenClass: 'sortable-chosen',
+        onEnd: function () {
+          const order = Array.from(overlay.children).map(el => el.dataset.id).filter(Boolean);
+          postWallOrder(dvr, order);
+        }
+      });
+    }
+
+    // postWallOrder persists the operator's tile order on the relay, which recomposes
+    // the mosaic in that order. The wall video reconnects to the new stream on its own.
+    function postWallOrder(dvr, order) {
+      const { ip, port, scheme } = resolveRelayHLSEndpoint(dvr);
+      const aid = window.survRemoteConfig && window.survRemoteConfig.agent_id;
+      const url = scheme + '://' + ip + ':' + port + '/surv/wallorder?agent=' +
+        encodeURIComponent(aid || '') + '&wall=' + encodeURIComponent(wallIdForDvr(dvr));
+      fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(order) })
+        .then(() => { window._wallLayout = null; }) // order changed -> re-fetch layout next render
+        .catch(() => {});
     }
 
     function expandWallChannel(dvr, cell) {
