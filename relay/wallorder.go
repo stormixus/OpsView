@@ -78,6 +78,48 @@ func getWallCols(key string) int {
 	return wallCols.m[key]
 }
 
+// Per-wall output width + fps overrides (in-memory). The viewer measures its own
+// decode performance and sets these to step the wall's quality up/down so a weak
+// client (e.g. an N100) stops flickering. Not persisted; the viewer re-sends on
+// load (it remembers the converged level in localStorage).
+var wallResW = struct {
+	sync.Mutex
+	m map[string]int
+}{m: map[string]int{}}
+var wallFpsOv = struct {
+	sync.Mutex
+	m map[string]int
+}{m: map[string]int{}}
+
+func setWallResW(key string, w int) {
+	wallResW.Lock()
+	defer wallResW.Unlock()
+	if w > 0 {
+		wallResW.m[key] = w
+	} else {
+		delete(wallResW.m, key)
+	}
+}
+func getWallResW(key string) int {
+	wallResW.Lock()
+	defer wallResW.Unlock()
+	return wallResW.m[key]
+}
+func setWallFpsOv(key string, f int) {
+	wallFpsOv.Lock()
+	defer wallFpsOv.Unlock()
+	if f > 0 {
+		wallFpsOv.m[key] = f
+	} else {
+		delete(wallFpsOv.m, key)
+	}
+}
+func getWallFpsOv(key string) int {
+	wallFpsOv.Lock()
+	defer wallFpsOv.Unlock()
+	return wallFpsOv.m[key]
+}
+
 func setWallCols(key string, cols int) {
 	wallCols.Lock()
 	if cols > 0 {

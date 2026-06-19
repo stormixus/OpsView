@@ -135,11 +135,22 @@ func (h *Hub) ServeWallOrder(w http.ResponseWriter, r *http.Request) {
 		agent = "default"
 	}
 	setWallOrder(wallOrderKey(agent, wallID), ids)
+	wkey := wallOrderKey(agent, wallID)
 	if c := r.URL.Query().Get("cols"); c != "" {
 		if n, err := strconv.Atoi(c); err == nil {
-			setWallCols(wallOrderKey(agent, wallID), n) // 0 clears
+			setWallCols(wkey, n) // 0 clears
 		}
 	}
-	s.survProxy.EnsureMosaic(agent, wallID) // rebuild in the new order
+	if v := r.URL.Query().Get("w"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			setWallResW(wkey, n) // adaptive output width (0 clears -> env default)
+		}
+	}
+	if v := r.URL.Query().Get("fps"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			setWallFpsOv(wkey, n) // adaptive fps (0 clears -> env default)
+		}
+	}
+	s.survProxy.EnsureMosaic(agent, wallID) // rebuild in the new order/quality
 	w.WriteHeader(http.StatusNoContent)
 }
