@@ -2619,7 +2619,24 @@
 
     // fetchWallLayout caches the relay's mosaic layout (grid shape + ordered cells)
     // so the overlay's click targets line up exactly with the composited tiles.
-    function wallIdForDvr(dvr) { return 'walldvr' + relayStreamDvrId(dvr); }
+    // Each wall has a stable uuid (persisted in localStorage), used as its stream id
+    // "wallg<uuid>" — the relay stores the wall's order/columns/membership in SQLite
+    // keyed by that uuid and composes/broadcasts it. roleKey makes one uuid per
+    // (purpose, agent, DVR) so the CCTV-tab wall and the collage grid wall differ.
+    function wallUuid(roleKey) {
+      const k = 'wall_uuid_' + roleKey;
+      let u = localStorage.getItem(k);
+      if (!u) {
+        u = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+          : ('u-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
+        localStorage.setItem(k, u);
+      }
+      return u;
+    }
+    function wallIdForDvr(dvr) {
+      const aid = (window.survRemoteConfig && window.survRemoteConfig.agent_id) || '';
+      return 'wallg' + wallUuid('cctv-' + aid + '-' + relayStreamDvrId(dvr));
+    }
     function wallScopeKey(dvr) {
       return ((window.survRemoteConfig && window.survRemoteConfig.agent_id) || '') + '|' + relayStreamDvrId(dvr);
     }
@@ -2743,15 +2760,23 @@
     // subset) into ONE group wall, so the collage decodes ~1 stream there instead of
     // N. The small overflow cells stay individual. Layout is computed client-side
     // (same ceil(sqrt) the relay uses) so the overlay lines up without a fetch.
-    function renderCollageGridWall(dvr, grid, channels) {
+    // renderGroupWall composites an explicit channel set into ONE wall (uuid-keyed,
+    // membership+columns persisted on the relay) and renders it into grid. Layout is
+    // computed client-side (same ceil(sqrt) the relay uses, or the given cols) so the
+    // overlay lines up without a layout fetch.
+    function renderGroupWall(dvr, grid, channels, wallId, cols) {
       const sid = relayStreamDvrId(dvr);
-      const wallId = 'wallgd' + sid;
       const ids = channels.map(ch => 'dvr' + sid + '_ch' + ch.ch_num);
-      const cols = Math.min(3, ids.length); // collage main grid is 3-wide (matches the old layout)
+      cols = cols || Math.max(1, Math.ceil(Math.sqrt(ids.length)));
       const rows = Math.ceil(ids.length / cols);
       const layout = { rows, cols, cells: channels.map((ch, i) => ({ i: i, id: ids[i], name: ch.name })) };
-      postWallOrder(dvr, ids, wallId, cols); // define membership + column count on the relay
+      postWallOrder(dvr, ids, wallId, cols); // membership + columns on the relay (keyed by the wall uuid)
       renderRelayWall(dvr, grid, layout, wallId);
+    }
+    function renderCollageGridWall(dvr, grid, channels) {
+      const aid = (window.survRemoteConfig && window.survRemoteConfig.agent_id) || '';
+      const wallId = 'wallg' + wallUuid('collage-' + aid + '-' + relayStreamDvrId(dvr));
+      renderGroupWall(dvr, grid, channels, wallId, Math.min(3, channels.length)); // 3-wide collage grid
     }
 
     function expandWallChannel(dvr, cell) {
@@ -2830,7 +2855,7 @@
         const scopeKey = wallScopeKey(dvr); // per-DVR: each tab shows only its cameras
         const wl = window._wallLayout;
         if (wl && wl._scope === scopeKey) {
-          if (wl.enabled && wl.cells && wl.cells.length) { renderRelayWall(dvr, grid, wl); return; }
+          if (wl.enabled) { renderGroupWall(dvr, grid, enabled, wallIdForDvr(dvr)); return; }
           // wall disabled on the relay -> fall through to the per-channel grid below
         } else {
           grid.innerHTML = '<div class="cctv-no-channels">Wall…</div>';
@@ -3440,9 +3465,9 @@
         const scopeKey = wallScopeKey(dvr);
         const wl = window._wallLayout;
         if (wl && wl._scope === scopeKey) {
-          if (wl.enabled && wl.cells && wl.cells.length) {
+          if (wl.enabled) {
             topRow.innerHTML = ''; bottomRow.innerHTML = '';
-            renderRelayWall(dvr, grid, wl);
+            renderGroupWall(dvr, grid, enabled, wallIdForDvr(dvr));
             return; // wall replaces the per-channel grid; no sortable
           }
           // wall disabled on the relay -> fall through to the per-channel grid
