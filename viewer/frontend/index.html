@@ -2782,9 +2782,20 @@
       return isNaN(l) ? 2 : Math.max(0, Math.min(WALL_Q.length - 1, l));
     }
     function setWallQLevel(l) { localStorage.setItem('wall_quality_level', Math.max(0, Math.min(WALL_Q.length - 1, l))); }
-    function applyWallQuality(dvr, wallId) {
+    // postActiveWall (re)posts the active wall's membership + cols + current quality,
+    // ALWAYS with the membership in the body — an empty body only preserves the order
+    // on relays that have the body-optional change; on older relays it would wipe the
+    // wall's channels (blank wall). Cached by set+cols+quality so a pure reorder (drag,
+    // same set) doesn't re-post (preserving it); a set/cols/quality change does.
+    function postActiveWall() {
+      const a = window._activeWall;
+      if (!a) return;
       const q = WALL_Q[wallQLevel()];
-      postWall(dvr, wallId, { w: q.w, fps: q.fps }); // quality only; order/cols untouched
+      window._wallMemberCache = window._wallMemberCache || {};
+      const sig = a.ids.slice().sort().join(',') + '|' + a.cols + '|' + q.w + '|' + q.fps;
+      if (window._wallMemberCache[a.wallId] === sig) return;
+      window._wallMemberCache[a.wallId] = sig;
+      postWall(a.dvr, a.wallId, { order: a.ids, cols: a.cols, w: q.w, fps: q.fps });
     }
     let _wallMon = null;
     function stopWallQualityMonitor() { if (_wallMon) { clearInterval(_wallMon); _wallMon = null; } }
@@ -2809,13 +2820,13 @@
         if (struggling) {
           good = 0;
           if (lvl < WALL_Q.length - 1 && Date.now() - lastChange > 8000) {
-            setWallQLevel(lvl + 1); lastChange = Date.now(); applyWallQuality(dvr, wallId);
+            setWallQLevel(lvl + 1); lastChange = Date.now(); postActiveWall();
             console.log('[wall] quality down ->', WALL_Q[wallQLevel()]);
           }
         } else {
           good++;
           if (good >= 8 && lvl > 0 && Date.now() - lastChange > 25000) { // ~40s smooth -> try better
-            good = 0; setWallQLevel(lvl - 1); lastChange = Date.now(); applyWallQuality(dvr, wallId);
+            good = 0; setWallQLevel(lvl - 1); lastChange = Date.now(); postActiveWall();
             console.log('[wall] quality up ->', WALL_Q[wallQLevel()]);
           }
         }
@@ -2836,17 +2847,8 @@
       cols = cols || Math.max(1, Math.ceil(Math.sqrt(ids.length)));
       const rows = Math.ceil(ids.length / cols);
       const layout = { rows, cols, cells: channels.map((ch, i) => ({ i: i, id: ids[i], name: ch.name })) };
-      // Post membership (+cols +current quality) only when the channel SET changes —
-      // not on reorder/re-render — so the operator's drag order isn't clobbered.
-      window._wallMemberCache = window._wallMemberCache || {};
-      const memberSig = ids.slice().sort().join(',') + '|' + cols;
-      const q = WALL_Q[wallQLevel()];
-      if (window._wallMemberCache[wallId] !== memberSig) {
-        window._wallMemberCache[wallId] = memberSig;
-        postWall(dvr, wallId, { order: ids, cols: cols, w: q.w, fps: q.fps });
-      } else {
-        applyWallQuality(dvr, wallId); // keep the stream matched to the current level
-      }
+      window._activeWall = { dvr: dvr, wallId: wallId, ids: ids, cols: cols }; // for the quality monitor
+      postActiveWall(); // membership + cols + current quality (always full body; never blanks the wall)
       renderRelayWall(dvr, grid, layout, wallId);
       const video = grid.querySelector('.wall-video');
       if (video) startWallQualityMonitor(dvr, wallId, video);
