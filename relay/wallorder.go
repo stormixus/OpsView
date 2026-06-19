@@ -1,57 +1,54 @@
 package main
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 )
 
-// Per-wall custom tile order. Operators reorder wall tiles by dragging in the
-// viewer; the new order is POSTed here, stored keyed by "<agentID>/<wallID>", and
-// applied when the mosaic is (re)composed — so the GPU tiles in that order. Shared
-// (every viewer of that wall sees the same order) and persisted to disk so it
-// survives relay restarts. Channels not listed fall to the end in default order.
+// Per-wall tile order + column count, keyed by the wall's stable uuid (the key is
+// "<agentID>/<wallID>", where wallID is the viewer's uuid for that wall). Operators
+// reorder by dragging in the viewer; the new order/columns are POSTed, persisted in
+// SQLite (wall_layout table), and applied when the mosaic composes — so the GPU
+// tiles in that order. Shared (every viewer of that wall sees the same order) and
+// survives relay restarts. For group walls the order IS the membership; channels
+// not listed fall to the end in default order.
+//
+// The in-memory maps are the hot read path (EnsureMosaic, no DB handle); writes
+// go through to SQLite via wallLayoutDB. Loaded from the DB at startup.
+
+var wallLayoutDB *agentStore
+
 var wallOrders = struct {
 	sync.Mutex
-	m      map[string][]string
-	loaded bool
-	path   string
+	m map[string][]string
 }{m: map[string][]string{}}
 
-// wallOrderPath is the persistence file on the relay's data volume, or "" when no
-// persistent location is configured (then order is in-memory only for this run).
-func wallOrderPath() string {
-	if v := strings.TrimSpace(os.Getenv("RELAY_WALL_ORDER_FILE")); v != "" {
-		return v
-	}
-	if db := strings.TrimSpace(os.Getenv("RELAY_DB")); db != "" {
-		return filepath.Join(filepath.Dir(db), "wallorder.json")
-	}
-	if rec := strings.TrimSpace(os.Getenv("RELAY_REC_DIR")); rec != "" {
-		return filepath.Join(rec, "wallorder.json")
-	}
-	return ""
-}
+var wallCols = struct {
+	sync.Mutex
+	m map[string]int
+}{m: map[string]int{}}
 
-func loadWallOrdersLocked() {
-	if wallOrders.loaded {
+// initWallLayoutStore wires the SQLite store and loads persisted wall layouts into
+// the in-memory maps. Call once at startup after the store is open.
+func initWallLayoutStore(s *agentStore) {
+	if s == nil {
 		return
 	}
-	wallOrders.loaded = true
-	wallOrders.path = wallOrderPath()
-	if wallOrders.path == "" {
-		return
-	}
-	b, err := os.ReadFile(wallOrders.path)
+	orders, cols, err := s.loadWallLayouts()
 	if err != nil {
 		return
 	}
-	var m map[string][]string
-	if json.Unmarshal(b, &m) == nil && m != nil {
-		wallOrders.m = m
+	wallOrders.Lock()
+	if orders != nil {
+		wallOrders.m = orders
 	}
+	wallOrders.Unlock()
+	wallCols.Lock()
+	if cols != nil {
+		wallCols.m = cols
+	}
+	wallCols.Unlock()
+	wallLayoutDB = s
 }
 
 func wallOrderKey(agentID, wallID string) string {
@@ -64,26 +61,41 @@ func wallOrderKey(agentID, wallID string) string {
 func getWallOrder(key string) []string {
 	wallOrders.Lock()
 	defer wallOrders.Unlock()
-	loadWallOrdersLocked()
 	return append([]string(nil), wallOrders.m[key]...)
 }
 
 func setWallOrder(key string, ids []string) {
 	wallOrders.Lock()
-	defer wallOrders.Unlock()
-	loadWallOrdersLocked()
 	wallOrders.m[key] = append([]string(nil), ids...)
-	if wallOrders.path == "" {
+	order := append([]string(nil), wallOrders.m[key]...)
+	wallOrders.Unlock()
+	persistWallLayout(key, order)
+}
+
+func getWallCols(key string) int {
+	wallCols.Lock()
+	defer wallCols.Unlock()
+	return wallCols.m[key]
+}
+
+func setWallCols(key string, cols int) {
+	wallCols.Lock()
+	if cols > 0 {
+		wallCols.m[key] = cols
+	} else {
+		delete(wallCols.m, key)
+	}
+	wallCols.Unlock()
+	persistWallLayout(key, getWallOrder(key))
+}
+
+// persistWallLayout writes a wall's current order + columns to SQLite (no-op when
+// no DB is configured).
+func persistWallLayout(key string, order []string) {
+	if wallLayoutDB == nil {
 		return
 	}
-	b, err := json.MarshalIndent(wallOrders.m, "", "  ")
-	if err != nil {
-		return
-	}
-	tmp := wallOrders.path + ".tmp"
-	if os.WriteFile(tmp, b, 0o644) == nil {
-		os.Rename(tmp, wallOrders.path) // atomic replace
-	}
+	_ = wallLayoutDB.saveWallLayout(key, strings.Join(order, ","), getWallCols(key))
 }
 
 // reorderByPreference returns ids reordered so the ones present in pref come first
@@ -115,28 +127,4 @@ func reorderByPreference(ids, pref []string) []string {
 // applyWallOrder reorders ids by the stored custom order for this wall.
 func applyWallOrder(key string, ids []string) []string {
 	return reorderByPreference(ids, getWallOrder(key))
-}
-
-// Per-wall column-count override (in-memory). The viewer sets it so a wall matches
-// the on-screen region shape — e.g. the collage's main grid is always 3 columns,
-// not the default near-square. Not persisted; the viewer re-sends it on load.
-var wallCols = struct {
-	sync.Mutex
-	m map[string]int
-}{m: map[string]int{}}
-
-func setWallCols(key string, cols int) {
-	wallCols.Lock()
-	defer wallCols.Unlock()
-	if cols > 0 {
-		wallCols.m[key] = cols
-	} else {
-		delete(wallCols.m, key)
-	}
-}
-
-func getWallCols(key string) int {
-	wallCols.Lock()
-	defer wallCols.Unlock()
-	return wallCols.m[key]
 }

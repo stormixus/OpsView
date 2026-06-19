@@ -174,6 +174,7 @@ func loadConfig() Config {
 		if serr := reg.useStore(store); serr != nil {
 			log.Fatalf("[relay] agent store init: %v", serr)
 		}
+		initWallLayoutStore(store) // persist wall tile order/columns in SQLite (by wall uuid)
 		log.Printf("[relay] tenant registry persisted to %s (%d named agents)", dbPath, len(reg.listNamed()))
 	}
 

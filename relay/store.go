@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -46,7 +47,50 @@ func openAgentStore(path string) (*agentStore, error) {
 		db.Close()
 		return nil, err
 	}
+	// wall_layout persists each live-wall's tile order + column count, keyed by the
+	// wall's stable uuid (the viewer's stream id). Survives relay restarts.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS wall_layout (
+		uuid      TEXT PRIMARY KEY,
+		order_csv TEXT NOT NULL DEFAULT '',
+		cols      INTEGER NOT NULL DEFAULT 0
+	)`); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &agentStore{db: db}, nil
+}
+
+// saveWallLayout upserts a wall's tile order (CSV of stream ids) and column count,
+// keyed by the wall uuid.
+func (s *agentStore) saveWallLayout(uuid, orderCSV string, cols int) error {
+	_, err := s.db.Exec(`INSERT INTO wall_layout (uuid, order_csv, cols) VALUES (?, ?, ?)
+		ON CONFLICT(uuid) DO UPDATE SET order_csv=excluded.order_csv, cols=excluded.cols`, uuid, orderCSV, cols)
+	return err
+}
+
+// loadWallLayouts reads every persisted wall layout into order + column maps.
+func (s *agentStore) loadWallLayouts() (orders map[string][]string, cols map[string]int, err error) {
+	rows, err := s.db.Query(`SELECT uuid, order_csv, cols FROM wall_layout`)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	orders = map[string][]string{}
+	cols = map[string]int{}
+	for rows.Next() {
+		var k, csv string
+		var c int
+		if err := rows.Scan(&k, &csv, &c); err != nil {
+			return nil, nil, err
+		}
+		if csv != "" {
+			orders[k] = strings.Split(csv, ",")
+		}
+		if c > 0 {
+			cols[k] = c
+		}
+	}
+	return orders, cols, rows.Err()
 }
 
 // hiddenAgents loads the set of operator-hidden agent ids.
