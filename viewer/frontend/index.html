@@ -2679,13 +2679,14 @@
       play();
     }
 
-    function renderRelayWall(dvr, grid, layout) {
+    function renderRelayWall(dvr, grid, layout, wallId) {
+      wallId = wallId || wallIdForDvr(dvr);
       grid.classList.remove('grid-2', 'grid-3', 'grid-4', 'cols-3', 'cols-4');
       grid.classList.add('cctv-wall');
       const { ip, port, scheme } = resolveRelayHLSEndpoint(dvr);
       const aid = window.survRemoteConfig && window.survRemoteConfig.agent_id;
       const scope = aid ? encodeURIComponent(aid) + '/' : '';
-      const wsUrl = (scheme === 'https' ? 'wss' : 'ws') + '://' + ip + ':' + port + '/surv/ws/' + scope + wallIdForDvr(dvr);
+      const wsUrl = (scheme === 'https' ? 'wss' : 'ws') + '://' + ip + ':' + port + '/surv/ws/' + scope + wallId;
 
       grid.innerHTML = '<div class="wall-wrap"><video class="wall-video" autoplay muted playsinline></video><div class="wall-overlay"></div></div>';
       const video = grid.querySelector('.wall-video');
@@ -2714,21 +2715,42 @@
         ghostClass: 'sortable-ghost', chosenClass: 'sortable-chosen',
         onEnd: function () {
           const order = Array.from(overlay.children).map(el => el.dataset.id).filter(Boolean);
-          postWallOrder(dvr, order);
+          postWallOrder(dvr, order, wallId);
         }
       });
     }
 
-    // postWallOrder persists the operator's tile order on the relay, which recomposes
-    // the mosaic in that order. The wall video reconnects to the new stream on its own.
-    function postWallOrder(dvr, order) {
+    // postWallOrder persists a wall's tile order/membership on the relay, which
+    // recomposes the mosaic. Cached per wall id so an unchanged list (e.g. a plain
+    // re-render of a group wall) doesn't churn a rebuild — only a real change posts.
+    function postWallOrder(dvr, order, wallId) {
+      wallId = wallId || wallIdForDvr(dvr);
+      window._wallGroupCache = window._wallGroupCache || {};
+      const sig = (order || []).join(',');
+      if (window._wallGroupCache[wallId] === sig) return;
+      window._wallGroupCache[wallId] = sig;
       const { ip, port, scheme } = resolveRelayHLSEndpoint(dvr);
       const aid = window.survRemoteConfig && window.survRemoteConfig.agent_id;
       const url = scheme + '://' + ip + ':' + port + '/surv/wallorder?agent=' +
-        encodeURIComponent(aid || '') + '&wall=' + encodeURIComponent(wallIdForDvr(dvr));
-      fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(order) })
-        .then(() => { window._wallLayout = null; }) // order changed -> re-fetch layout next render
-        .catch(() => {});
+        encodeURIComponent(aid || '') + '&wall=' + encodeURIComponent(wallId);
+      fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(order || []) })
+        .then(() => { window._wallLayout = null; }) // changed -> re-fetch layout next render
+        .catch(() => { window._wallGroupCache[wallId] = null; }); // failed -> allow retry
+    }
+
+    // renderCollageGridWall composites the collage's main grid (an arbitrary channel
+    // subset) into ONE group wall, so the collage decodes ~1 stream there instead of
+    // N. The small overflow cells stay individual. Layout is computed client-side
+    // (same ceil(sqrt) the relay uses) so the overlay lines up without a fetch.
+    function renderCollageGridWall(dvr, grid, channels) {
+      const sid = relayStreamDvrId(dvr);
+      const wallId = 'wallgd' + sid;
+      const ids = channels.map(ch => 'dvr' + sid + '_ch' + ch.ch_num);
+      const cols = Math.ceil(Math.sqrt(ids.length));
+      const rows = Math.ceil(ids.length / cols);
+      const layout = { rows, cols, cells: channels.map((ch, i) => ({ i: i, id: ids[i], name: ch.name })) };
+      postWallOrder(dvr, ids, wallId); // define the group's membership on the relay
+      renderRelayWall(dvr, grid, layout, wallId);
     }
 
     function expandWallChannel(dvr, cell) {
@@ -3511,12 +3533,17 @@
       topChannels.forEach(ch => createCell(ch, topRow));
       bottomChannels.forEach(ch => createCell(ch, bottomRow));
 
-      // Render left grid (remaining channels)
+      // Render left grid (remaining channels). Relay collage: the big grid becomes
+      // ONE group wall (1 decode) while the small overflow cells stay individual.
       grid.innerHTML = '';
       grid.classList.remove('cols-3', 'cols-4');
       if (gridChannels.length > 0) {
-        grid.classList.add((isCollage || gridChannels.length <= 9) ? 'cols-3' : 'cols-4');
-        gridChannels.forEach(ch => createCell(ch, grid));
+        if (useRelayHLS && isCollage) {
+          renderCollageGridWall(dvr, grid, gridChannels);
+        } else {
+          grid.classList.add((isCollage || gridChannels.length <= 9) ? 'cols-3' : 'cols-4');
+          gridChannels.forEach(ch => createCell(ch, grid));
+        }
       }
 
       // Initialize SortableJS on mixed containers (shared group for cross-container drag)
@@ -3553,6 +3580,7 @@
         }
       };
       [topRow, grid, bottomRow].forEach(el => {
+        if (el.classList.contains('cctv-wall')) return; // grid is a group wall -> its own drag
         if (el.children.length > 0 || el === grid) {
           window._mixedSortables.push(new Sortable(el, mixedSortOpts));
         }
