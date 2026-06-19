@@ -2700,6 +2700,8 @@
       wallId = wallId || wallIdForDvr(dvr);
       grid.classList.remove('grid-2', 'grid-3', 'grid-4', 'cols-3', 'cols-4');
       grid.classList.add('cctv-wall');
+      grid.dataset.wallRows = layout.rows; // for smart-fit (size the right column to match)
+      grid.dataset.wallCols = layout.cols;
       const { ip, port, scheme } = resolveRelayHLSEndpoint(dvr);
       const aid = window.survRemoteConfig && window.survRemoteConfig.agent_id;
       const scope = aid ? encodeURIComponent(aid) + '/' : '';
@@ -3134,8 +3136,12 @@
       const topRow = document.getElementById('mixedCctvTopRow');
       const bottomRow = document.getElementById('mixedCctvBottomRow');
       if (!split || !grid || !left) return;
+      // When the left grid is a relay wall there are no .cctv-cells to size — the
+      // wall fills the left via CSS — but smart-fit still drives the divider and
+      // matches the right column's row height to a wall row (wall height / rows).
+      const isWall = grid.classList.contains('cctv-wall');
       const cells = grid.querySelectorAll('.cctv-cell');
-      const nLeft = cells.length;
+      const nLeft = isWall ? (grid.querySelectorAll('.wall-cell').length || 1) : cells.length;
       if (!nLeft) return;
       const gap = 3, pad = 3;
       const sizeCells = (cellW, cellH) => {
@@ -3148,15 +3154,24 @@
         const W = split.clientWidth, H = split.clientHeight;
         if (W <= 0 || H <= 0) return;
         const rightCols = ((topRow && topRow.children.length) || (bottomRow && bottomRow.children.length)) ? 2 : 0;
-        const fit = computeSmartFit(W, H, nLeft, rightCols);
+        let cols, rows;
+        if (isWall) {
+          cols = parseInt(grid.dataset.wallCols) || Math.min(3, nLeft);
+          rows = parseInt(grid.dataset.wallRows) || Math.ceil(nLeft / cols);
+        } else {
+          const fit = computeSmartFit(W, H, nLeft, rightCols);
+          cols = fit.cols; rows = fit.rows;
+        }
         // Move the divider so the right column is exactly `rightCols` tiles wide.
-        const leftFrac = rightCols > 0 ? fit.cols / (fit.cols + rightCols) : 1;
+        const leftFrac = rightCols > 0 ? cols / (cols + rightCols) : 1;
         left.style.flexBasis = (leftFrac * 100) + '%';
-        const leftW = W * leftFrac;
-        const cellW = (leftW - 2 * pad - (fit.cols - 1) * gap) / fit.cols - 1; // -1: avoid sub-pixel wrap
-        const cellH = (H - 2 * pad - (fit.rows - 1) * gap) / fit.rows;
-        if (!sizeCells(cellW, cellH)) return;
-        // Right overflow rows match the tile height; the Ops board fills the rest.
+        const cellH = (H - 2 * pad - (rows - 1) * gap) / rows; // height of one left row
+        if (!isWall) {
+          const leftW = W * leftFrac;
+          const cellW = (leftW - 2 * pad - (cols - 1) * gap) / cols - 1; // -1: avoid sub-pixel wrap
+          if (!sizeCells(cellW, cellH)) return;
+        }
+        // Right overflow rows match a left-row height; the Ops board fills the rest.
         const rowHpx = cellH + 2 * pad, rowH = rowHpx + 'px';
         let numRows = 0;
         [topRow, bottomRow].forEach(r => {
@@ -3166,6 +3181,7 @@
         if (mainArea) mainArea.style.flex = '0 0 ' + Math.max(60, H - numRows * rowHpx) + 'px';
         if (right) right.classList.remove('ops-custom');
       } else {
+        if (isWall) return; // wall fills via CSS; nothing to size
         // Horizontal / vertical: fill the CCTV grid within its current container
         // (no overflow rows, divider left as the user set it).
         const gridW = grid.clientWidth, gridH = grid.clientHeight;
