@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -134,6 +135,11 @@ func (h *Hub) ServeWallOrder(w http.ResponseWriter, r *http.Request) {
 		agent = "default"
 	}
 	setWallOrder(wallOrderKey(agent, wallID), ids)
+	if c := r.URL.Query().Get("cols"); c != "" {
+		if n, err := strconv.Atoi(c); err == nil {
+			setWallCols(wallOrderKey(agent, wallID), n) // 0 clears
+		}
+	}
 	s.survProxy.EnsureMosaic(agent, wallID) // rebuild in the new order
 	w.WriteHeader(http.StatusNoContent)
 }

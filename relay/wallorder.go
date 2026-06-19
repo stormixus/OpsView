@@ -116,3 +116,27 @@ func reorderByPreference(ids, pref []string) []string {
 func applyWallOrder(key string, ids []string) []string {
 	return reorderByPreference(ids, getWallOrder(key))
 }
+
+// Per-wall column-count override (in-memory). The viewer sets it so a wall matches
+// the on-screen region shape — e.g. the collage's main grid is always 3 columns,
+// not the default near-square. Not persisted; the viewer re-sends it on load.
+var wallCols = struct {
+	sync.Mutex
+	m map[string]int
+}{m: map[string]int{}}
+
+func setWallCols(key string, cols int) {
+	wallCols.Lock()
+	defer wallCols.Unlock()
+	if cols > 0 {
+		wallCols.m[key] = cols
+	} else {
+		delete(wallCols.m, key)
+	}
+}
+
+func getWallCols(key string) int {
+	wallCols.Lock()
+	defer wallCols.Unlock()
+	return wallCols.m[key]
+}

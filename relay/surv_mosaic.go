@@ -241,6 +241,10 @@ func (sp *SurvProxy) EnsureMosaic(agentID, wallID string) {
 	}
 
 	rows, cols := mosaicLayout(len(ids))
+	if oc := getWallCols(wallOrderKey(agentID, wallID)); oc > 0 { // viewer's column preference
+		cols = oc
+		rows = (len(ids) + cols - 1) / cols
+	}
 	w, h := wallDims()
 	fps := wallFPS()
 	cellW := evenDown(w / cols)
