@@ -126,16 +126,17 @@ func (h *Hub) ServeWallOrder(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such agent", http.StatusNotFound)
 		return
 	}
-	var ids []string
-	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
-		http.Error(w, "bad body", http.StatusBadRequest)
-		return
-	}
 	if agent == "" {
 		agent = "default"
 	}
-	setWallOrder(wallOrderKey(agent, wallID), ids)
 	wkey := wallOrderKey(agent, wallID)
+	// Body is an OPTIONAL JSON array of stream ids (the order/membership). A quality-
+	// only POST (empty body + ?w=/&fps=) leaves the order untouched, so the viewer's
+	// adaptive quality changes never clobber the operator's drag order.
+	var ids []string
+	if err := json.NewDecoder(r.Body).Decode(&ids); err == nil && len(ids) > 0 {
+		setWallOrder(wkey, ids)
+	}
 	if c := r.URL.Query().Get("cols"); c != "" {
 		if n, err := strconv.Atoi(c); err == nil {
 			setWallCols(wkey, n) // 0 clears
