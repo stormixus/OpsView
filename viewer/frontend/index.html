@@ -2685,8 +2685,14 @@
       };
       const watchdog = setInterval(() => {
         const t = Math.max(video.currentTime || 0, wallBufEnd(video));
-        if (t > lastT + 0.01) { lastT = t; lastAt = Date.now(); backoff = 0; }
-        else if (Date.now() - lastAt > 8000) { lastAt = Date.now(); play(); }
+        if (t > lastT + 0.01) { lastT = t; lastAt = Date.now(); backoff = 0; return; }
+        // A weak client (N100) stalls transiently — the relay drops frames then
+        // resumes. DON'T tear down + reconnect on a short stall (that black-flashes);
+        // let the wall freeze on its last frame and recover, just nudge playback.
+        // Only a long, genuinely-dead stall (socket not closing) forces a rebuild.
+        const stalledMs = Date.now() - lastAt;
+        if (stalledMs > 3000) { try { video.play(); } catch (e) {} }
+        if (stalledMs > 20000) { lastAt = Date.now(); play(); }
       }, 3000);
       video._wallPlayer = {
         close() {
