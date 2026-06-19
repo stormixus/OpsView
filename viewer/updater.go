@@ -315,7 +315,12 @@ func fetchSignature(client *http.Client, sigURL string) (string, error) {
 func (u *Updater) runInstaller(tmpPath string) (string, error) {
 	switch runtime.GOOS {
 	case "windows":
-		cmd := exec.Command(tmpPath)
+		// The NSIS installer requires admin (UAC). exec.Command uses CreateProcess,
+		// which can't elevate ("The requested operation requires elevation"). Launch
+		// it via ShellExecute "runas" (through PowerShell Start-Process) so Windows
+		// shows the UAC prompt and the installer runs elevated.
+		ps := "Start-Process -FilePath '" + tmpPath + "' -Verb RunAs"
+		cmd := exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps)
 		if err := cmd.Start(); err != nil {
 			return "", err
 		}
