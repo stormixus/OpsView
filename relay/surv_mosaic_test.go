@@ -42,7 +42,7 @@ func TestMosaicInputIDs(t *testing.T) {
 }
 
 func TestMosaicWallDVR(t *testing.T) {
-	cases := map[string]int{"wall": 0, "walldvr1": 1, "walldvr12": 12, "walldvr0": -1, "wallx": -1, "dvr1_ch1": -1, "walldvr": -1}
+	cases := map[string]int{"wall": 0, "walldvr1": 1, "walldvr12": 12, "walldvr0": -1, "wallx": -1, "dvr1_ch1": -1, "walldvr": -1, "wallgd3": -2, "wallgX": -2, "wallg": -1}
 	for id, want := range cases {
 		if got := mosaicWallDVR(id); got != want {
 			t.Fatalf("mosaicWallDVR(%q) = %d, want %d", id, got, want)

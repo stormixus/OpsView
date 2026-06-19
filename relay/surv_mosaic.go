@@ -181,7 +181,33 @@ func mosaicWallDVR(wallID string) int {
 			return n
 		}
 	}
+	if strings.HasPrefix(wallID, "wallg") && len(wallID) > 5 {
+		return -2 // group wall: explicit channel set (membership stored, not DVR-derived)
+	}
 	return -1
+}
+
+// wallChannelIDs resolves the base channel stream ids that compose a wall, in
+// order: "wall" = whole agent, "walldvr<N>" = one DVR (both honoring the operator's
+// drag order), "wallg*" = an explicit group whose membership+order IS the stored
+// list (filtered to currently-active channels). Used for arbitrary tile groups,
+// e.g. the collage's main grid in the viewer.
+func (sp *SurvProxy) wallChannelIDs(agentID, wallID string, stats []StreamStat) []string {
+	key := wallOrderKey(agentID, wallID)
+	if mosaicWallDVR(wallID) == -2 {
+		active := map[string]bool{}
+		for _, id := range mosaicInputIDs(stats, 0) {
+			active[id] = true
+		}
+		var out []string
+		for _, id := range getWallOrder(key) {
+			if active[id] {
+				out = append(out, id)
+			}
+		}
+		return out
+	}
+	return applyWallOrder(key, mosaicInputIDs(stats, mosaicWallDVR(wallID)))
 }
 
 // EnsureMosaic (re)builds the live-wall composite identified by wallID ("wall" =
@@ -189,17 +215,15 @@ func mosaicWallDVR(wallID string) int {
 // Idempotent: no-op when unchanged, restart when the set changed, stop when empty.
 // Multiple walls (one per watched DVR) can run concurrently, keyed by wallID.
 func (sp *SurvProxy) EnsureMosaic(agentID, wallID string) {
-	dvrNum := mosaicWallDVR(wallID)
-	if dvrNum < 0 {
+	if mosaicWallDVR(wallID) == -1 {
 		return // not a recognized wall id
 	}
 	stats := sp.StreamStats()
-	ids := mosaicInputIDs(stats, dvrNum)
+	ids := sp.wallChannelIDs(agentID, wallID, stats)
 	if len(ids) == 0 {
 		sp.stopMosaicID(wallID)
 		return
 	}
-	ids = applyWallOrder(wallOrderKey(agentID, wallID), ids) // operator's drag order, if any
 	sig := mosaicSig(ids)
 
 	sp.mu.Lock()
