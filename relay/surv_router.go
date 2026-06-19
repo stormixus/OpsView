@@ -94,3 +94,46 @@ func (h *Hub) ServeWallLayout(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewEncoder(w).Encode(out)
 }
+
+// ServeWallOrder sets the operator's custom tile order for a wall (drag-to-reorder
+// in the viewer) and rebuilds the mosaic in that order. Body is a JSON array of
+// base stream ids. POST /surv/wallorder?agent=<id>&wall=<wallID>. Ungated, like the
+// rest of the /surv surface; the order is persisted on the relay.
+func (h *Hub) ServeWallOrder(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	wallID := r.URL.Query().Get("wall")
+	if wallID == "" {
+		http.Error(w, "missing wall", http.StatusBadRequest)
+		return
+	}
+	agent := r.URL.Query().Get("agent")
+	s := h.sessionByID(agent)
+	if s == nil {
+		s = h.defaultSession()
+	}
+	if s == nil {
+		http.Error(w, "no such agent", http.StatusNotFound)
+		return
+	}
+	var ids []string
+	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	if agent == "" {
+		agent = "default"
+	}
+	setWallOrder(wallOrderKey(agent, wallID), ids)
+	s.survProxy.EnsureMosaic(agent, wallID) // rebuild in the new order
+	w.WriteHeader(http.StatusNoContent)
+}

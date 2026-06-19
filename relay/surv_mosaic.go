@@ -199,6 +199,7 @@ func (sp *SurvProxy) EnsureMosaic(agentID, wallID string) {
 		sp.stopMosaicID(wallID)
 		return
 	}
+	ids = applyWallOrder(wallOrderKey(agentID, wallID), ids) // operator's drag order, if any
 	sig := mosaicSig(ids)
 
 	sp.mu.Lock()
