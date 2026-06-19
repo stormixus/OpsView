@@ -245,10 +245,12 @@ func (sp *SurvProxy) EnsureMosaic(agentID, wallID string) {
 		cols = oc
 		rows = (len(ids) + cols - 1) / cols
 	}
-	w, h := wallDims()
+	w, _ := wallDims()
 	fps := wallFPS()
+	// 16:9 cells so each (16:9) camera fills its tile with no crop/stretch. The
+	// mosaic's overall aspect is then (cols*16):(rows*9) — the viewer fits to that.
 	cellW := evenDown(w / cols)
-	cellH := evenDown(h / rows)
+	cellH := evenDown(cellW * 9 / 16)
 
 	inputs := make([]string, len(ids))
 	cells := make([]mosaicCell, len(ids))
