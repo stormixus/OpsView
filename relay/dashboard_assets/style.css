@@ -841,3 +841,13 @@ button{font-family:inherit; cursor:pointer;}
 .wbig-name{font:600 15px system-ui}
 .wbig-close{background:#0006;color:#fff;border:0;width:34px;height:34px;border-radius:50%;font-size:16px;cursor:pointer}
 
+/* ===== Mobile (phone) polish for the Android wall app and small screens ===== */
+@media (max-width: 700px) {
+  .login-card, .loginCard { width: 92vw; max-width: 360px; }
+  #pw, .input { font-size: 16px; min-height: 44px; } /* 16px avoids iOS/Android zoom; 44px tap target */
+  .wcell { min-height: 44px; }
+  .wcell .wname { font-size: 13px; }
+  .wbig-close { min-width: 48px; min-height: 48px; font-size: 22px; }
+  .wbig-bar { padding: 8px 12px; }
+}
+

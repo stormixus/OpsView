@@ -203,7 +203,7 @@ function attempt(){
   var pw=pwIn.value;
   fetch('/dashboard/api/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:pw})})
     .then(function(r){
-      if(r.status===200){ loginMsg.textContent=''; loginMsg.className='login-msg'; fails=0; showApp(); }
+      if(r.status===200){ loginMsg.textContent=''; loginMsg.className='login-msg'; fails=0; var nx=safeNext(); if(nx){ location.href=nx; return; } showApp(); }
       else if(r.status===429){ loginMsg.textContent='시도가 너무 많습니다 · 잠시 후'; loginMsg.className='login-msg warn'; pwIn.value=''; }
       else { loginFail(); }
     })
@@ -219,12 +219,21 @@ function lock(){
 enterBtn.addEventListener('click', attempt);
 pwIn.addEventListener('keydown', function(e){ if(e.key==='Enter') attempt(); });
 pwIn.addEventListener('input', function(){ if(loginCard.classList.contains('err') && Date.now()>=lockUntil){ loginCard.classList.remove('err'); } });
+// safeNext returns the ?next= path only when it is a same-origin /dashboard
+// path (blocks open-redirects like //evil.com or https://evil.com). Else null.
+function safeNext(){
+  var n=new URLSearchParams(location.search).get('next');
+  if(!n) return null;
+  if(n.charAt(0)!=='/' || n.charAt(1)==='/') return null; // must be path, not //host
+  if(n!=='/dashboard' && n.indexOf('/dashboard/')!==0 && n.indexOf('/dashboard?')!==0) return null;
+  return n;
+}
 $('#logoutBtn').addEventListener('click', function(){ fetch('/dashboard/api/logout', {method:'POST'}).catch(function(){}); logoutToLogin(); });
 // On load, the session cookie decides: a 200 from /state means we're already in.
 // #login stays hidden until we know we're NOT authed, so it never flashes on reload.
 function showLogin(){ loginEl.style.display='grid'; setTimeout(function(){pwIn.focus();},120); }
 fetch('/dashboard/api/state').then(function(r){
-  if(r.status===200){ showApp(); } else { showLogin(); }
+  if(r.status===200){ var nx=safeNext(); if(nx){ location.href=nx; return; } showApp(); } else { showLogin(); }
 }).catch(showLogin);
 
 /* ============================================================ NAVIGATION */
