@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OpsView</string>
+    <string name="settings_title">서버 주소</string>
+    <string name="settings_save">저장</string>
+    <string name="settings_cancel">취소</string>
+    <string name="exit_hint">한 번 더 누르면 종료</string>
+</resources>
