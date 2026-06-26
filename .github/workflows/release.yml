@@ -221,6 +221,53 @@ jobs:
         if: matrix.goos == 'darwin' && always()
         run: security delete-keychain build.keychain-db 2>/dev/null || true
 
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set version from tag
+        shell: bash
+        run: |
+          TAG="${{ github.event.release.tag_name || github.ref_name }}"
+          echo "APP_VERSION=${TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        shell: bash
+        working-directory: android
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 --decode > release.keystore
+            ./gradlew :app:assembleRelease \
+              -Pandroid.injected.signing.store.file="$PWD/release.keystore" \
+              -Pandroid.injected.signing.store.password="$KS_PASS" \
+              -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
+              -Pandroid.injected.signing.key.password="$KEY_PASS"
+            cp app/build/outputs/apk/release/app-release.apk "../opsview-android-${APP_VERSION}.apk"
+          else
+            echo "::warning::ANDROID_KEYSTORE_BASE64 not set; building unsigned debug APK."
+            ./gradlew :app:assembleDebug
+            cp app/build/outputs/apk/debug/app-debug.apk "../opsview-android-${APP_VERSION}-unsigned.apk"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opsview-android
+          path: opsview-android-*.apk
+
   build-relay-docker:
     runs-on: ubuntu-latest
     steps:
@@ -254,7 +301,7 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/opsview-relay:latest
 
   release:
-    needs: [build-agent, build-viewer]
+    needs: [build-agent, build-viewer, build-android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -305,3 +352,4 @@ jobs:
             artifacts/*.tar.gz
             artifacts/*.zip
             artifacts/*.sig
+            artifacts/*.apk
