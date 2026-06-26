@@ -462,7 +462,9 @@ func (h *Hub) HandleWallLayout(w http.ResponseWriter, r *http.Request) {
 // HandleWallPage serves the live-wall HTML page. Guarded by authedDashboard.
 func (h *Hub) HandleWallPage(w http.ResponseWriter, r *http.Request) {
 	if !h.authedDashboard(r) {
-		http.Redirect(w, r, "/dashboard", http.StatusFound)
+		// Carry a same-origin next hint so the login SPA returns the caller to the
+		// wall after authenticating (used by the Android app and desktop deep links).
+		http.Redirect(w, r, "/dashboard?next=%2Fdashboard%2Fwall", http.StatusFound)
 		return
 	}
 	b, err := dashboardAssets.ReadFile("dashboard_assets/wall.html")
