@@ -39,6 +39,7 @@ func runServer() (stop func()) {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", handleRoot)
 	mux.HandleFunc("/publish", hub.HandlePublish)
 	mux.HandleFunc("/watch", hub.HandleWatch)
 	mux.HandleFunc("/health", hub.HandleHealth)
@@ -78,6 +79,17 @@ func runServer() (stop func()) {
 		srv.Shutdown(ctx)
 		hub.Stop()
 	}
+}
+
+// handleRoot keeps the public hostname useful when opened without a path.
+// All other unknown paths still return 404; registered ServeMux routes win by
+// longest-prefix matching before this fallback handler is considered.
+func handleRoot(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	http.Redirect(w, r, "/dashboard", http.StatusTemporaryRedirect)
 }
 
 // setupUPNP attempts to discover a UPnP-enabled router and forward the relay port.
