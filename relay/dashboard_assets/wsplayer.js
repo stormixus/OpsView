@@ -68,7 +68,7 @@ function createGridWSFactory(agent,connections){
     };
   }
   var physical=null, subscribers=new Map(), nextSlot=1, stopped=false, idle=null, startup=null, legacy=false;
-  var endpoint=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/dashboard/api/live-grid-ws?agent='+encodeURIComponent(agent);
+  var endpoint=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/dashboard/api/live-grid-ws?agent='+encodeURIComponent(agent)+'&flow=1';
   function command(v,op){if(physical&&physical.readyState===1)physical.send(JSON.stringify({op:op,slot:v.slot,stream:v.stream}));}
   function openVirtual(v){
     if(v.closed||v.opened)return;
@@ -85,11 +85,21 @@ function createGridWSFactory(agent,connections){
   }
   function connect(){
     if(physical)return;
-    var socket=new WebSocket(endpoint),opened=false;physical=socket;socket.binaryType='arraybuffer';
+    var socket=new WebSocket(endpoint),opened=false,flow=false,received=0;physical=socket;socket.binaryType='arraybuffer';
     startup=setTimeout(function(){if(physical===socket&&!opened)disconnect(socket,false);},6000);
     socket.onopen=function(){if(physical!==socket)return;clearTimeout(startup);startup=null;opened=true;subscribers.forEach(openVirtual);};
     socket.onmessage=function(ev){
-      if(physical!==socket||!ev.data||typeof ev.data==='string'||ev.data.byteLength<2)return;
+      if(physical!==socket||!ev.data)return;
+      if(typeof ev.data==='string'){
+        try{if(JSON.parse(ev.data).op==='flow')flow=true;}catch(e){}
+        return;
+      }
+      if(ev.data.byteLength<2)return;
+      if(flow){
+        // Credit covers wire bytes even when the slot was already retired.
+        received+=ev.data.byteLength;
+        try{socket.send(JSON.stringify({op:'ack',received:received}));}catch(e){disconnect(socket,opened);return;}
+      }
       var slot=new DataView(ev.data).getUint16(0),v=subscribers.get(slot);
       if(v&&!v.closed&&v.onmessage)v.onmessage({data:ev.data.slice(2)});
     };

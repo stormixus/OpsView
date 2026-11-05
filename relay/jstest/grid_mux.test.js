@@ -83,7 +83,7 @@ test('one physical connection sends per-slot controls and preserves each channel
   a.onmessage = event => aData.push(Array.from(new Uint8Array(event.data)));
   b.onmessage = event => bData.push(Array.from(new Uint8Array(event.data)));
   assert.equal(h.sockets.length, 1);
-  assert.match(h.sockets[0].url, /live-grid-ws\?agent=site%20a$/);
+  assert.match(h.sockets[0].url, /live-grid-ws\?agent=site%20a&flow=1$/);
   h.sockets[0].open(); await drain();
   assert.equal(opened, 2);
   assert.deepEqual(h.sockets[0].sent.map(c => [c.op, c.slot, c.stream]), [['sub', a.slot, 'dvr1_ch1'], ['sub', b.slot, 'dvr1_ch2']]);
@@ -332,4 +332,97 @@ test('pool disposal closes unopened and opened children and prevents late callba
   assert.equal(received,0);assert.equal(closed,12);
   assert.throws(()=>factory.socket(streamURL(13)),/grid closed/);
   assert.equal(h.sockets.length,4);assert.equal(h.timers.size,0);
+});
+
+test('flow acknowledgments require server capability and count complete binary wire packets cumulatively',async()=>{
+  const h=harness(),factory=h.context.createGridWSFactory('site-a');
+  const client=factory.socket(streamURL(1)),socket=h.sockets[0];
+  const delivered=[];client.onmessage=event=>delivered.push(Array.from(new Uint8Array(event.data)));
+  socket.open();await drain();
+  socket.message(packet(client.slot,[10]));
+  for(const text of ['not JSON','null','{"op":"status","window":8192}','{"op":"ack","received":9}'])socket.message(text);
+  socket.message(packet(client.slot,[11,12]));
+  assert.equal(socket.sent.filter(command=>command.op==='ack').length,0,'older relays must not receive unknown ACK commands');
+  socket.message(JSON.stringify({op:'flow',window:8192}));
+  assert.equal(socket.sent.filter(command=>command.op==='ack').length,0,'capability text does not consume binary byte credit');
+  socket.message(packet(client.slot,[21,22,23]));
+  socket.message(packet(client.slot,[31,32]));
+  socket.message(JSON.stringify({op:'flow',window:4096}));
+  socket.message(packet(client.slot,[41]));
+  assert.deepEqual(socket.sent.filter(command=>command.op==='ack'),[
+    {op:'ack',received:5},{op:'ack',received:9},{op:'ack',received:12},
+  ]);
+  assert.deepEqual(delivered,[[10],[11,12],[21,22,23],[31,32],[41]]);
+  factory.close();
+});
+
+test('unknown and closed slots still acknowledge receipt without delivering stale media',async()=>{
+  const h=harness(),factory=h.context.createGridWSFactory('site-a');
+  const old=factory.socket(streamURL(1)),live=factory.socket(streamURL(2)),socket=h.sockets[0];
+  let stale=0;const delivered=[];
+  old.onmessage=()=>stale++;
+  live.onmessage=event=>{
+    assert.deepEqual(socket.sent.at(-1),{op:'ack',received:12},'ACK must not depend on downstream MSE append completion');
+    delivered.push(Array.from(new Uint8Array(event.data)));
+  };
+  socket.open();await drain();socket.message(JSON.stringify({op:'flow',window:8192}));
+  old.close();
+  socket.message(packet(60000,[1,2]));
+  socket.message(packet(old.slot,[3]));
+  socket.message(packet(live.slot,[4,5,6]));
+  assert.deepEqual(socket.sent.filter(command=>command.op==='ack').map(command=>command.received),[4,7,12]);
+  assert.equal(stale,0);assert.deepEqual(delivered,[[4,5,6]]);
+  factory.close();
+});
+
+test('new physical generation resets negotiation and byte total while late old frames remain ignored',async()=>{
+  const h=harness(),factory=h.context.createGridWSFactory('site-a');
+  const first=factory.socket(streamURL(1)),old=h.sockets[0];
+  old.open();await drain();old.message(JSON.stringify({op:'flow',window:8192}));
+  old.message(packet(first.slot,[1,2,3,4]));
+  assert.deepEqual(old.sent.filter(command=>command.op==='ack'),[{op:'ack',received:6}]);
+  old.error();
+  const current=factory.socket(streamURL(2)),socket=h.sockets[1];
+  let delivered=0;current.onmessage=()=>delivered++;
+  socket.open();await drain();
+  old.message(packet(current.slot,[90,91]));old.message(JSON.stringify({op:'flow',window:8192}));
+  assert.equal(delivered,0);
+  socket.message(packet(current.slot,[3]));
+  assert.equal(socket.sent.filter(command=>command.op==='ack').length,0,'new physical connection inherited old capability');
+  socket.message(JSON.stringify({op:'flow',window:8192}));
+  socket.message(packet(current.slot,[4,5]));
+  assert.deepEqual(socket.sent.filter(command=>command.op==='ack'),[{op:'ack',received:4}]);
+  assert.equal(old.sent.filter(command=>command.op==='ack').length,1);
+  assert.equal(delivered,2);factory.close();
+});
+
+test('bounded physical pools negotiate and accumulate flow credit independently',async()=>{
+  const h=harness(),factory=h.context.createGridWSFactory('site-a',4);
+  const clients=Array.from({length:4},(_,i)=>factory.socket(streamURL(i+1)));
+  for(const socket of h.sockets)socket.open();await drain();
+  for(const i of [0,1,3])h.sockets[i].message(JSON.stringify({op:'flow',window:8192}));
+  h.sockets[0].message(packet(clients[0].slot,[1]));
+  h.sockets[1].message(packet(clients[1].slot,[2,3,4]));
+  h.sockets[0].message(packet(clients[0].slot,[5,6]));
+  h.sockets[2].message(packet(clients[2].slot,[7,8,9,10]));
+  h.sockets[3].message(packet(clients[3].slot,[11,12,13,14]));
+  assert.deepEqual(h.sockets.map(socket=>socket.sent.filter(command=>command.op==='ack').map(command=>command.received)),[[3,7],[5],[],[6]]);
+  h.sockets[2].message(JSON.stringify({op:'flow',window:8192}));
+  h.sockets[2].message(packet(clients[2].slot,[15,16]));
+  assert.deepEqual(h.sockets[2].sent.filter(command=>command.op==='ack'),[{op:'ack',received:4}]);
+  factory.close();
+});
+
+test('failed ACK write closes the shared generation once and never dispatches unacknowledged media',async()=>{
+  const h=harness(),factory=h.context.createGridWSFactory('site-a');
+  const client=factory.socket(streamURL(1)),socket=h.sockets[0];
+  let closed=0,delivered=0;client.onclose=()=>closed++;client.onmessage=()=>delivered++;
+  socket.open();await drain();socket.message(JSON.stringify({op:'flow',window:8192}));
+  const send=socket.send.bind(socket);
+  socket.send=data=>{if(JSON.parse(data).op==='ack')throw new Error('send failed');send(data);};
+  socket.message(packet(client.slot,[1]));
+  assert.equal(closed,1);assert.equal(delivered,0);assert.equal(socket.readyState,3);
+  socket.message(packet(client.slot,[2]));socket.onclose();
+  assert.equal(closed,1);assert.equal(delivered,0);
+  factory.close();assert.equal(h.timers.size,0);
 });

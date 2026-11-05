@@ -338,3 +338,114 @@ func TestLiveGridWSInitialPicturesPrecedeAlreadyQueuedMedia(t *testing.T) {
 		return true
 	})
 }
+
+// A slow reader must not let ordinary media fill an unbounded network backlog.
+// Controls remain live while credit is exhausted, and releasing credit gives the
+// replacement channel's startup packets priority over the old queued media.
+func TestLiveGridWSFlowWindowKeepsControlsResponsive(t *testing.T) {
+	h, base := gridTestServer(t)
+	old, _ := seedGridTestStream(t, h, "site-a", "dvr1_ch1", 1)
+	next, seed := seedGridTestStream(t, h, "site-a", "dvr1_ch2", 2)
+	const fragmentBytes = 96 << 10
+	for i := 0; i < 16; i++ {
+		old.broadcast(bytes.Repeat([]byte{byte(i + 1)}, fragmentBytes), false)
+	}
+	conn := gridTestDial(t, h, base+"site-a&flow=1")
+	var hello struct {
+		Op     string `json:"op"`
+		Window int    `json:"window"`
+	}
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if err := conn.ReadJSON(&hello); err != nil {
+		t.Fatal(err)
+	}
+	if hello.Op != "flow" || hello.Window != liveGridMaxInflight {
+		t.Fatalf("unexpected flow negotiation: %+v", hello)
+	}
+	type packet struct {
+		slot uint16
+		data []byte
+		err  error
+	}
+	packets := make(chan packet, 64)
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
+		for {
+			kind, data, err := conn.ReadMessage()
+			if err != nil {
+				packets <- packet{err: err}
+				return
+			}
+			if kind != websocket.BinaryMessage || len(data) < 2 {
+				packets <- packet{err: fmt.Errorf("invalid packet")}
+				return
+			}
+			packets <- packet{slot: binary.BigEndian.Uint16(data), data: data[2:]}
+		}
+	}()
+	defer func() { conn.Close(); <-readerDone }()
+	read := func() packet {
+		t.Helper()
+		select {
+		case p := <-packets:
+			if p.err != nil {
+				t.Fatal(p.err)
+			}
+			return p
+		case <-time.After(3 * time.Second):
+			t.Fatal("flow-controlled reader stalled")
+			return packet{}
+		}
+	}
+	if err := conn.WriteJSON(liveGridControl{Op: "sub", Slot: 1, Stream: "dvr1_ch1"}); err != nil {
+		t.Fatal(err)
+	}
+	var received uint64
+	for received < liveGridMaxInflight {
+		p := read()
+		if p.slot != 1 {
+			t.Fatalf("unexpected slot %d", p.slot)
+		}
+		received += uint64(len(p.data) + 2)
+	}
+	if received >= liveGridMaxInflight+fragmentBytes+2 {
+		t.Fatalf("window overshot more than one packet: %d", received)
+	}
+	assertPaused := func() {
+		t.Helper()
+		select {
+		case p := <-packets:
+			t.Fatalf("media sent without credit: slot=%d bytes=%d error=%v", p.slot, len(p.data), p.err)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	assertPaused()
+	// Impossible future and regressive acknowledgments cannot grant credit.
+	for _, ack := range []uint64{received + 1, 0} {
+		if err := conn.WriteJSON(liveGridControl{Op: "ack", Received: ack}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertPaused()
+	if err := conn.WriteJSON(liveGridControl{Op: "unsub", Slot: 1}); err != nil {
+		t.Fatal(err)
+	}
+	awaitGridCondition(t, func() bool { return old.ClientCount() == 0 })
+	if err := conn.WriteJSON(liveGridControl{Op: "sub", Slot: 2, Stream: "dvr1_ch2"}); err != nil {
+		t.Fatal(err)
+	}
+	awaitGridCondition(t, func() bool { return next.ClientCount() == 1 })
+	assertPaused()
+	if err := conn.WriteJSON(liveGridControl{Op: "ack", Received: received}); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range seed {
+		p := read()
+		if p.slot != 2 || !bytes.Equal(p.data, want) {
+			t.Fatalf("replacement startup corrupted at %d: slot=%d bytes=%d", i, p.slot, len(p.data))
+		}
+	}
+	conn.Close()
+	awaitGridCondition(t, func() bool { return next.ClientCount() == 0 })
+}
