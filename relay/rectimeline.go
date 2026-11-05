@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"time"
@@ -10,8 +12,10 @@ import (
 
 // tlSegment is one recorded span on the unified-player timeline (unix seconds).
 type tlSegment struct {
-	Start int64 `json:"start"`
-	Dur   int   `json:"dur"`
+	Name   string `json:"name"`
+	Active bool   `json:"active,omitempty"`
+	Start  int64  `json:"start"`
+	Dur    int    `json:"dur"`
 }
 
 // tlEvent is one (clustered) event mark on the timeline (unix seconds).
@@ -53,7 +57,13 @@ func (h *Hub) timelineFor(stream string, start, end int64) recTimeline {
 	out := recTimeline{Segments: []tlSegment{}, Events: []tlEvent{}}
 	if h.rec != nil {
 		for _, s := range h.rec.segmentsForExport(stream, start, end) {
-			out.Segments = append(out.Segments, tlSegment{Start: s.Start, Dur: s.Dur})
+			active := false
+			if path, ok := h.rec.segmentFile(stream, s.Name); ok {
+				if info, err := os.Stat(path); err == nil {
+					active = time.Since(info.ModTime()) <= recFinalizeQuiesce
+				}
+			}
+			out.Segments = append(out.Segments, tlSegment{Name: s.Name, Start: s.Start, Dur: s.Dur, Active: active})
 		}
 	}
 	if h.events != nil {
@@ -101,7 +111,9 @@ func (h *Hub) HandleDashboardRecTimeline(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+	started := time.Now()
 	tl := h.timelineFor(stream, start, end)
+	w.Header().Set("Server-Timing", fmt.Sprintf("timeline;dur=%.3f", float64(time.Since(started))/float64(time.Millisecond)))
 	w.Header().Set("Content-Type", "application/json")
 	if end > time.Now().Unix()-int64(h.recSegSeconds()) {
 		w.Header().Set("Cache-Control", "no-store")

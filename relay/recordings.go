@@ -177,41 +177,29 @@ func (r *Recorder) segments(stream, day string) []recSegment {
 // stream that overlap [start,end] unix seconds, scanning across day boundaries
 // so a clip can span midnight.
 func (r *Recorder) segmentsForExport(stream string, start, end int64) []recSegment {
-	dir, ok := r.safeStreamDir(stream)
-	if !ok || end <= start {
+	if end <= start {
 		return nil
 	}
-	var segs []recSegment
-	for _, e := range readDirSafe(dir) {
-		n := e.Name()
-		if e.IsDir() || !strings.HasSuffix(n, ".mp4") {
-			continue
-		}
-		t, err := time.ParseInLocation(recNameLayout, strings.TrimSuffix(n, ".mp4"), time.Local)
-		if err != nil {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		segs = append(segs, recSegment{Name: n, Start: t.Unix(), Size: info.Size()})
-	}
-	sort.Slice(segs, func(i, j int) bool { return segs[i].Start < segs[j].Start })
 	nominal := r.segSecs
 	if nominal <= 0 {
 		nominal = recSegSeconds
 	}
+	// Reuse the bounded day indexes. Include neighbouring segments so short
+	// segments crossing midnight retain their true gap to the next recording.
+	var segs []recSegment
+	for _, day := range daysInRange(start-int64(nominal), end+int64(nominal)) {
+		segs = append(segs, r.segments(stream, day)...)
+	}
 	for i := range segs {
-		dur := nominal
+		segs[i].Dur = nominal
 		if i+1 < len(segs) {
 			if gap := int(segs[i+1].Start - segs[i].Start); gap > 0 && gap < nominal {
-				dur = gap
+				segs[i].Dur = gap
 			}
 		}
-		segs[i].Dur = dur
 	}
-	out := segs[:0]
+
+	out := make([]recSegment, 0, len(segs))
 	for _, s := range segs {
 		if s.Start < end && s.Start+int64(s.Dur) > start {
 			out = append(out, s)
@@ -299,7 +287,7 @@ func (h *Hub) HandleDashboardRecFile(w http.ResponseWriter, r *http.Request) {
 	// segments on input media PTS, not wall-clock — and the recorder's input is the
 	// relay's own HLS, which can stall — so a name/clock check can mis-classify a
 	// still-growing file as "past". The file's mtime instead stops advancing the
-	// moment ffmpeg closes the segment (after the +faststart moov relocation), so a
+	// moment ffmpeg closes and flushes the segment, so a
 	// file untouched for the quiescence window is guaranteed complete; only then is
 	// it safe to cache long-term. The currently-recording segment stays no-cache.
 	// http.ServeContent honors If-None-Match/If-Range against the Etag below.

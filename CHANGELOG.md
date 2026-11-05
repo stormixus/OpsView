@@ -6,12 +6,21 @@ All notable changes to OpsView are documented here.
 
 ### Fixed
 
+- Unified recording playback reuses the current MP4 decoder for same-file seeks, cancels superseded lookups before they can change channels/times, and uses filenames returned with timeline coverage instead of waiting for another day-list request. Missing footage stays at the requested time with an explicit empty state.
+- Wheel scrubbing updates the selected clock immediately, coalesces cross-file loading, and can show an accurately extracted video frame while playback starts. Snapshot substitutes are excluded from this preview; extraction is bounded and cancelled with navigation.
+- Newly recorded MP4s write playable fragments while recording instead of waiting for a five-minute file to finalize. Video packets remain stream-copied. Growing-file reads retry boundedly and refresh coverage at rollover; existing recordings are retained.
+- Live startup reuses the initial authenticated state response, overlaps WebSocket/MSE setup, prioritizes newly visible channels within the existing decoder limits, and cleans up stale first-frame callbacks. HEVC MIME detection follows the actual MP4 sample entry.
+- Event requests leave loading with a retry action after a 15-second deadline. Numeric server timing phases distinguish application work from network delivery. Recording-range queries reuse bounded day indexes rather than statting every retained MP4.
+- Event cards use bounded background-generated JPEG derivatives up to 512 pixels at quality 60. Originals remain available. Recent card DOM reuse avoids reloading already decoded images on quick revisits; conversion and extraction concurrency are bounded.
+
 - Event dashboard loading: start the event list without waiting for recording-day metadata, prioritize the first six thumbnails, and load further cards in 24-card pages. Recent day revisits display a bounded cached list while refreshing; stale day/range requests are cancelled and cannot overwrite newer selections.
 - Event JSONL disk reads and appends no longer hold the global event-state lock. Stream-scoped synchronization preserves append/cache consistency and midnight retention behavior.
 - Stored event JPEGs now share a Hub-isolated LRU cache bounded to 32 MiB and 512 entries. File replacement/deletion is revalidated; unchanged browser copies use ETags. Snapshot writes use distinct temporary files for concurrent captures.
 
 
 ### Added
+
+- Click the unified player’s current date/time to open calendar and time controls and jump directly to a recorded instant. Local timezone handling matches the timeline; invalid/future times are rejected.
 
 - 통합 플레이어: 라이브 그리드 셀 클릭 → 풀블리드 플레이어. 우측 줌-타임라인(녹화 커버리지 + 사람/차량/모션 이벤트 아이콘)을 휠로 스크럽해 라이브↔녹화를 매끄럽게 이동, 호버 스크럽 미리보기.
 - relay `/api/rec-timeline` — 시각 범위 단위 녹화 커버리지 + 클러스터링된 이벤트.

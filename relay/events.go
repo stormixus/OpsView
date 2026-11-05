@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"hash/fnv"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -179,10 +181,20 @@ func (e *eventStore) fileInterval(stream, day string, iv eventInterval) {
 	}
 }
 
+// Request-local diagnostics expose aggregate durations only, never file paths.
+type eventReadTiming struct{ wait, stat, cache, load time.Duration }
+
 // eventsForDay returns intervals for (stream,day), mtime-cached from the JSONL.
 func (e *eventStore) eventsForDay(stream, day string) []eventInterval {
+	return e.eventsForDayMeasured(stream, day, nil)
+}
+func (e *eventStore) eventsForDayMeasured(stream, day string, timing *eventReadTiming) []eventInterval {
+	started := time.Now()
 	lock := e.streamLock(stream)
 	lock.Lock()
+	if timing != nil {
+		timing.wait += time.Since(started)
+	}
 	defer lock.Unlock()
 	e.mu.Lock()
 	key := stream + "|" + day
@@ -193,18 +205,33 @@ func (e *eventStore) eventsForDay(stream, day string) []eventInterval {
 	}
 	e.mu.Unlock()
 	p := filepath.Join(e.recDir, filepath.FromSlash(stream), ".events", day+".jsonl")
+	started = time.Now()
 	info, err := os.Stat(p)
+	if timing != nil {
+		timing.stat += time.Since(started)
+	}
 	if err != nil {
 		return nil
 	}
+	started = time.Now()
 	e.mu.Lock()
 	c, ok := e.cache[key]
 	if ok && c.mtime.Equal(info.ModTime()) && c.size == info.Size() {
 		ivals := append([]eventInterval(nil), c.ivals...)
 		e.mu.Unlock()
+		if timing != nil {
+			timing.cache += time.Since(started)
+		}
 		return ivals
 	}
 	e.mu.Unlock()
+	if timing != nil {
+		timing.cache += time.Since(started)
+	}
+	started = time.Now()
+	if timing != nil {
+		defer func() { timing.load += time.Since(started) }()
+	}
 	f, err := os.Open(p)
 	if err != nil {
 		return nil
@@ -392,6 +419,14 @@ func (h *Hub) HandleDashboardRecEventsList(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "events disabled", http.StatusConflict)
 		return
 	}
+	started := time.Now()
+	var timings eventReadTiming
+	defer func() {
+		if elapsed := time.Since(started); elapsed > time.Second {
+			ms := func(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
+			log.Printf("[rec-events] app_ms=%.0f wait_ms=%.0f stat_ms=%.0f cache_ms=%.0f load_ms=%.0f cancelled=%t", ms(elapsed), ms(timings.wait), ms(timings.stat), ms(timings.cache), ms(timings.load), r.Context().Err() != nil)
+		}
+	}()
 	q := r.URL.Query()
 	agentID := q.Get("agent")
 	day := q.Get("day")
@@ -424,7 +459,7 @@ func (h *Hub) HandleDashboardRecEventsList(w http.ResponseWriter, r *http.Reques
 					if r.Context().Err() != nil {
 						return
 					}
-					for _, iv := range h.events.eventsForDay(stream, d) {
+					for _, iv := range h.events.eventsForDayMeasured(stream, d, &timings) {
 						items = append(items, recEventItem{
 							Stream: stream,
 							Ch:     ch.ChNum,
@@ -441,11 +476,22 @@ func (h *Hub) HandleDashboardRecEventsList(w http.ResponseWriter, r *http.Reques
 	}
 
 	// coalesce fragmented per-channel events (grid: consolidate aggressively), sort newest first
+	mergeStart := time.Now()
 	items = clusterEventItems(items, recEventMergeGapSec)
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].Start > items[j].Start
 	})
 
+	mergeTime := time.Since(mergeStart)
+	encodeStart := time.Now()
+	body, err := json.Marshal(map[string]interface{}{"events": items})
+	if err != nil {
+		http.Error(w, "encode failed", http.StatusInternalServerError)
+		return
+	}
+	encodeTime := time.Since(encodeStart)
+	ms := func(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
+	w.Header().Set("Server-Timing", fmt.Sprintf("app;dur=%.3f, wait;dur=%.3f, stat;dur=%.3f, cache;dur=%.3f, load;dur=%.3f, merge;dur=%.3f, encode;dur=%.3f", ms(time.Since(started)), ms(timings.wait), ms(timings.stat), ms(timings.cache), ms(timings.load), ms(mergeTime), ms(encodeTime)))
 	w.Header().Set("Content-Type", "application/json")
 	today := todayKey()
 	live := false
@@ -460,5 +506,5 @@ func (h *Hub) HandleDashboardRecEventsList(w http.ResponseWriter, r *http.Reques
 	} else {
 		w.Header().Set("Cache-Control", "private, max-age=60")
 	}
-	json.NewEncoder(w).Encode(map[string]interface{}{"events": items})
+	w.Write(append(body, '\n'))
 }

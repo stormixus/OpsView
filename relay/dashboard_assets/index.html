@@ -311,7 +311,8 @@
   <button class="uplayer-close" id="uplayerClose" title="닫기 (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
   <div class="up-stage" id="upStage">
     <video class="up-video" id="upVideo" muted autoplay playsinline></video>
-    <div class="up-toplabel"><span id="upTitle">—</span><span class="up-sub" id="upSub"></span><span class="up-bigclock" id="upBigClock"></span></div>
+    <img id="upScrubFrame" class="up-scrub-frame" alt="선택 시각의 녹화 미리보기" hidden>
+    <div class="up-toplabel"><span id="upTitle">—</span><span class="up-sub" id="upSub"></span><button type="button" class="up-bigclock" id="upBigClock" aria-haspopup="dialog" aria-controls="upTimeJump" title="날짜와 시간으로 이동"></button></div>
     <button type="button" class="up-hd-btn" id="upHdBtn" hidden>HD</button>
     <div class="up-livebadge" id="upLiveBadge" aria-label="라이브"><span class="dot live"></span></div>
     <div class="up-transport" id="upTransport" aria-label="재생 컨트롤">
@@ -358,6 +359,17 @@
   </div>
   <div class="drawer-note">화면 설정은 이 브라우저에 저장됩니다. 지점·알림·보안은 상단 <b>관리</b>에서 설정하세요.</div>
 </aside>
+<dialog id="upTimeJump" class="up-time-jump" aria-labelledby="upJumpTitle">
+  <form id="upTimeJumpForm">
+    <h2 id="upJumpTitle">날짜 · 시간으로 이동</h2>
+    <p>선택한 채널의 녹화 시각으로 이동합니다.</p>
+    <label for="upJumpDate">날짜</label><input id="upJumpDate" type="date" required>
+    <label for="upJumpTime">시간</label><input id="upJumpTime" type="time" step="1" required>
+    <p id="upJumpError" role="alert"></p>
+    <div class="up-jump-actions"><button type="button" id="upJumpCancel">취소</button><button type="submit">이동</button></div>
+  </form>
+</dialog>
+<script src="/dashboard/assets/player_time.js"></script>
 <script src="/dashboard/assets/timeline_math.js"></script>
 <script src="/dashboard/assets/livestream.js"></script>
 <script src="/dashboard/assets/gridrotate.js"></script>

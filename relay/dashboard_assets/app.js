@@ -110,11 +110,16 @@ function adaptState(api){
     };
   });
 }
+var statePollPending=null,statePollAbort=null;
 function pollState(){
-  return fetch('/dashboard/api/state', {headers:{'Accept':'application/json'}})
+  if(statePollPending) return statePollPending;
+  var controller=new AbortController();statePollAbort=controller;
+  statePollPending=fetch('/dashboard/api/state', {headers:{'Accept':'application/json'},signal:controller.signal})
     .then(function(r){ if(r.status===401) throw {auth:1}; if(!r.ok) throw {net:1}; return r.json(); })
-    .then(function(api){ demo.relayDown=false; adaptState(api); applyRealRender(); })
-    .catch(function(e){ if(e&&e.auth){ logoutToLogin(); } else { demo.relayDown=true; renderConn(); } });
+    .then(function(api){ if(controller.signal.aborted)return null;demo.relayDown=false; adaptState(api); applyRealRender(); if(selected===null && /\/dashboard\/agent\//.test(location.pathname))routeFromPath(); return api; })
+    .catch(function(e){ if(controller.signal.aborted)return null;if(e&&e.auth){ logoutToLogin(); } else { demo.relayDown=true; renderConn(); } return null; })
+    .finally(function(){if(statePollAbort===controller){statePollPending=null;statePollAbort=null;}});
+  return statePollPending;
 }
 // Re-render after a poll without tearing down live <video> elements.
 function applyRealRender(){
@@ -191,8 +196,8 @@ function renderDvrChips(a){
 var fails=0, lockUntil=0, lockTimer=null;
 var loginEl=$('#login'), appEl=$('#app');
 var pwIn=$('#pw'), enterBtn=$('#enterBtn'), loginMsg=$('#loginMsg'), loginCard=$('#loginCard');
-function showApp(){ loginEl.style.display='none'; appEl.classList.add('show'); startLoop(); }
-function logoutToLogin(){ stopLoop(); appEl.classList.remove('show'); loginEl.style.display='grid'; if(pwIn){pwIn.value='';pwIn.focus();} }
+function showApp(initial){ loginEl.style.display='none'; appEl.classList.add('show'); startLoop(initial); }
+function logoutToLogin(){ stopLoop();if(statePollAbort)statePollAbort.abort();statePollAbort=null;statePollPending=null;recStop();if(up&&up.open)closePlayer();if(typeof recEventCache!=='undefined')recEventCache.clear();if(typeof recCardCache!=='undefined')recCardCache.clear();recCtx.eventList=[];$('#recEventGrid').innerHTML=''; appEl.classList.remove('show'); loginEl.style.display='grid'; if(pwIn){pwIn.value='';pwIn.focus();} }
 function loginFail(msg, bad){
   fails++; loginCard.classList.add('err','shake'); setTimeout(function(){loginCard.classList.remove('shake');},420);
   if(fails>=4){ lock(); } else { loginMsg.textContent=msg||('비밀번호가 틀렸습니다 ('+fails+'/4)'); loginMsg.className='login-msg '+(bad||'bad'); }
@@ -233,7 +238,7 @@ $('#logoutBtn').addEventListener('click', function(){ fetch('/dashboard/api/logo
 // #login stays hidden until we know we're NOT authed, so it never flashes on reload.
 function showLogin(){ loginEl.style.display='grid'; setTimeout(function(){pwIn.focus();},120); }
 fetch('/dashboard/api/state').then(function(r){
-  if(r.status===200){ var nx=safeNext(); if(nx){ location.href=nx; return; } showApp(); } else { showLogin(); }
+  if(r.status===200){ var nx=safeNext(); if(nx){ location.href=nx; return; } return r.json().then(function(api){showApp(api);}); } else { showLogin(); }
 }).catch(showLogin);
 
 /* ============================================================ NAVIGATION */
@@ -532,6 +537,13 @@ var LIVE_STALL_MS=8000, WATCHDOG_MS=3000, LIVE_BACKOFF_MAX=15000;
 function liveCap(){ return _isMobile()?LIVE_CAP_MOBILE:LIVE_CAP_DESKTOP; }
 function _bufEnd(v){ try{ return v.buffered.length? v.buffered.end(v.buffered.length-1):0; }catch(e){ return 0; } }
 function _cellShouldBeLive(cell){ return !!gridSched && !up.open && !!cell && cell._wantLive===true; }
+function _cellCancelFirstFrame(cell){
+  var video=cell&&cell.querySelector('video');if(!video)return;
+  cell._playGeneration=(cell._playGeneration||0)+1;
+  if(cell._frameCallback && video.cancelVideoFrameCallback)video.cancelVideoFrameCallback(cell._frameCallback);
+  if(cell._firstData)video.removeEventListener('loadeddata',cell._firstData);
+  cell._frameCallback=null;cell._firstData=null;
+}
 function _cellPlay(cell){
   if(!cell || cell._player) return;
   var path=cell.dataset.path; if(!path) return;
@@ -539,8 +551,20 @@ function _cellPlay(cell){
   var wsUrl=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/surv/ws/'+path;
   var hlsUrl=location.origin+'/surv/'+path+'/index.m3u8';
   cell._liveProg={v:-1, at:Date.now()};
+  cell._firstFrameAt=0;
+  _cellCancelFirstFrame(cell);
+  var generation=cell._playGeneration;
+  var started=performance.now();video.dataset.liveStartedAt=started;
+  function firstFrame(){
+    if(!cell._wantLive || generation!==cell._playGeneration) return;
+    cell._hasFrame=true;cell._firstFrameAt=performance.now();
+    video.dataset.viewportToFrameMs=Math.round(cell._firstFrameAt-(cell._visibleAt||started));
+    if(gridSched && gridSched.eligible.some(function(c){return !c._hasFrame;})) gridRotate(false);
+  }
+  if(video.requestVideoFrameCallback) cell._frameCallback=video.requestVideoFrameCallback(firstFrame);
+  else {cell._firstData=firstFrame;video.addEventListener('loadeddata',firstFrame,{once:true});}
   cell._player=playWS(video, wsUrl,
-    function(){ playHLS(video, hlsUrl); },   // pre-init: fall back to HLS
+    function(){ if(_cellShouldBeLive(cell) && !playHLS(video,hlsUrl)) _cellReconnect(cell); },
     function(){ _cellReconnect(cell); });    // post-init death: zombie reconnect
   _cellUnfreeze(cell);
 }
@@ -549,6 +573,7 @@ function _cellPlay(cell){
 // frozen meanwhile). Rotated-out / overlay-covered cells are left to rest.
 function _cellReconnect(cell){
   if(!cell) return;
+  _cellCancelFirstFrame(cell);
   if(cell._player){ try{ cell._player.close&&cell._player.close(); }catch(e){} cell._player=null; }
   if(!_cellShouldBeLive(cell)) return;
   _cellFreeze(cell);
@@ -562,6 +587,7 @@ function _cellReconnect(cell){
 }
 function _cellStop(cell){
   if(!cell) return;
+  _cellCancelFirstFrame(cell);
   cell._wantLive=false;
   if(cell._reconnTimer){ clearTimeout(cell._reconnTimer); cell._reconnTimer=null; }
   if(cell._player){ try{ cell._player.close&&cell._player.close(); }catch(e){} cell._player=null; }
@@ -598,7 +624,11 @@ function gridRotate(advance){
   if(!gridSched || up.open) return; // player overlay covers the grid — don't decode under it
   var pool=gridSched.eligible, cap=liveCap();
   if(advance) gridSched.start=nextStart(pool.length, cap, gridSched.start);
-  var liveSet=new Set(); liveWindow(pool.length, cap, gridSched.start).forEach(function(i){ if(pool[i]) liveSet.add(pool[i]); });
+  // Seed a first decoded picture for newly visible cells before dwelling on
+  // cells that already have a frozen picture. Decoder concurrency stays capped.
+  var ordered=advance?pool:pool.filter(function(c){return !c._hasFrame;}).concat(pool.filter(function(c){return c._hasFrame;}));
+  var offset=advance?gridSched.start:0;
+  var liveSet=new Set(); liveWindow(ordered.length, cap, offset).forEach(function(i){ if(ordered[i]) liveSet.add(ordered[i]); });
   pool.forEach(function(c){
     var want=liveSet.has(c);
     c._wantLive=want; // authoritative: drives the watchdog + reconnect gate
@@ -631,13 +661,15 @@ function startLiveGrid(cells){
   // rotation caps concurrent decoders within it.
   gridSched.obs=new IntersectionObserver(function(entries){
     if(!gridSched) return;
+    var entered=[];
     entries.forEach(function(en){
       var c=en.target, i=gridSched.eligible.indexOf(c);
-      if(en.isIntersecting){ if(i<0) gridSched.eligible.push(c); }
+      if(en.isIntersecting){ if(i<0){c._visibleAt=performance.now();entered.push(c);} }
       else { if(i>=0) gridSched.eligible.splice(i,1); if(c._player){ _cellFreeze(c); _cellStop(c); } }
     });
-    gridRotate(false); // re-evaluate the live window immediately on a visibility change
-  }, {rootMargin:'100px'});
+    if(entered.length){gridSched.eligible=entered.concat(gridSched.eligible);gridSched.start=0;}
+    gridRotate(false); // newly visible cells connect immediately, within the cap
+  }, {rootMargin:'0px'});
   cells.forEach(function(c){ gridSched.obs.observe(c); });
   // Background tabs are throttled hard; skip ticking there and let _installGridResume
   // kick a fresh pass on return instead of churning reconnects in the background.
@@ -679,7 +711,7 @@ function stopLiveGrid(){
 // live grid leaves cells black there. Desktop handles many fine — we only gate
 // playback by visibility on mobile, leaving desktop's all-at-once behavior intact.
 function _isMobile(){ return _isIOS() || /Android|Mobile/i.test(navigator.userAgent); }
-function playHLS(video, hlsUrl){ if(video.canPlayType('application/vnd.apple.mpegurl')){ video.src=hlsUrl; video.play().catch(function(){}); } }
+function playHLS(video, hlsUrl){ if(!video.canPlayType('application/vnd.apple.mpegurl')) return false; video.src=hlsUrl; video.play().catch(function(){}); return true; }
 function liveCellHTML(s){
   var off=!s.active;
   return '<video class="cellvid" muted autoplay playsinline></video>'+
@@ -783,7 +815,8 @@ modalCell.addEventListener('keydown', function(e){ if(e.target.classList.contain
 /* ============================================================ EVENTS (이벤트) — Protect-style thumbnail grid */
 // recCtx keeps the day + the agent-wide event list (newest-first from the API).
 // segCache memoizes per-stream segment lists for the day (used for modal playback).
-var REC_EV_PAGE = 24; // number of event cards to load per page
+var REC_EV_PAGE = 24;
+var recCardCache=new Map(), REC_CARD_CACHE_CAP=96; // number of event cards to load per page
 var recCtx = { day:null, selDay:'', availDays:[], eventList:[], eventFilter:'all', segCache:{}, evShown:0, range:null, preset:null };
 function pad2(n){ return (n<10?'0':'')+n; }
 function recDayStr(d){ return ''+d.getFullYear()+pad2(d.getMonth()+1)+pad2(d.getDate()); }
@@ -831,11 +864,17 @@ function recLoadDays(){
     return days;
   }).catch(function(){ return []; });
 }
-var recListAbort=null, recEventCache=new Map();
+var recListAbort=null, recListTimer=null, recEventCache=new Map();
 function recBeginListLoad(){
   if(recListAbort) recListAbort.abort();
-  recListAbort=new AbortController();
-  return ++recRangeToken;
+  clearTimeout(recListTimer);
+  var controller=new AbortController(),tok=++recRangeToken;
+  recListAbort=controller;recCtx.loadTimedOut=false;
+  recListTimer=setTimeout(function(){
+    if(tok!==recRangeToken) return;
+    recCtx.loadTimedOut=true;controller.abort();
+  },15000);
+  return tok;
 }
 function recLoadDay(){
   var day=recDateInputVal(); if(!day) return Promise.resolve(null);
@@ -849,6 +888,7 @@ function recLoadDay(){
   recRenderEventList();
   return loadRecEventList(day, recListAbort.signal).then(function(list){
     if(tok!==recRangeToken || selected!==agent) return null;
+    clearTimeout(recListTimer);
     recCtx.loading=false; recCtx.loadError=list===null;
     if(list===null){ if(!recCtx.eventList.length) recRenderEventList(); return null; }
     recEventCache.delete(key);
@@ -890,8 +930,8 @@ function recLoadRange(from, to, kind){
   recCtx.eventList=[]; recRenderEventList();
   fetch(BASE+'/api/rec-events-list?agent='+encodeURIComponent(selected)+'&from='+from+'&to='+to, {credentials:'same-origin',signal:recListAbort.signal})
     .then(function(r){ return r.ok? r.json() : Promise.reject(new Error("event list failed")); })
-    .then(function(j){ if(tok!==recRangeToken) return; recCtx.loading=false; recCtx.eventList=(j&&Array.isArray(j.events))?j.events:[]; recRenderEventList(); })
-    .catch(function(){ if(tok!==recRangeToken) return; recCtx.loading=false; recCtx.loadError=true; recCtx.eventList=[]; recRenderEventList(); });
+    .then(function(j){ if(tok!==recRangeToken) return; clearTimeout(recListTimer); recCtx.loading=false; recCtx.eventList=(j&&Array.isArray(j.events))?j.events:[]; recRenderEventList(); })
+    .catch(function(){ if(tok!==recRangeToken) return; clearTimeout(recListTimer); recCtx.loading=false; recCtx.loadError=true; recCtx.eventList=[]; recRenderEventList(); });
 }
 (function(){ var p=$('#recPresets'); if(p) p.addEventListener('click', function(e){ var b=e.target.closest('[data-preset]'); if(b) recPreset(b.dataset.preset); }); })();
 function loadRecEventList(day, signal){
@@ -920,7 +960,7 @@ var recIntersectObs = null; // IntersectionObserver for infinite scroll sentinel
 function evCardHTML(ev, index){
   var d=new Date(ev.start*1000), kind=ev.kind||'motion', kindLabel=REC_KIND_NAMES[kind]||kind;
   var when=(d.getMonth()+1)+'월 '+pad2(d.getDate())+', '+pad2(d.getHours())+':'+pad2(d.getMinutes());
-  var thumbUrl=BASE+'/api/rec-thumb?stream='+encodeURIComponent(ev.stream)+'&t='+ev.start+'&v=2';
+  var thumbUrl=BASE+'/api/rec-thumb?stream='+encodeURIComponent(ev.stream)+'&t='+ev.start+'&size=card&v=3';
   var plateHtml = ev.plate ? '<span class="ev-plate-badge">🚗 ' + escHtml(ev.plate) + '</span>' : '';
   return '<button class="ev-cell ev-k-'+escAttr(kind)+'" data-stream="'+escAttr(ev.stream)+'" data-start="'+ev.start+'" data-ch="'+escAttr(''+ev.ch)+'">'+
     '<img class="ev-cellimg" loading="'+(index<6?'eager':'lazy')+'" fetchpriority="'+(index<6?'high':'low')+'" decoding="async" src="'+escAttr(thumbUrl)+'" alt="'+escAttr(kindLabel)+'">'+
@@ -945,7 +985,7 @@ function recRenderEventList(){
   });
   filtersEl.innerHTML=filters.join('');
   $('#recMeta').textContent = events.length ? (events.length+'건') : '';
-  if(!events.length){ grid.innerHTML='<div class="ev-grid-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg><b>'+(recCtx.loading?'이벤트 불러오는 중…':recCtx.loadError?'이벤트를 불러오지 못했습니다':'이벤트 없음')+'</b></div>'; recCleanupIntersect(); return; }
+  if(!events.length){ grid.innerHTML='<div class="ev-grid-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg><b>'+(recCtx.loading?'이벤트 불러오는 중…':recCtx.loadError?(recCtx.loadTimedOut?'응답이 지연되고 있습니다':'이벤트를 불러오지 못했습니다'):'이벤트 없음')+'</b>'+(recCtx.loadError?'<button type="button" data-action="retry">다시 시도</button>':'')+'</div>'; recCleanupIntersect(); return; }
   var filtered = recCtx.eventFilter==='all' ? events : events.filter(function(ev){ return (ev.kind||'motion')===recCtx.eventFilter; });
   if(!filtered.length){ grid.innerHTML='<div class="ev-grid-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg><b>선택한 종류 이벤트 없음</b></div>'; recCleanupIntersect(); return; }
   // Reset for fresh render (day/filter change)
@@ -961,14 +1001,28 @@ function recAppendEvents(grid, filtered){
   var end = Math.min(start + REC_EV_PAGE, filtered.length);
   var slice = filtered.slice(start, end);
   if(!slice.length) return;
-  var html = slice.map(function(ev, i){ return evCardHTML(ev, start+i); }).join('');
-  grid.insertAdjacentHTML('beforeend', html);
+  var fragment=document.createDocumentFragment(),now=Date.now();
+  slice.forEach(function(ev,i){
+    var key=ev.stream+'|'+ev.start+'|'+ev.kind,sig=JSON.stringify(ev),cached=recCardCache.get(key),card;
+    if(cached && now-cached.at<30000 && cached.sig===sig && cached.node.querySelector('img').getAttribute('src')){
+      card=cached.node; // preserve loaded image/decoder state across quick revisits
+    } else {
+      var wrap=document.createElement('div');wrap.innerHTML=evCardHTML(ev,start+i);card=wrap.firstElementChild;
+    }
+    var image=card.querySelector('img');
+    image.loading=start+i<6?'eager':'lazy';image.fetchPriority=start+i<6?'high':'low';
+    recCardCache.delete(key);recCardCache.set(key,{at:now,sig:sig,node:card});
+    while(recCardCache.size>REC_CARD_CACHE_CAP)recCardCache.delete(recCardCache.keys().next().value);
+    fragment.appendChild(card);
+  });
+  grid.appendChild(fragment);
   recCtx.evShown = end;
   // Attach onerror handler to newly appended thumbnails
   var newImgs = grid.querySelectorAll('.ev-cellimg');
   for(var i = newImgs.length - slice.length; i < newImgs.length; i++){
     var img = newImgs[i];
-    if(img && !img.onerror){
+    if(img && !img._ovErrorBound){
+      img._ovErrorBound=true;
       img.addEventListener('error', function(){ this.onerror=null; this.classList.add('ev-thumb-na'); this.removeAttribute('src'); });
     }
   }
@@ -1008,13 +1062,17 @@ $('#recEventFilters').addEventListener('click', function(e){
 // Click a card -> open the unified rail player seeked to the event time (REC mode).
 // Replaces the old per-event clip modal so live and recording share one player.
 $('#recEventGrid').addEventListener('click', function(e){
+  if(e.target.closest('[data-action=retry]')){
+    if(recCtx.range)recLoadRange(recCtx.range.from,recCtx.range.to,recCtx.preset);else recLoadDay();
+    return;
+  }
   var card=e.target.closest('.ev-cell'); if(!card) return;
   openPlayer(card.dataset.stream, {mode:'rec', t:+card.dataset.start});
 });
-function recSegsForDay(stream, day){
+function recSegsForDay(stream, day, signal){
   var key=stream+'|'+day;
   if(recCtx.segCache[key]) return Promise.resolve(recCtx.segCache[key]);
-  return fetch(BASE+'/api/rec?stream='+encodeURIComponent(stream)+'&day='+day).then(function(r){return r.ok?r.json():null;})
+  return fetch(BASE+'/api/rec?stream='+encodeURIComponent(stream)+'&day='+day,{signal:signal}).then(function(r){return r.ok?r.json():null;})
     .then(function(d){ var segs=(d&&d.segments)||[]; recCtx.segCache[key]=segs; return segs; })
     .catch(function(){ return []; });
 }
@@ -1083,7 +1141,7 @@ document.addEventListener('click', function(){ if(recCalOpen) recCalClose(); });
 document.addEventListener('keydown', function(e){ if(e.key==='Escape' && recCalOpen) recCalClose(); });
 // Navigation stops event requests/scrolling; dismissing a modal only stops its video.
 var recModalVideo=null;
-function recStop(){ recRangeToken++; if(recListAbort) recListAbort.abort(); recCleanupIntersect(); recStopVideo(); }
+function recStop(){ clearTimeout(recListTimer); recRangeToken++; if(recListAbort) recListAbort.abort(); recCleanupIntersect(); recStopVideo(); }
 function recStopVideo(){ if(recModalVideo){ try{ recModalVideo.pause(); recModalVideo.removeAttribute('src'); recModalVideo.load(); }catch(e){} recModalVideo=null; } }
 /* ============================================================ UNIFIED PLAYER (통합 플레이어) */
 var up = {
@@ -1111,6 +1169,10 @@ function openPlayer(stream, opts){
     var m=String(stream).match(/_ch(\d+)/);
     s={ id:stream, path:stream, codec:'h264', name:'CH'+(m?m[1]:'?'), ch:(m?+m[1]:0), hires:false };
   }
+  upCancelSeek();upClearScrubFrame();
+  if(up._timelineAbort) up._timelineAbort.abort();
+  up._timelineSeq=(up._timelineSeq||0)+1;up._fetching=false;
+  up.segs=[];up.events=[];up._loaded=null;up._curSeg=null;
   up.open=true; up.stream=s.id; up.path=s.path; up.codec=s.codec; up.name=s.name; up.sub=a.name;
   up.hires=!!s.hires; up.hdOn=false;
   up.pxPerSec=1.0; // reset to the default zoom on every open (~1s/px — tight enough that a 10s skip and fine scrub are visible)
@@ -1181,6 +1243,8 @@ function upAnimateSkip(from, to){
   up._skipAnim=requestAnimationFrame(step);
 }
 function upStartLive(){
+  upCancelSeek();upClearScrubFrame();
+  upVideo.style.visibility='';
   upStopVideo();
   if(up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
   upPaused=false; upUpdatePauseBtn();
@@ -1191,9 +1255,10 @@ function upStartLive(){
   var wsUrl=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/surv/ws/'+wsPath;
   var hlsUrl=location.origin+'/surv/'+up.path+'/index.m3u8';
   up._liveProg={v:-1, at:Date.now()};
+  var generation=up._seekSeq;
   up.player=playWS(upVideo, wsUrl,
-    function(){ playHLS(upVideo, hlsUrl); },
-    function(){ upLiveReconnect(); });
+    function(){ if(up.open && up.mode==='live' && generation===up._seekSeq && !playHLS(upVideo,hlsUrl))upLiveReconnect(); },
+    function(){ if(generation===up._seekSeq)upLiveReconnect(); });
   upSyncLiveWindow(); upEnsureTimeline(true); clearTimeout(up._liveTimer); upLiveTick();
 }
 // Zombie-live for the fullscreen single view: a dead live feed is rebuilt with
@@ -1214,7 +1279,8 @@ function upStopVideo(){
   if(up._skipAnim){ cancelAnimationFrame(up._skipAnim); up._skipAnim=null; }
   if(up._liveReconn){ clearTimeout(up._liveReconn); up._liveReconn=null; }
   if(up.player){ try{ up.player.close&&up.player.close(); }catch(e){} up.player=null; }
-  upVideo.onended=null; upVideo.onloadedmetadata=null;
+  upVideo.onended=null; upVideo.onloadedmetadata=null;upVideo.onseeked=null;upVideo.onloadeddata=null;upVideo.onerror=null;
+  up._curSeg=null;
   try{ upVideo.pause(); upVideo.removeAttribute('src'); upVideo.load(); }catch(e){}
 }
 
@@ -1225,22 +1291,27 @@ function upStopVideo(){
 up._loaded=null;     // {from,to} unix-sec range currently held in up.segs/up.events
 up._fetching=false;
 up._seekSeq=0;
-function upLoadTimeline(qs,qe){
-  return fetch(BASE+'/api/rec-timeline?stream='+encodeURIComponent(up.path)+'&start='+Math.round(qs)+'&end='+Math.round(qe),{credentials:'same-origin'})
+function upLoadTimeline(qs,qe,path,signal){
+  return fetch(BASE+'/api/rec-timeline?stream='+encodeURIComponent(path||up.path)+'&start='+Math.round(qs)+'&end='+Math.round(qe),{credentials:'same-origin',signal:signal})
     .then(function(r){ return r.ok? r.json() : null; });
 }
 function upEnsureTimeline(force){
-  if(!up.stream || up._fetching) return;
+  if(!up.open || !up.stream || up._seeking) return;
   var span=Math.max(60, up.t1-up.t0);
-  if(!force && up._loaded && up._loaded.from <= up.t0-span*0.4 && up._loaded.to >= up.t1+span*0.4) return;
+  var liveBand=up.t1>Date.now()/1000-600;
+  if(!force && up._loaded && up._loaded.from <= up.t0-span*0.4 && up._loaded.to >= up.t1+span*0.4 && (!liveBand || Date.now()-up._loaded.at<5000)) return;
   var qs=up.t0-span, qe=up.t1+span; // one extra span of margin on each side
-  up._fetching=true;
-  upLoadTimeline(qs,qe).then(function(d){
+  if(up._fetching && !force) return;
+  if(up._timelineAbort) up._timelineAbort.abort();
+  var controller=new AbortController(),path=up.path,seq=(up._timelineSeq||0)+1;
+  up._timelineSeq=seq;up._timelineAbort=controller;up._fetching=true;
+  upLoadTimeline(qs,qe,path,controller.signal).then(function(d){
+    if(!up.open || path!==up.path || seq!==up._timelineSeq || up._seeking) return;
     up._fetching=false;
     if(!d) return;
-    up.segs=d.segments||[]; up.events=d.events||[]; up._loaded={from:qs,to:qe};
+    up.segs=d.segments||[]; up.events=d.events||[]; up._loaded={from:qs,to:qe,at:Date.now()};
     if(up.open) upRenderRail();
-  }).catch(function(){ up._fetching=false; });
+  }).catch(function(){ if(seq===up._timelineSeq) up._fetching=false; });
 }
 
 var upRail=$('#upRail');
@@ -1442,6 +1513,22 @@ function upSetBigClock(now){
   bc.setAttribute('aria-label', (live?'라이브':'녹화')+' '+upFmtFull(t));
 }
 
+// Native calendar and time controls use the same local timezone as the rail.
+$('#upBigClock').addEventListener('click',function(){
+  if(!up.open) return;
+  var value=upFmtFull(up.mode==='live'?Math.floor(Date.now()/1000):up.cursorT);
+  $('#upJumpDate').value=value.slice(0,10);$('#upJumpTime').value=value.slice(11);
+  $('#upJumpDate').max=upFmtFull(Date.now()/1000).slice(0,10);
+  $('#upJumpError').textContent='';$('#upTimeJump').showModal();$('#upJumpDate').focus();
+});
+$('#upJumpCancel').addEventListener('click',function(){$('#upTimeJump').close();});
+$('#upTimeJumpForm').addEventListener('submit',function(e){
+  e.preventDefault();
+  var t=parsePlayerDateTime($('#upJumpDate').value,$('#upJumpTime').value);
+  if(t===null || t>Date.now()/1000){$('#upJumpError').textContent='현재 시각 이전의 올바른 날짜와 시간을 선택해주세요.';return;}
+  $('#upTimeJump').close();upSeekTo(t);
+});
+
 // the timeline is a hover-reveal OVERLAY on top of the full-bleed video — it never
 // resizes the video. Reveal when the pointer nears the right edge, or while scrubbing.
 function upRailReveal(on){ upRail.classList.toggle('show', on || up.mode==='rec'); }
@@ -1464,6 +1551,9 @@ function upLiveTick(){
 
 function closePlayer(){
   if(!up.open) return;
+  upCancelSeek();upClearScrubFrame();
+  if(up._timelineAbort) up._timelineAbort.abort();up._timelineSeq=(up._timelineSeq||0)+1;
+  if($('#upTimeJump').open) $('#upTimeJump').close();
   up.open=false; upStopVideo();
   // Move focus out before hiding: the close button keeps focus when clicked, and
   // aria-hidden on a focused element's ancestor warns (and is an a11y bug).
@@ -1483,7 +1573,7 @@ function closePlayer(){
 function playerPathSuffix(){
   if(!up.open) return '';
   var s='/ch/'+encodeURIComponent(up.stream);
-  if(up.mode==='rec' && up.cursorT) s+='/t/'+Math.round(up.cursorT);
+  if((up.mode==='rec'||up.mode==='gap') && up.cursorT) s+='/t/'+Math.round(up.cursorT);
   else if(up.hires && up.hdOn) s+='/hd';
   return s;
 }
@@ -1512,73 +1602,142 @@ if($('#upHdBtn')) $('#upHdBtn').addEventListener('click', function(){
   syncPlayerURL();
 });
 upEl.addEventListener('click', function(e){ if(e.target===upEl) closePlayer(); });
-document.addEventListener('keydown', function(e){ if(e.key==='Escape' && up.open) closePlayer(); });
+document.addEventListener('keydown', function(e){ if(e.key==='Escape' && up.open && !$('#upTimeJump').open) closePlayer(); });
 
-// enter REC at unix-second time t: find the covering segment and seek into it.
-function upSeekTo(t,_retried){
-  var i=segmentAt(up.segs, t);
-  if(i<0){
-    // panned/clicked into a range we haven't loaded yet — fetch around t, then retry once
-    if(!_retried && (!up._loaded || t<up._loaded.from || t>up._loaded.to)){
-      var lspan=Math.max(60, up.t1-up.t0);
-      up._fetching=false;
-      upLoadTimeline(t-lspan, t+lspan).then(function(d){
-        if(d){ up.segs=d.segments||[]; up.events=d.events||[]; up._loaded={from:t-lspan,to:t+lspan}; }
-        upSeekTo(t, true);
-      });
-      return;
-    }
-    upGap(t); return;
-  }
-  var seg=up.segs[i]; // capture BEFORE upSyncRecWindow() — it can reload up.segs (via
-                      // upEnsureTimeline), which would make up.segs[i] stale/undefined -> black video.
-  up.mode='rec'; upEl.classList.add('up-rec'); upRail.classList.add('show');
-  $('#upLiveBadge').style.display='none'; $('#upState').textContent='';
-  clearTimeout(up._liveTimer); // stop the 1s LIVE re-render so it can't fight the REC rAF over t0/t1
-  up.cursorT=t;
-  syncPlayerURL(); // keep ?t= in sync with the recording cursor for reload-restore
-  upSyncRecWindow(); upRenderRail(); // snap the rail to t immediately (don't wait for the segment load)
-  upStopVideo();
-  var seq=++up._seekSeq;
-  upResolveSegName(seg.start).then(function(name){
-    if(seq!==up._seekSeq || !up.open) return; // superseded by a newer seek (rapid scrub/wheel)
-    if(!name){ upGap(t); return; }
-    if(up.codec==='h265' && !upVideo.canPlayType('video/mp4; codecs="hvc1"')){
-      $('#upState').textContent='이 브라우저는 H.265 녹화 재생을 지원하지 않습니다 (라이브만 가능)';
-    }
-    upVideo.src=BASE+'/api/rec-file?stream='+encodeURIComponent(up.path)+'&name='+encodeURIComponent(name);
-    upVideo.currentTime=0;
-    upVideo.onloadedmetadata=function(){
-      try{ upVideo.currentTime=Math.max(0,t-seg.start); }catch(e){}
-      if(upPaused){
-        try{ upVideo.pause(); }catch(e){}
-        if(up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
-        upSyncRecWindow(); upRenderRail();
-      } else {
-        upVideo.play().catch(function(){});
+// A precise decoded frame is independent of video metadata/range startup.
+// Event snapshots are deliberately excluded by frame=1: they can be nearby times.
+function upClearScrubFrame(){
+  clearTimeout(up._previewTimer);up._previewTimer=null;up._previewWanted=null;
+  var img=$('#upScrubFrame');img.hidden=true;img.onload=null;img.onerror=null;img.removeAttribute('src');
+}
+function upPreviewAt(t){
+  up._previewWanted=Math.round(t);
+  var img=$('#upScrubFrame');img.hidden=true;
+  if(up._previewTimer)return;
+  var wait=Math.max(0,180-(performance.now()-(up._previewStarted||-1000)));
+  up._previewTimer=setTimeout(function(){
+    up._previewTimer=null;
+    var at=up._previewWanted,path=up.path;up._previewStarted=performance.now();
+    if(!up.open || at===null)return;
+    var url=location.origin+BASE+'/api/rec-thumb?stream='+encodeURIComponent(path)+'&t='+at+'&frame=1';
+    img.onload=function(){if(img.currentSrc===url && up.open && up.path===path && up.mode!=='live' && Math.round(up.cursorT)===at && (up._seeking||up._scrubbing))img.hidden=false;};
+    img.onerror=function(){img.hidden=true;};
+    img.src=url;
+  },wait);
+}
+
+function upBufferedAt(t){
+  if(!up._curSeg || up._curSeg.path!==up.path || !upVideo.buffered)return false;
+  var offset=t-up._curSeg.start;
+  for(var i=0;i<upVideo.buffered.length;i++){if(upVideo.buffered.start(i)<=offset && offset<upVideo.buffered.end(i))return true;}
+  return false;
+}
+
+// Every seek owns a generation and its requests, including the missing-band lookup.
+function upCancelSeek(){
+  if(up._skipAnim){cancelAnimationFrame(up._skipAnim);up._skipAnim=null;}
+  up._seekSeq++;
+  if(up._seekAbort) up._seekAbort.abort();
+  up._seekAbort=null; up._seeking=false;up._tailFetching=false;
+  clearTimeout(up._wheelSeek); up._wheelSeek=null;
+  clearTimeout(up._mediaRetry);clearTimeout(up._mediaDeadline);
+  return up._seekSeq;
+}
+function upSeekTo(t){
+  t=Math.round(+t); if(!up.open || !Number.isFinite(t)) return;
+  var seq=upCancelSeek(), path=up.path, controller=new AbortController();
+  up._seekAbort=controller; up._seeking=true;
+  if(upBufferedAt(t))upClearScrubFrame();else upPreviewAt(t);
+  if(up._timelineAbort)up._timelineAbort.abort();up._timelineSeq=(up._timelineSeq||0)+1;up._fetching=false;
+  function current(){ return up.open && up.path===path && seq===up._seekSeq; }
+  clearTimeout(up._liveTimer);
+  up.mode='rec'; up.cursorT=t; up._scrubbing=false;
+  upEl.classList.add('up-rec'); upRail.classList.add('show'); $('#upLiveBadge').style.display='none';
+  $('#upState').textContent='녹화 불러오는 중…';
+  up._mediaDeadline=setTimeout(function(){if(current() && up._seeking){controller.abort();clearTimeout(up._mediaRetry);upClearScrubFrame();up._seeking=false;$('#upState').textContent='영상 응답이 지연되고 있습니다. 시각을 다시 선택해주세요.';}},15000);
+  if(up._raf){cancelAnimationFrame(up._raf);up._raf=null;}
+  try{upVideo.pause();}catch(e){}
+  upVideo.style.visibility='hidden';
+  upSyncRecWindow(); upRenderRail(); syncPlayerURL();
+  function play(seg){
+    if(!current()) return;
+    if(!seg){clearTimeout(up._mediaDeadline);up._seeking=false;upGap(t);return;}
+    var namePromise=seg.name?Promise.resolve(seg.name):upResolveSegName(seg.start,path,controller.signal);
+    namePromise.then(function(name){
+      if(!current()) return;
+      if(!name){clearTimeout(up._mediaDeadline);up._seeking=false;upGap(t);return;}
+      var offset=Math.max(0,t-seg.start), same=up._curSeg && up._curSeg.name===name && up._curSeg.path===path && upVideo.readyState>=1 && (!Number.isFinite(upVideo.duration)||offset<=upVideo.duration);
+      var fileUrl=BASE+'/api/rec-file?stream='+encodeURIComponent(path)+'&name='+encodeURIComponent(name),retries=0;
+      function reloadGrowing(){
+        if(!current() || !seg.active || retries>=15)return false;
+        retries++;clearTimeout(up._mediaRetry);
+        up._mediaRetry=setTimeout(function(){if(current())upVideo.src=fileUrl+'&refresh='+retries+'#t='+offset;},500);return true;
       }
+      function reveal(){
+        if(!current() || upVideo.readyState<2 || upVideo.seeking || Math.abs(upVideo.currentTime-offset)>0.5) return;
+        clearTimeout(up._mediaDeadline);up._seeking=false; upVideo.style.visibility=''; upClearScrubFrame();$('#upState').textContent='';
+        if(!upPaused){upVideo.play().catch(function(){});upStartRecLoop();}
+        upUpdatePauseBtn();
+      }
+      if(!same) upStopVideo();
+      up._curSeg={start:seg.start,dur:seg.dur,name:name,path:path};
+      upVideo.onseeked=reveal; upVideo.onloadeddata=reveal;
+      upVideo.onerror=function(){if(current() && !reloadGrowing()){clearTimeout(up._mediaDeadline);up._seeking=false;$('#upState').textContent='녹화를 불러오지 못했습니다';}};
+      upVideo.onloadedmetadata=function(){
+        if(!current()) return;
+        if(Number.isFinite(upVideo.duration) && offset>upVideo.duration+0.05){if(!reloadGrowing()){clearTimeout(up._mediaDeadline);up._seeking=false;upGap(t);}return;}
+        try{upVideo.currentTime=offset;}catch(e){}
+        if(!upPaused) upVideo.play().catch(function(){});
+        reveal();
+      };
+      upVideo.onended=function(){
+        if(!current() || up.mode!=='rec' || upPaused) return;
+        var end=seg.start+upVideo.currentTime;
+        var next=up.segs.filter(function(s){return s.name!==name && s.start>=end-0.5 && s.start<=end+1;})[0];
+        if(next){upSeekTo(next.start);return;}
+        if(seg.active && !up._tailFetching){
+          up._tailFetching=true;up._seeking=true;
+          if(up._timelineAbort)up._timelineAbort.abort();up._timelineSeq=(up._timelineSeq||0)+1;up._fetching=false;
+          $('#upState').textContent='다음 녹화 확인 중…';
+          up._mediaDeadline=setTimeout(function(){if(current() && up._tailFetching){controller.abort();up._seeking=false;up._tailFetching=false;$('#upState').textContent='영상 응답이 지연되고 있습니다. 시각을 다시 선택해주세요.';}},15000);
+          var span=Math.max(60,up.t1-up.t0);
+          // Await one catalogue refresh before reloading the growing file. A
+          // slower network response must not be cancelled by 500ms tail retries.
+          upLoadTimeline(end-span,end+span,path,controller.signal).then(function(d){
+            if(!current())return;
+            clearTimeout(up._mediaDeadline);up._tailFetching=false;up._seeking=false;
+            if(!d)throw new Error('timeline failed');
+            up.segs=d.segments||[];up.events=d.events||[];up._loaded={from:end-span,to:end+span,at:Date.now()};
+            var next=up.segs.filter(function(s){return s.name!==name && s.start>=end-0.5 && s.start<=end+1;})[0];
+            if(next){upSeekTo(next.start);return;}
+            var key=path+'|'+name;
+            if(up._tailKey!==key || end>(up._tailEnd||0)+0.1){up._tailKey=key;up._tailEnd=end;up._tailRetries=0;}
+            if((up._tailRetries||0)<10){up._tailRetries=(up._tailRetries||0)+1;up._mediaRetry=setTimeout(function(){if(current()){up._curSeg=null;upSeekTo(end);}},500);}
+            else $('#upState').textContent='현재 녹화의 끝입니다';
+          }).catch(function(err){if(current() && err.name!=='AbortError'){clearTimeout(up._mediaDeadline);up._tailFetching=false;up._seeking=false;$('#upState').textContent='녹화를 불러오지 못했습니다';}});
+        }
+      };
+      if(same){upVideo.currentTime=offset;reveal();}
+      else {upVideo.src=fileUrl+'#t='+offset;}
       upUpdatePauseBtn();
-    };
-    upVideo.onended=function(){ // truncated/short segment: advance to the next contiguous one
-      if(!up.open || up.mode!=='rec' || !up._curSeg || upPaused) return;
-      var nx=segmentAt(up.segs, up._curSeg.start+up._curSeg.dur+1);
-      if(nx>=0) upSeekTo(up.segs[nx].start+0.1);
-    };
-    up._curSeg={start:seg.start, dur:seg.dur, name:name};
-    if(upPaused){
-      if(up._raf){ cancelAnimationFrame(up._raf); up._raf=null; }
-      upSyncRecWindow(); upRenderRail();
-    } else {
-      upStartRecLoop();
-    }
-    upUpdatePauseBtn();
-  });
+    }).catch(function(err){if(current() && err.name!=='AbortError'){clearTimeout(up._mediaDeadline);up._seeking=false;$('#upState').textContent='녹화를 불러오지 못했습니다';}});
+  }
+  var i=segmentAt(up.segs,t);
+  if(i>=0){play(up.segs[i]);return;}
+  if(up._loaded && t>=up._loaded.from && t<up._loaded.to && Date.now()-up._loaded.at<5000){play(null);return;}
+  var span=Math.max(60,up.t1-up.t0),from=t-span,to=t+span;
+  upLoadTimeline(from,to,path,controller.signal).then(function(d){
+    if(!current()) return;
+    if(!d) throw new Error('timeline failed');
+    up.segs=d.segments||[];up.events=d.events||[];up._loaded={from:from,to:to,at:Date.now()};
+    upRenderRail(); var i=segmentAt(up.segs,t);play(i>=0?up.segs[i]:null);
+  }).catch(function(err){if(current() && err.name!=='AbortError'){clearTimeout(up._mediaDeadline);up._seeking=false;$('#upState').textContent='녹화를 불러오지 못했습니다';}});
 }
 
 function upDayOf(t){ var d=new Date(t*1000); return ''+d.getFullYear()+pad2(d.getMonth()+1)+pad2(d.getDate()); }
 // resolve the segment file name whose start == segStart (via the day's listing).
-function upResolveSegName(segStart){
-  return recSegsForDay(up.path, upDayOf(segStart)).then(function(list){
+function upResolveSegName(segStart,path,signal){
+  return recSegsForDay(path||up.path, upDayOf(segStart),signal).then(function(list){
     var hit=(list||[]).filter(function(s){return s.start===segStart;})[0];
     return hit? hit.name : null;
   });
@@ -1590,7 +1749,7 @@ function upStartRecLoop(){
     // while scrubbing, the drag OWNS up.cursorT — the playback loop must not write
     // it back from upVideo.currentTime, or the drag appears frozen (rail won't move,
     // time just tracks playback). This was the real bug behind "drag does nothing".
-    if(!up.open || up.mode!=='rec' || upPaused || up._scrubbing){ up._raf=null; return; }
+    if(!up.open || up.mode!=='rec' || upPaused || up._scrubbing || up._seeking){ up._raf=null; return; }
     if(up._curSeg){
       up.cursorT=up._curSeg.start + (upVideo.currentTime||0);
       // reached the live edge? hand back to LIVE.
@@ -1626,11 +1785,9 @@ function upSyncRecWindow(){
   upEnsureTimeline(); // keep coverage/events/thumbs loaded as the window scrubs
 }
 function upGap(t){
-  up.mode='gap'; up.cursorT=t; $('#upState').textContent='이 시각 녹화 없음';
-  var best=null,bestD=1e15;
-  up.segs.forEach(function(s){ [s.start, s.start+s.dur-1].forEach(function(edge){ var d=Math.abs(edge-t); if(d<bestD){bestD=d;best=edge;} }); });
-  upSyncRecWindow(); upRenderRail();
-  if(best!=null){ setTimeout(function(){ if(up.mode==='gap') upSeekTo(best); }, 700); }
+  upClearScrubFrame();upStopVideo(); up.mode='gap'; up.cursorT=t; upVideo.style.visibility='hidden';
+  $('#upState').textContent='이 시각 녹화 없음';
+  upSyncRecWindow(); upRenderRail(); syncPlayerURL();
 }
 
 // Delta scrub (matches the touch handler): time = press-time + (drag distance / rail
@@ -1698,7 +1855,7 @@ upRail.addEventListener('click', function(e){
 // wheel over the stage/rail: pan time (REC) or step back from LIVE into REC.
 // ctrl/⌘+wheel: zoom (change pxPerSec) around the cursor.
 function upOnWheel(e){
-  if(!up.open) return;
+  if(!up.open || $('#upTimeJump').open) return;
   e.preventDefault();
   if(e.ctrlKey || e.metaKey){
     var factor=e.deltaY>0?1/1.15:1.15;
@@ -1710,11 +1867,21 @@ function upOnWheel(e){
   // pan: now is at TOP, past below — scrolling DOWN (deltaY>0) = into the past.
   var H=upRailH(), span=up.t1-up.t0;
   var dt=-(e.deltaY/H)*span;
-  var center=(up.mode==='rec')? up.cursorT : Math.floor(Date.now()/1000);
+  var center=(up.mode==='rec'||up.mode==='gap')? up.cursorT : Math.floor(Date.now()/1000);
   var newCursor=center+dt;
   var now=Math.floor(Date.now()/1000);
   if(newCursor>=now-2){ if(up.mode!=='live') upStartLive(); return; }
-  upSeekTo(Math.round(newCursor));
+  if(up._curSeg && up._curSeg.path===up.path && newCursor>=up._curSeg.start && newCursor<up._curSeg.start+up._curSeg.dur && upVideo.readyState>=1){upSeekTo(Math.round(newCursor));return;}
+  upCancelSeek();
+  upPreviewAt(newCursor);
+  up.mode='rec';up.cursorT=Math.round(newCursor);up._scrubbing=true;
+  clearTimeout(up._liveTimer);
+  if(up._raf){cancelAnimationFrame(up._raf);up._raf=null;}
+  try{upVideo.pause();}catch(e){}
+  upVideo.style.visibility='hidden'; $('#upState').textContent='시각 탐색 중…';
+  upEl.classList.add('up-rec');upRail.classList.add('show');$('#upLiveBadge').style.display='none';
+  upSyncRecWindow();upPaintScrub();
+  up._wheelSeek=setTimeout(function(){up._wheelSeek=null;up._scrubbing=false;upSeekTo(up.cursorT);},90);
 }
 $('#upStage').addEventListener('wheel', upOnWheel, {passive:false});
 upRail.addEventListener('wheel', upOnWheel, {passive:false});
@@ -1839,11 +2006,12 @@ function updateSidebarLive(){
 }
 
 var loopId=null, snapId=null, pollId=null, opsSnapId=null;
-function startLoop(){
+function startLoop(initial){
   if(loopId) return;
-  renderSidebar(); routeFromPath();
-  // first fetch; once data is in, honor a deep link to an agent that wasn't loaded yet
-  pollState().then(function(){ if(selected===null) routeFromPath(); });
+  // The authentication check already returned the full state; reuse it instead
+  // of paying a second serial network roundtrip before starting live streams.
+  if(initial){demo.relayDown=false;adaptState(initial);renderSidebar();routeFromPath();applyRealRender();}
+  else {renderSidebar();pollState();}
   pollId=setInterval(function(){ if(!document.hidden) pollState(); }, 2000);
   loopId=setInterval(tick,1000);
   opsSnapId=setInterval(function(){ if(!document.hidden && curTab==='status') refreshOpsSnap(); }, 1500);
