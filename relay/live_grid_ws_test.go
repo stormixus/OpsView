@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -238,4 +239,98 @@ func TestLiveGridWSMalformedControlsCloseAndReleaseSubscriptions(t *testing.T) {
 			awaitGridCondition(t, func() bool { return hub.ClientCount() == 0 })
 		})
 	}
+}
+
+// Queue all controls behind the first hub's subscription lock. A websocket
+// ping/pong then proves the reader has accepted those controls before releasing
+// the writer; the assertion does not depend on TCP timing or future requests.
+func TestLiveGridWSInitialMetadataPrecedesAlreadyQueuedMedia(t *testing.T) {
+	h, base := gridTestServer(t)
+	const subscriptions = 16
+	hubs := make([]*survWSHub, subscriptions)
+	initial := make(map[uint16][]byte)
+	for i := range hubs {
+		var seed [][]byte
+		hubs[i], seed = seedGridTestStream(t, h, "site-a", fmt.Sprintf("dvr1_ch%d", i+1), byte(i+1))
+		initial[uint16(i+1)] = seed[0]
+	}
+	// A ready channel has substantial queued GOP media as well as its init.
+	for i := 0; i < 64; i++ {
+		hubs[0].broadcast(bytes.Repeat([]byte{byte(i + 1)}, 1024), false)
+	}
+	hubs[0].mu.Lock()
+	var unlocked sync.Once
+	unlock := func() { unlocked.Do(func() { hubs[0].mu.Unlock() }) }
+	defer unlock()
+	conn := gridTestDial(t, h, base+"site-a")
+	pong := make(chan struct{})
+	var pongOnce sync.Once
+	conn.SetPongHandler(func(payload string) error {
+		if payload == "queued-controls" {
+			pongOnce.Do(func() { close(pong) })
+		}
+		return nil
+	})
+	type received struct {
+		slot uint16
+		data []byte
+		err  error
+	}
+	packets := make(chan received, subscriptions)
+	readerDone := make(chan struct{})
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	go func() {
+		defer close(readerDone)
+		for i := 0; i < subscriptions; i++ {
+			kind, data, err := conn.ReadMessage()
+			if err != nil {
+				packets <- received{err: err}
+				return
+			}
+			if kind != websocket.BinaryMessage || len(data) < 2 {
+				packets <- received{err: fmt.Errorf("unexpected grid packet type %d length %d", kind, len(data))}
+				return
+			}
+			packets <- received{slot: binary.BigEndian.Uint16(data[:2]), data: data[2:]}
+		}
+	}()
+	defer func() { conn.Close(); <-readerDone }()
+	for i := 0; i < subscriptions; i++ {
+		if err := conn.WriteJSON(liveGridControl{Op: "sub", Slot: uint16(i + 1), Stream: fmt.Sprintf("dvr1_ch%d", i+1)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := conn.WriteControl(websocket.PingMessage, []byte("queued-controls"), time.Now().Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-pong:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reader did not accept queued controls behind blocked writer")
+	}
+	unlock()
+	seen := make(map[uint16]bool)
+	for i := 0; i < subscriptions; i++ {
+		select {
+		case packet := <-packets:
+			if packet.err != nil {
+				t.Fatal(packet.err)
+			}
+			if seen[packet.slot] || !bytes.Equal(packet.data, initial[packet.slot]) {
+				t.Fatalf("queued GOP media overtook another ready subscription's initialization: packet=%d slot=%d bytes=%d", i, packet.slot, len(packet.data))
+			}
+			seen[packet.slot] = true
+		case <-time.After(3 * time.Second):
+			t.Fatal("initial metadata was not delivered")
+		}
+	}
+	conn.Close()
+	awaitGridCondition(t, func() bool {
+		for _, hub := range hubs {
+			if hub.ClientCount() != 0 {
+				return false
+			}
+		}
+		return true
+	})
 }

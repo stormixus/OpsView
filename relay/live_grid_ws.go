@@ -22,8 +22,9 @@ type liveGridControl struct {
 }
 
 type liveGridSubscription struct {
-	hub    *survWSHub
-	client *survWSClient
+	hub     *survWSHub
+	client  *survWSClient
+	initial bool
 }
 
 func (h *Hub) HandleDashboardLiveGridWS(w http.ResponseWriter, r *http.Request) {
@@ -79,8 +80,15 @@ func (h *Hub) HandleDashboardLiveGridWS(w http.ResponseWriter, r *http.Request) 
 			}
 			session.survProxy.mu.RUnlock()
 			if hub != nil {
-				subs[control.Slot] = liveGridSubscription{hub: hub, client: hub.add()}
+				subs[control.Slot] = liveGridSubscription{hub: hub, client: hub.add(), initial: true}
 			}
+		}
+		write := func(slot uint16, fragment []byte) error {
+			packet := make([]byte, 2+len(fragment))
+			binary.BigEndian.PutUint16(packet, slot)
+			copy(packet[2:], fragment)
+			conn.SetWriteDeadline(time.Now().Add(survWSWriteWait))
+			return conn.WriteMessage(websocket.BinaryMessage, packet)
 		}
 		ping := time.NewTicker(survWSPingPeriod)
 		defer ping.Stop()
@@ -92,6 +100,32 @@ func (h *Hub) HandleDashboardLiveGridWS(w http.ResponseWriter, r *http.Request) 
 				apply(control)
 				continue
 			default:
+			}
+			// Initialization is small but required before MSE can accept media.
+			// Deliver it before an established channel's larger GOP backlog can
+			// consume the shared connection's initial congestion window.
+			initialized := false
+			for slot, sub := range subs {
+				if !sub.initial {
+					continue
+				}
+				select {
+				case fragment, ok := <-sub.client.send:
+					if !ok {
+						remove(slot)
+						continue
+					}
+					sub.initial = false
+					subs[slot] = sub
+					if err := write(slot, fragment); err != nil {
+						return
+					}
+					initialized = true
+				default:
+				}
+			}
+			if initialized {
+				continue
 			}
 			cases := []reflect.SelectCase{
 				{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(controls)},
@@ -121,11 +155,11 @@ func (h *Hub) HandleDashboardLiveGridWS(w http.ResponseWriter, r *http.Request) 
 					continue
 				}
 				fragment := value.Interface().([]byte)
-				packet := make([]byte, 2+len(fragment))
-				binary.BigEndian.PutUint16(packet, slot)
-				copy(packet[2:], fragment)
-				conn.SetWriteDeadline(time.Now().Add(survWSWriteWait))
-				if err := conn.WriteMessage(websocket.BinaryMessage, packet); err != nil {
+				if sub := subs[slot]; sub.initial {
+					sub.initial = false
+					subs[slot] = sub
+				}
+				if err := write(slot, fragment); err != nil {
 					return
 				}
 			}
