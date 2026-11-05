@@ -236,3 +236,100 @@ test('shared physical death routes real players to fallback before init and reco
     factory.close();assert.equal(h.timers.size,0);
   }
 });
+
+test('bounded pool balances subscribers across at most four physical connections',async()=>{
+  for(const [requested,expected] of [[4,4],[100,4],[2.9,2],[0,1]]){
+    const h=harness(),factory=h.context.createGridWSFactory('site-a',requested);
+    const clients=Array.from({length:16},(_,i)=>factory.socket(streamURL(i+1)));
+    assert.equal(h.sockets.length,expected);
+    for(const socket of h.sockets)socket.open();
+    await drain();
+    const counts=h.sockets.map(socket=>socket.sent.filter(command=>command.op==='sub').length);
+    assert.equal(counts.reduce((sum,count)=>sum+count,0),16);
+    assert.ok(Math.max(...counts)-Math.min(...counts)<=1,`uneven pool subscriptions: ${counts}`);
+    assert.ok(clients.every(client=>client.shared));
+    factory.close();assert.ok(h.sockets.every(socket=>socket.readyState===3));
+    assert.equal(h.timers.size,0);
+  }
+});
+
+test('identical slot numbers on different pooled sockets cannot cross-route channel payloads',async()=>{
+  const h=harness(),factory=h.context.createGridWSFactory('site-a',4);
+  const clients=Array.from({length:8},(_,i)=>factory.socket(streamURL(i+1)));
+  const deliveries=new Map(clients.map(client=>[client.stream,[]]));
+  for(const client of clients)client.onmessage=event=>deliveries.get(client.stream).push(Array.from(new Uint8Array(event.data)));
+  for(const socket of h.sockets)socket.open();await drain();
+  for(let i=0;i<h.sockets.length;i++){
+    const socket=h.sockets[i],subs=socket.sent.filter(command=>command.op==='sub');
+    assert.equal(subs[0].slot,1,'fixture should reuse slot 1 across independent physical sockets');
+    const before=[...deliveries.values()].reduce((sum,messages)=>sum+messages.length,0);
+    socket.message(packet(subs[0].slot,[i+1,91]));
+    assert.deepEqual(deliveries.get(subs[0].stream),[[i+1,91]]);
+    assert.equal([...deliveries.values()].reduce((sum,messages)=>sum+messages.length,0),before+1);
+    socket.message(packet(subs[1].slot,[i+1,92]));
+    assert.deepEqual(deliveries.get(subs[1].stream),[[i+1,92]]);
+  }
+  factory.close();
+});
+
+test('released subscribers make their least-loaded pool preferred for new channels',async()=>{
+  const h=harness(),factory=h.context.createGridWSFactory('site-a',4);
+  const clients=Array.from({length:8},(_,i)=>factory.socket(streamURL(i+1)));
+  for(const socket of h.sockets)socket.open();await drain();
+  const released=h.sockets[2].sent.filter(command=>command.op==='sub');
+  for(const command of released)clients.find(client=>client.stream===command.stream).close();
+  factory.socket(streamURL(9));factory.socket(streamURL(10));await drain();
+  assert.equal(h.sockets.length,4);
+  const chosen=h.sockets[2].sent.filter(command=>command.op==='sub').map(command=>command.stream);
+  assert.ok(chosen.includes('dvr1_ch9')&&chosen.includes('dvr1_ch10'));
+  for(const socket of h.sockets.filter((_,i)=>i!==2)){
+    assert.equal(socket.sent.some(command=>command.stream==='dvr1_ch9'||command.stream==='dvr1_ch10'),false);
+  }
+  factory.close();
+});
+
+test('a failed pre-open pool is avoided while another multiplex pool remains healthy',async()=>{
+  const h=harness(),factory=h.context.createGridWSFactory('site-a',4);
+  const initial=Array.from({length:4},(_,i)=>factory.socket(streamURL(i+1)));
+  let firstClosed=0;initial[0].onclose=()=>firstClosed++;
+  h.sockets[0].error();
+  const next=factory.socket(streamURL(5));
+  assert.equal(next.shared,true);
+  assert.equal(h.sockets.length,4,'healthy pools should avoid a new raw fallback handshake');
+  for(const socket of h.sockets.slice(1))socket.open();await drain();
+  assert.equal(firstClosed,1);
+  assert.equal(h.sockets[0].sent.length,0);
+  assert.ok(h.sockets[1].sent.some(command=>command.op==='sub'&&command.stream==='dvr1_ch5'));
+  factory.close();
+});
+
+test('all failed pools use caller-owned raw fallback and shared factory disposal prevents new starts',()=>{
+  const h=harness(),factory=h.context.createGridWSFactory('site-a',4);
+  for(let i=0;i<4;i++)factory.socket(streamURL(i+1));
+  for(const socket of h.sockets)socket.error();
+  const raw=factory.socket(streamURL(5));
+  assert.equal(raw.url,streamURL(5));assert.equal(raw.shared,undefined);
+  assert.equal(h.sockets.length,5);
+  // Raw fallback keeps the existing playWS ownership contract; the caller closes
+  // it, while the factory owns shared transports and prevents any future starts.
+  raw.close();
+  factory.close();factory.close();
+  assert.ok(h.sockets.every(socket=>socket.readyState===3),'caller/factory cleanup left a connection alive');
+  assert.throws(()=>factory.socket(streamURL(6)),/grid closed/);
+  assert.equal(h.timers.size,0);
+});
+
+test('pool disposal closes unopened and opened children and prevents late callbacks from reconnecting',async()=>{
+  const h=harness(),factory=h.context.createGridWSFactory('site-a',4);
+  const clients=Array.from({length:12},(_,i)=>factory.socket(streamURL(i+1)));
+  let closed=0,received=0;
+  for(const client of clients){client.onclose=()=>closed++;client.onmessage=()=>received++;}
+  h.sockets[0].open();h.sockets[2].open();await drain();
+  factory.close();factory.close();
+  assert.equal(closed,12);
+  assert.ok(h.sockets.every(socket=>socket.readyState===3));
+  for(const socket of h.sockets){socket.onopen();socket.message(packet(1,[4]));socket.onclose();}
+  assert.equal(received,0);assert.equal(closed,12);
+  assert.throws(()=>factory.socket(streamURL(13)),/grid closed/);
+  assert.equal(h.sockets.length,4);assert.equal(h.timers.size,0);
+});

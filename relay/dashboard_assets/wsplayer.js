@@ -50,9 +50,23 @@ function _queueWSConnect(start){
   };
   _wsConnectQueue.push(entry);_pumpWSConnects();return entry.release;
 }
-// One authenticated socket carries the grid's active channels. Each virtual
-// socket keeps the existing MSE player lifecycle and per-channel message order.
-function createGridWSFactory(agent){
+// A bounded pool shares handshakes without putting every channel behind one
+// connection's media backlog. Virtual sockets retain each player's lifecycle.
+function createGridWSFactory(agent,connections){
+  connections=Math.max(1,Math.min(4,Math.floor(Number(connections)||1)));
+  if(connections>1){
+    var pool=Array.from({length:connections},function(){return createGridWSFactory(agent);}),disposed=false;
+    return {
+      socket:function(url){
+        if(disposed)throw new Error('grid closed');
+        var candidates=pool.filter(function(p){return p.available();});
+        var selected=candidates.length?candidates[0]:pool[0];
+        candidates.forEach(function(p){if(p.active()<selected.active())selected=p;});
+        return selected.socket(url);
+      },
+      close:function(){disposed=true;pool.forEach(function(p){p.close();});}
+    };
+  }
   var physical=null, subscribers=new Map(), nextSlot=1, stopped=false, idle=null, startup=null, legacy=false;
   var endpoint=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/dashboard/api/live-grid-ws?agent='+encodeURIComponent(agent);
   function command(v,op){if(physical&&physical.readyState===1)physical.send(JSON.stringify({op:op,slot:v.slot,stream:v.stream}));}
@@ -82,6 +96,8 @@ function createGridWSFactory(agent){
     socket.onerror=socket.onclose=function(){disconnect(socket,opened);};
   }
   return {
+    active:function(){return subscribers.size;},
+    available:function(){return !stopped&&!legacy;},
     socket:function(url){
       if(stopped)throw new Error('grid closed');
       if(legacy)return new WebSocket(url);
