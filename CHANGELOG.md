@@ -6,6 +6,7 @@ All notable changes to OpsView are documented here.
 
 ### Fixed
 
+- The live grid gives unseen visible channels a bounded 12-second startup grace period before timed decoder rotation can interrupt them. First-frame warming stops when that grace expires, so an unavailable channel cannot continually pull healthy channels out of their rotation.
 - Shared live-grid sockets negotiate cumulative receipt acknowledgments and bound unacknowledged video to 256 KiB plus one packet per connection. Subscription changes remain responsive while waiting for receipt, reducing how much old video can queue ahead of newly visible channels; older clients and relays retain the existing protocol.
 - Shared live-grid connections send ready channel initialization packets and then each new channel's first keyframe before queued video fragments, reducing startup contention from another channel's GOP backlog.
 - The dashboard live grid multiplexes its active channel streams over up to four authenticated WebSocket connections on desktop and two on mobile, distributing subscriptions across healthy connections while preserving per-channel fMP4 packets and existing decoder limits. Viewport changes unsubscribe channels, stale slot generations are isolated, and unavailable shared upgrades retain the single-stream fallback.
