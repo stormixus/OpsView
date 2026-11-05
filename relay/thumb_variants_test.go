@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -358,5 +359,41 @@ func TestExactFrameWaitingForExtractorHonorsCancellation(t *testing.T) {
 	h.HandleDashboardRecThumb(response, req)
 	if response.Code != http.StatusNoContent || response.Body.Len() != 0 {
 		t.Fatalf("cancelled preview ignored bounded extractor wait: %d %q", response.Code, response.Body.String())
+	}
+}
+
+func TestCardVariantStaysOutsideOriginalSnapshotExportsAndRetentionPrunesIt(t *testing.T) {
+	h := newVariantHub(t)
+	original := variantJPEG(t, 704, 396, color.White)
+	h.storeEventThumb("cam", 1000_000, original)
+	rawPath := evThumbPath(h.rec.dir, "cam", 1000)
+	variantPath := cardThumbPath(rawPath, original)
+	waitVariant(t, h.queueCardThumb(variantPath, original))
+	if filepath.Base(filepath.Dir(variantPath)) != ".cards" {
+		t.Fatal("variant shares original snapshot namespace")
+	}
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/api/lpr-frames?stream=cam", nil)
+	req.AddCookie(&http.Cookie{Name: dashboardCookieName, Value: signSession(h.effectiveDashToken(), time.Now().Add(time.Hour))})
+	response := httptest.NewRecorder()
+	h.HandleDashboardLPRFrames(response, req)
+	archive, err := zip.NewReader(bytes.NewReader(response.Body.Bytes()), int64(response.Body.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(archive.File) != 1 || archive.File[0].Name != "1000.jpg" {
+		t.Fatalf("export included downscaled variants: %+v", archive.File)
+	}
+	t.Setenv("RELAY_REC_KEEP_EVENT_DAYS", "1")
+	old := time.Now().Add(-48 * time.Hour)
+	for _, p := range []string{rawPath, variantPath} {
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.rec.pruneEventThumbs()
+	for _, p := range []string{rawPath, variantPath} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("retention left %s: %v", p, err)
+		}
 	}
 }

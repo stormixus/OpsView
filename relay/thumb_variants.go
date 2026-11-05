@@ -54,6 +54,7 @@ func (h *Hub) queueCardThumb(path string, data []byte) <-chan struct{} {
 						return
 					case job := <-q.jobs:
 						if img, err := makeCardThumb(job.jpeg); err == nil && len(img) > 0 {
+							_ = os.MkdirAll(filepath.Dir(job.path), 0o755)
 							if f, err := os.CreateTemp(filepath.Dir(job.path), ".card-*"); err == nil {
 								tmp := f.Name()
 								_, writeErr := f.Write(img)
@@ -99,7 +100,7 @@ func (h *Hub) queueCardThumb(path string, data []byte) <-chan struct{} {
 func cardThumbPath(original string, data []byte) string {
 	sum := sha256.Sum256(data)
 	ext := filepath.Ext(original)
-	return original[:len(original)-len(ext)] + fmt.Sprintf(".card.%x.jpg", sum)
+	return filepath.Join(filepath.Dir(original), ".cards", filepath.Base(original[:len(original)-len(ext)])+fmt.Sprintf(".%x.jpg", sum))
 }
 
 // JPEG uses the existing browser/Go codec path. Only the derivative is resized;

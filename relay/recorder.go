@@ -382,7 +382,10 @@ func (r *Recorder) pruneEventThumbs() {
 		if d.IsDir() {
 			return nil
 		}
-		if filepath.Base(filepath.Dir(p)) != evThumbDir || !strings.HasSuffix(p, ".jpg") {
+		parent := filepath.Dir(p)
+		original := filepath.Base(parent) == evThumbDir
+		derivative := filepath.Base(parent) == ".cards" && filepath.Base(filepath.Dir(parent)) == evThumbDir
+		if (!original && !derivative) || !strings.HasSuffix(p, ".jpg") {
 			return nil
 		}
 		info, err := d.Info()

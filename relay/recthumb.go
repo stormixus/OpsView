@@ -289,6 +289,11 @@ func (h *Hub) HandleDashboardRecThumb(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "recording disabled", http.StatusConflict)
 		return
 	}
+	started := time.Now()
+	serve := func(img []byte) {
+		w.Header().Set("Server-Timing", fmt.Sprintf("thumb;dur=%.3f", float64(time.Since(started))/float64(time.Millisecond)))
+		serveRecThumb(w, r, img)
+	}
 	q := r.URL.Query()
 	stream := q.Get("stream")
 	exactFrame := q.Get("frame") == "1"
@@ -327,7 +332,7 @@ func (h *Hub) HandleDashboardRecThumb(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			serveRecThumb(w, r, img)
+			serve(img)
 			return
 		}
 	}
@@ -335,7 +340,7 @@ func (h *Hub) HandleDashboardRecThumb(w http.ResponseWriter, r *http.Request) {
 	// check cache
 	cacheKey := fmt.Sprintf("%s|%s|%d|%t", h.recRootDir(), stream, t, exactFrame)
 	if img := h.thumbnails.get(cacheKey, nil); img != nil {
-		serveRecThumb(w, r, img)
+		serve(img)
 		return
 	}
 
@@ -356,7 +361,7 @@ func (h *Hub) HandleDashboardRecThumb(w http.ResponseWriter, r *http.Request) {
 		if recDir := h.recRootDir(); !exactFrame && recDir != "" {
 			if p := nearestEvThumb(recDir, stream, t, evThumbNearWindowSec); p != "" {
 				if img := h.storedThumb(p); len(img) > 0 {
-					serveRecThumb(w, r, img)
+					serve(img)
 					return
 				}
 			}
@@ -402,5 +407,5 @@ func (h *Hub) HandleDashboardRecThumb(w http.ResponseWriter, r *http.Request) {
 
 	h.thumbnails.put(cacheKey, img, nil)
 
-	serveRecThumb(w, r, img)
+	serve(img)
 }
