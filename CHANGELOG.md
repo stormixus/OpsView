@@ -4,6 +4,13 @@ All notable changes to OpsView are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Event dashboard loading: start the event list without waiting for recording-day metadata, prioritize the first six thumbnails, and load further cards in 24-card pages. Recent day revisits display a bounded cached list while refreshing; stale day/range requests are cancelled and cannot overwrite newer selections.
+- Event JSONL disk reads and appends no longer hold the global event-state lock. Stream-scoped synchronization preserves append/cache consistency and midnight retention behavior.
+- Stored event JPEGs now share a Hub-isolated LRU cache bounded to 32 MiB and 512 entries. File replacement/deletion is revalidated; unchanged browser copies use ETags. Snapshot writes use distinct temporary files for concurrent captures.
+
+
 ### Added
 
 - 통합 플레이어: 라이브 그리드 셀 클릭 → 풀블리드 플레이어. 우측 줌-타임라인(녹화 커버리지 + 사람/차량/모션 이벤트 아이콘)을 휠로 스크럽해 라이브↔녹화를 매끄럽게 이동, 호버 스크럽 미리보기.
