@@ -131,7 +131,9 @@ func (h *Hub) storeEventThumb(stream string, tsMs int64, jpeg []byte) {
 	if err := os.Rename(tmp, dst); err != nil {
 		os.Remove(tmp)
 		log.Printf("[rec-thumb] %s: rename event thumb: %v", stream, err)
+		return
 	}
+	h.queueCardThumb(cardThumbPath(dst, jpeg), jpeg)
 }
 
 // runLPR runs in-process ONNX plate recognition when configured (RELAY_LPR=1).
@@ -274,6 +276,8 @@ func serveRecThumb(w http.ResponseWriter, r *http.Request, img []byte) {
 	w.Write(img)
 }
 
+var thumbExtractSlots = make(chan struct{}, 2) // ffmpeg fallback/accurate previews share a bounded pool
+
 // HandleDashboardRecThumb extracts a JPEG thumbnail from a recording at a given
 // unix timestamp. Admin-gated. ?stream=<path>&t=<unix_sec>.
 func (h *Hub) HandleDashboardRecThumb(w http.ResponseWriter, r *http.Request) {
@@ -287,6 +291,7 @@ func (h *Hub) HandleDashboardRecThumb(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	stream := q.Get("stream")
+	exactFrame := q.Get("frame") == "1"
 	t, _ := strconv.ParseInt(q.Get("t"), 10, 64)
 	if t <= 0 {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -297,15 +302,38 @@ func (h *Hub) HandleDashboardRecThumb(w http.ResponseWriter, r *http.Request) {
 	// dependency). The agent ships these on event edges; rec-thumb?t=<event.start>
 	// finds <recDir>/<stream>/.evthumbs/<t>.jpg. Fall through to ffmpeg only when
 	// there's no stored thumb (scrub/other times).
-	if recDir := h.recRootDir(); recDir != "" {
-		if img := h.storedThumb(evThumbPath(recDir, stream, t)); len(img) > 0 {
+	if recDir := h.recRootDir(); !exactFrame && recDir != "" {
+		original := evThumbPath(recDir, stream, t)
+		if img := h.storedThumb(original); len(img) > 0 {
+			if q.Get("size") == "card" {
+				variant := cardThumbPath(original, img)
+				if small := h.storedThumb(variant); len(small) > 0 {
+					img = small
+				} else {
+					done := h.queueCardThumb(variant, img)
+					if done != nil {
+						timer := time.NewTimer(100 * time.Millisecond)
+						select {
+						case <-done:
+							if small := h.storedThumb(variant); len(small) > 0 {
+								img = small
+							}
+						case <-timer.C:
+						case <-r.Context().Done():
+							timer.Stop()
+							return
+						}
+						timer.Stop()
+					}
+				}
+			}
 			serveRecThumb(w, r, img)
 			return
 		}
 	}
 
 	// check cache
-	cacheKey := fmt.Sprintf("%s|%s|%d", h.recRootDir(), stream, t)
+	cacheKey := fmt.Sprintf("%s|%s|%d|%t", h.recRootDir(), stream, t, exactFrame)
 	if img := h.thumbnails.get(cacheKey, nil); img != nil {
 		serveRecThumb(w, r, img)
 		return
@@ -325,7 +353,7 @@ func (h *Hub) HandleDashboardRecThumb(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		// No live segment at t (old event, video pruned). Serve the nearest stored
 		// event snapshot so the timeline thumbnail still renders.
-		if recDir := h.recRootDir(); recDir != "" {
+		if recDir := h.recRootDir(); !exactFrame && recDir != "" {
 			if p := nearestEvThumb(recDir, stream, t, evThumbNearWindowSec); p != "" {
 				if img := h.storedThumb(p); len(img) > 0 {
 					serveRecThumb(w, r, img)
@@ -347,13 +375,21 @@ func (h *Hub) HandleDashboardRecThumb(w http.ResponseWriter, r *http.Request) {
 	offset := t - s.Start
 	ctx, cancel := context.WithTimeout(r.Context(), thumbTimeout)
 	defer cancel()
+	select {
+	case thumbExtractSlots <- struct{}{}:
+		defer func() { <-thumbExtractSlots }()
+	case <-ctx.Done():
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	cmd := exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-loglevel", "error",
 		"-ss", strconv.FormatInt(offset, 10), "-i", path,
 		"-frames:v", "1", "-vf", "scale=320:-1", "-q:v", "6", "-f", "mjpeg", "pipe:1")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil || out.Len() == 0 {
-		// The currently-recording segment has no finalized moov yet, so ffmpeg can't
+		// A legacy active MP4 may lack a finalized moov, or a fragment may still be
+		// incomplete, so ffmpeg cannot yet
 		// read it — expected for events in the active (last ≤ segment-length) window.
 		// Report "no thumbnail" (not an error) so the dashboard shows a clean
 		// placeholder; it resolves once the segment closes and the day is reloaded.
