@@ -388,3 +388,75 @@ test('players queued beyond watchdog threshold remain starting without a prematu
   assert.equal(h.timers.size,4,'only actually constructed sockets own a deadline');
   for(const run of runs)run.player.close();
 });
+
+test('slow handshake does not consume the following initialization budget',()=>{
+  const h=playerHarness(),player=h.start();
+  h.mediaSources[0].open();
+  h.advance(4500);h.sockets[0].open();
+  h.advance(2000); // Init arrives after the old combined six-second deadline.
+  assert.deepEqual(h.callbacks,{failed:0,ended:0});
+  h.sockets[0].sendFrame(avcInit());
+  assert.equal(player.starting(),false);
+  assert.deepEqual(h.mediaSources[0].buffers[0].appended,[Array.from(avcInit())]);
+  assert.ok(h.video.dataset.wsOpenMs>=4500);
+  assert.ok(h.video.dataset.wsInitMs>6000);
+  assert.equal(h.timers.size,0);
+  h.advance(12000);assert.deepEqual(h.callbacks,{failed:0,ended:0});
+  player.close();
+});
+
+test('connected socket without initialization fails six seconds after opening',()=>{
+  const h=playerHarness(),player=h.start();
+  h.advance(4500);h.sockets[0].open();
+  h.advance(5900);
+  assert.equal(player.starting(),true);
+  assert.deepEqual(h.callbacks,{failed:0,ended:0});
+  h.advance(200);
+  assert.deepEqual(h.callbacks,{failed:1,ended:0});
+  assert.equal(h.sockets[0].closed,true);assert.equal(player.starting(),false);
+  assert.equal(h.timers.size,0);
+});
+
+test('never-opened handshake still fails within its admission-time deadline',()=>{
+  const h=playerHarness(),player=h.start();
+  h.advance(5900);assert.deepEqual(h.callbacks,{failed:0,ended:0});
+  h.advance(200);
+  assert.deepEqual(h.callbacks,{failed:1,ended:0});
+  assert.equal(player.starting(),false);assert.equal(h.sockets[0].closed,true);
+  assert.equal(h.video.dataset.wsOpenMs,undefined);assert.equal(h.timers.size,0);
+});
+
+test('duplicate open notifications cannot extend the initialization deadline',()=>{
+  const h=playerHarness();h.start();
+  h.advance(1000);h.sockets[0].open();
+  const opened=h.video.dataset.wsOpenMs,deadline=[...h.deadlines.values()][0];
+  h.advance(5000);h.sockets[0].open();
+  assert.equal(h.video.dataset.wsOpenMs,opened);
+  assert.equal([...h.deadlines.values()][0],deadline);
+  h.advance(1100);
+  assert.deepEqual(h.callbacks,{failed:1,ended:0});
+  assert.equal(h.timers.size,0);
+});
+
+test('late socket open after deliberate close or timeout never creates a new deadline',()=>{
+  for(const reason of ['close','timeout']){
+    const h=playerHarness(),player=h.start();
+    if(reason==='close')player.close();else h.advance(6100);
+    const expected=reason==='close'?{failed:0,ended:0}:{failed:1,ended:0};
+    assert.equal(h.timers.size,0);
+    h.sockets[0].open();h.sockets[0].open();
+    assert.equal(h.video.dataset.wsOpenMs,undefined);
+    assert.equal(h.timers.size,0);
+    h.advance(20000);assert.deepEqual(h.callbacks,expected);
+  }
+});
+
+test('initialization arriving before mocked open keeps its startup deadline cleared',()=>{
+  const h=playerHarness(),player=h.start();
+  h.mediaSources[0].open();h.sockets[0].sendFrame(avcInit());
+  assert.equal(player.starting(),false);assert.equal(h.timers.size,0);
+  h.advance(6100);h.sockets[0].open();
+  assert.equal(h.timers.size,0,'open rearmed a deadline for an already initialized player');
+  h.advance(6100);assert.deepEqual(h.callbacks,{failed:0,ended:0});
+  player.close();
+});
