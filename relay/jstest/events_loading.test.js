@@ -5,8 +5,9 @@ const fs = require('node:fs');
 const src = fs.readFileSync(require('node:path').join(__dirname, '../dashboard_assets/app.js'), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function harness() {
- const requests=[], renders=[];
+ const requests=[], renders=[],timers=new Map();let timerID=0;
  const ctx = vm.createContext({Promise,Map,Date,AbortController,encodeURIComponent,JSON,
+  setTimeout:(fn)=>{timers.set(++timerID,fn);return timerID},clearTimeout:id=>timers.delete(id),
   selected:'a',BASE:'/dashboard',recRangeToken:0,recCalOpen:false,
   recCtx:{selDay:'20260608',eventList:[],range:null},
   agentById:()=>({streams:[{path:'a/cam'}]}),
@@ -15,14 +16,14 @@ function harness() {
   recSetActivePreset:()=>{},recDayStr:()=> '20260608',
   recRenderEventList:()=>renders.push(ctx.recCtx.eventList),
   recRenderCal:()=>{},$:()=>null,
-  fetch:(url,options={})=>new Promise(resolve=>requests.push({url,options,resolve})),
+  fetch:(url,options={})=>new Promise((resolve,reject)=>{requests.push({url,options,resolve});if(options.signal)options.signal.addEventListener("abort",()=>reject(Object.assign(new Error("aborted"),{name:"AbortError"})));}),
  });
  vm.runInContext(src.slice(src.indexOf('function openRec(){'),src.indexOf('/* ---- date presets')),ctx);
  vm.runInContext(src.slice(src.indexOf('function loadRecEventList('),src.indexOf('var REC_KIND_NAMES')),ctx);
  vm.runInContext(src.slice(src.indexOf('function recLoadRange('),src.indexOf('(function(){ var p=',src.indexOf('function recLoadRange('))),ctx);
  ctx.REC_PRESET_LABELS={};
  const reply=(n,events)=>requests[n].resolve({ok:true,json:async()=>({events})});
- return {ctx,requests,renders,reply};
+ return {ctx,requests,renders,reply,timers};
 }
 test('entry starts list before calendar metadata; a slow calendar cannot delay cards',async()=>{
  const h=harness();h.ctx.openRec();
@@ -90,4 +91,11 @@ test('dismissing a modal does not cancel event loading or infinite scroll',async
  h.ctx.recLoadDay();h.ctx.closeModal();
  assert.equal(h.requests[0].options.signal.aborted,false);assert.equal(cleaned,0);
  h.reply(0,[{start:1000}]);await tick();assert.equal(h.ctx.recCtx.eventList[0].start,1000);
+});
+
+test('a stalled list exits loading on timeout; a late response cannot replace a retry',async()=>{
+ const h=harness();h.ctx.recLoadDay();[...h.timers.values()][0]();await tick();
+ assert.equal(h.ctx.recCtx.loading,false);assert.equal(h.ctx.recCtx.loadError,true);assert.equal(h.ctx.recCtx.loadTimedOut,true);
+ h.ctx.recLoadDay();h.reply(1,[{start:2000}]);await tick();h.reply(0,[{start:1000}]);await tick();
+ assert.equal(h.ctx.recCtx.eventList[0].start,2000);assert.equal(h.ctx.recCtx.loadTimedOut,false);
 });
