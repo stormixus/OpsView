@@ -65,11 +65,26 @@ function createGridWSFactory(agent,connections,receiptFlow){
         candidates.forEach(function(p){if(p.active()<selected.active())selected=p;});
         return selected.socket(url);
       },
+      reusable:function(){return !disposed&&pool.every(function(p){return p.reusable();});},
+      pause:function(ms){var ok=!disposed;pool.forEach(function(p){if(!p.pause(ms))ok=false;});return ok;},
+      resume:function(){pool.forEach(function(p){p.resume();});},
       close:function(){disposed=true;pool.forEach(function(p){p.close();});}
     };
   }
-  var physical=null, subscribers=new Map(), nextSlot=1, stopped=false, idle=null, startup=null, legacy=false;
+  var physical=null, subscribers=new Map(), nextSlot=1, stopped=false, idle=null, startup=null, legacy=false, unhealthy=false, idleGeneration=0;
   var endpoint=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/dashboard/api/live-grid-ws?agent='+encodeURIComponent(agent)+(receiptFlow?'&flow=1':'');
+  function clearIdle(){clearTimeout(idle);idle=null;idleGeneration++;}
+  function scheduleIdle(ms){
+    clearIdle();
+    if(!physical)return;
+    var generation=idleGeneration,socket=physical;
+    idle=setTimeout(function(){
+      if(generation!==idleGeneration||subscribers.size||physical!==socket)return;
+      idle=null;physical=null;clearTimeout(startup);startup=null;
+      try{socket.close();}catch(e){}
+    },ms);
+  }
+  function reusable(){return !stopped&&!legacy&&!unhealthy&&(!physical||physical.readyState===1);}
   function command(v,op){if(physical&&physical.readyState===1)physical.send(JSON.stringify({op:op,slot:v.slot,stream:v.stream}));}
   function openVirtual(v){
     if(v.closed||v.opened)return;
@@ -78,7 +93,7 @@ function createGridWSFactory(agent,connections,receiptFlow){
   }
   function disconnect(socket,opened){
     if(physical!==socket)return;
-    clearTimeout(startup);startup=null;physical=null;
+    clearTimeout(startup);startup=null;physical=null;unhealthy=true;
     if(socket.readyState<2){try{socket.close();}catch(e){}}
     if(!opened)legacy=true; // older relays or unavailable upgrades retain the old route
     var old=Array.from(subscribers.values());subscribers.clear();
@@ -88,7 +103,7 @@ function createGridWSFactory(agent,connections,receiptFlow){
     if(physical)return;
     var socket=new WebSocket(endpoint),opened=false,flow=false,received=0;physical=socket;socket.binaryType='arraybuffer';
     startup=setTimeout(function(){if(physical===socket&&!opened)disconnect(socket,false);},6000);
-    socket.onopen=function(){if(physical!==socket)return;clearTimeout(startup);startup=null;opened=true;subscribers.forEach(openVirtual);};
+    socket.onopen=function(){if(physical!==socket)return;clearTimeout(startup);startup=null;opened=true;unhealthy=false;subscribers.forEach(openVirtual);};
     socket.onmessage=function(ev){
       if(physical!==socket||!ev.data)return;
       if(typeof ev.data==='string'){
@@ -109,10 +124,18 @@ function createGridWSFactory(agent,connections,receiptFlow){
   return {
     active:function(){return subscribers.size;},
     available:function(){return !stopped&&!legacy;},
+    reusable:reusable,
+    pause:function(ms){
+      Array.from(subscribers.values()).forEach(function(v){v.close();});
+      clearIdle();
+      if(!reusable())return false;
+      scheduleIdle(ms);return true;
+    },
+    resume:clearIdle,
     socket:function(url){
       if(stopped)throw new Error('grid closed');
       if(legacy)return new WebSocket(url);
-      clearTimeout(idle);
+      clearIdle();
       var stream=url.slice(url.lastIndexOf('/')+1);
       if(!/^dvr[0-9]+_ch[0-9]+$/.test(stream))throw new Error('invalid grid stream');
       // Recycle the physical generation before a wire slot can be reused. Late
@@ -122,10 +145,7 @@ function createGridWSFactory(agent,connections,receiptFlow){
       var v={slot:slot,stream:stream,closed:false,opened:false,shared:true,close:function(){
         if(v.closed)return;
         v.closed=true;subscribers.delete(slot);command(v,'unsub');
-        if(!subscribers.size)idle=setTimeout(function(){
-          if(subscribers.size||!physical)return;
-          var old=physical;physical=null;clearTimeout(startup);startup=null;try{old.close();}catch(e){}
-        },1000);
+        if(!subscribers.size)scheduleIdle(1000);
       }};
       subscribers.set(slot,v);
       try{connect();if(physical&&physical.readyState===1)openVirtual(v);}
@@ -133,11 +153,36 @@ function createGridWSFactory(agent,connections,receiptFlow){
       return v;
     },
     close:function(){
-      stopped=true;clearTimeout(idle);clearTimeout(startup);startup=null;
+      stopped=true;clearIdle();clearTimeout(startup);startup=null;
       var old=physical;physical=null;if(old){try{old.close();}catch(e){}}
       var clients=Array.from(subscribers.values());subscribers.clear();
       clients.forEach(function(v){v.closed=true;if(v.onclose)v.onclose();});
     }
+  };
+}
+// Keep only one site's healthy transport for a short tab round trip. Subscriptions
+// and decoders are released immediately; no camera media is retained by this cache.
+function createGridTransportCache(){
+  var current=null,agent=null,count=0,expiry=null,generation=0;
+  function cancel(){clearTimeout(expiry);expiry=null;generation++;}
+  function close(){cancel();if(current)current.close();current=null;agent=null;count=0;}
+  return {
+    acquire:function(nextAgent,nextCount){
+      cancel();
+      if(current&&(agent!==nextAgent||count!==nextCount||!current.reusable()))close();
+      if(!current){current=createGridWSFactory(nextAgent,nextCount);agent=nextAgent;count=nextCount;}
+      current.resume();return current;
+    },
+    release:function(factory){
+      if(factory!==current){factory.close();return;}
+      cancel();
+      try{if(!current.pause(20000)){close();return;}}
+      catch(e){close();return;}
+      var saved=current,lease=generation;
+      expiry=setTimeout(function(){if(current===saved&&generation===lease)close();},20000);
+    },
+    dropIdle:function(){if(expiry!==null)close();},
+    close:close
   };
 }
 // playWS(video, wsUrl, onFail, onEnd): onFail fires when the stream never starts

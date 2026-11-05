@@ -205,7 +205,7 @@ test('actual grid teardown closes shared and legacy players and cancels queued s
       return cell;
     });
     const grid = { innerHTML: 'cells', dataset: { agent: 'site-a' } };
-    Object.assign(h.context, { gridSched: { mux: factory }, $: () => grid, $$: () => cells, clearInterval() {} });
+    Object.assign(h.context, { gridTransportCache: null, gridSched: { mux: factory }, $: () => grid, $$: () => cells, clearInterval() {} });
     for (const name of ['_cellCancelFirstFrame', '_cellStop', 'stopGridSched', 'stopLiveGrid']) vm.runInContext(actualFunction(name), h.context);
     h.context.stopLiveGrid(); await drain(); h.advance(20000);
     assert.equal(h.context.gridSched, null); assert.equal(restarts, 0);
@@ -472,4 +472,111 @@ test('truthy non-boolean receipt flow options never opt in implicitly',()=>{
     assert.ok(h.sockets.every(socket=>!new URL(socket.url).searchParams.has('flow')),'only the boolean true may enable receipt flow');
     factory.close();assert.equal(h.timers.size,0);
   }
+});
+
+
+test('tab round trip releases media, reuses four healthy transports and ignores retired slots', async () => {
+  const h = harness(), cache = h.context.createGridTransportCache();
+  const factory = cache.acquire('site-a', 4);
+  const clients = Array.from({length: 12}, (_, i) => factory.socket(streamURL(i + 1)));
+  h.sockets.forEach(s => s.open()); await drain();
+  let staleFrames = 0; clients.forEach(v => v.onmessage = () => staleFrames++);
+  cache.release(factory);
+  assert.ok(clients.every(v => v.closed));
+  assert.equal(h.sockets.flatMap(s => s.sent).filter(c => c.op === 'unsub').length, 12);
+  h.sockets.forEach(s => s.message(packet(1, [99])));
+  assert.equal(staleFrames, 0);
+  h.advance(5000);
+  assert.equal(cache.acquire('site-a', 4), factory);
+  Array.from({length: 12}, (_, i) => factory.socket(streamURL(i + 1)));
+  await drain();
+  assert.equal(h.sockets.length, 4);
+  assert.ok(h.sockets.every(s => s.readyState === 1));
+  cache.close(); assert.equal(h.timers.size, 0);
+});
+
+test('parked transports expire at twenty seconds and cannot be acquired again', async () => {
+  const h = harness(), cache = h.context.createGridTransportCache();
+  const first = cache.acquire('site-a', 2);
+  first.socket(streamURL(1)); first.socket(streamURL(2));
+  h.sockets.forEach(s => s.open()); await drain(); cache.release(first);
+  h.advance(19990); assert.ok(h.sockets.every(s => s.readyState === 1));
+  h.advance(20); assert.ok(h.sockets.every(s => s.readyState === 3));
+  assert.equal(h.timers.size, 0);
+  assert.notEqual(cache.acquire('site-a', 2), first); cache.close();
+});
+
+test('posted idle and lease callbacks cannot close a reacquired transport', async () => {
+  const h = harness(), cache = h.context.createGridTransportCache();
+  const first = cache.acquire('site-a', 1), v = first.socket(streamURL(1));
+  h.sockets[0].open(); await drain();
+  v.close(); const oldIdle = [...h.timers.values()].map(t => t.fn);
+  cache.release(first); const oldLease = [...h.timers.values()].map(t => t.fn);
+  assert.equal(cache.acquire('site-a', 1), first);
+  // There need not be a subscriber yet when a queued expiry callback runs.
+  [...oldIdle, ...oldLease].forEach(fn => fn());
+  assert.equal(h.sockets[0].readyState, 1);
+  first.socket(streamURL(2)); cache.close(); assert.equal(h.timers.size, 0);
+});
+
+test('site or pool-size change, logout and idle invalidation dispose retained sockets', async () => {
+  for (const action of ['site', 'size', 'logout', 'network']) {
+    const h = harness(), cache = h.context.createGridTransportCache();
+    const first = cache.acquire('site-a', 1); first.socket(streamURL(1));
+    h.sockets[0].open(); await drain();
+    cache.dropIdle(); assert.equal(h.sockets[0].readyState, 1);
+    cache.release(first);
+    if (action === 'site') cache.acquire('site-b', 1);
+    if (action === 'size') cache.acquire('site-a', 2);
+    if (action === 'logout') cache.close();
+    if (action === 'network') cache.dropIdle();
+    assert.equal(h.sockets[0].readyState, 3);
+    cache.close(); assert.equal(h.timers.size, 0);
+  }
+});
+
+test('connecting, failed and legacy transports are never parked', async () => {
+  for (const state of ['connecting', 'failed', 'legacy']) {
+    const h = harness(), cache = h.context.createGridTransportCache();
+    const first = cache.acquire('site-a', 1); first.socket(streamURL(1));
+    if (state === 'failed') h.sockets[0].open();
+    if (state !== 'connecting') h.sockets[0].error();
+    cache.release(first);
+    assert.equal(h.sockets[0].readyState, 3);
+    assert.notEqual(cache.acquire('site-a', 1), first);
+    cache.close(); assert.equal(h.timers.size, 0);
+  }
+});
+
+test('actual app teardown parks transport but closes players, and logout disposes it from events', async () => {
+  const h = harness(), cache = h.context.createGridTransportCache();
+  const factory = cache.acquire('site-a', 4);
+  const cells = Array.from({length: 4}, (_, i) => {
+    const v = h.video(), cell = {_wantLive: true, querySelector: () => v};
+    cell._player = h.context.playWS(v, streamURL(i + 1), () => assert.fail('fallback during teardown'), null, factory.socket);
+    return cell;
+  });
+  h.sockets.forEach(s => s.open()); await drain();
+  const grid = {innerHTML: 'cells', dataset: {agent: 'site-a'}};
+  Object.assign(h.context, {gridTransportCache: cache, gridSched: {mux: factory}, $: () => grid, $$: () => cells, clearInterval() {}});
+  for (const name of ['_cellCancelFirstFrame', '_cellStop', 'stopGridSched', 'stopLiveGrid']) vm.runInContext(actualFunction(name), h.context);
+  h.context.stopLiveGrid(true); await drain();
+  assert.ok(cells.every(c => c._player === null && !c._wantLive));
+  assert.ok(h.sockets.every(s => s.readyState === 1));
+  assert.equal(grid.innerHTML, ''); assert.equal(h.context.gridSched, null);
+  // Logout must still clear the parked cache when there is no active scheduler.
+  h.context.stopLiveGrid();
+  assert.ok(h.sockets.every(s => s.readyState === 3)); assert.equal(h.timers.size, 0);
+});
+
+
+test('unsubscribe send failure cannot interrupt app teardown or retain the pool', async () => {
+  const h = harness(), cache = h.context.createGridTransportCache();
+  const first = cache.acquire('site-a', 2); first.socket(streamURL(1)); first.socket(streamURL(2));
+  h.sockets.forEach(s => s.open()); await drain();
+  h.sockets[0].send = () => {throw new Error('transport failed while unsubscribing');};
+  assert.doesNotThrow(() => cache.release(first));
+  assert.ok(h.sockets.every(s => s.readyState === 3));
+  assert.equal(h.timers.size, 0);
+  assert.notEqual(cache.acquire('site-a', 2), first); cache.close();
 });
