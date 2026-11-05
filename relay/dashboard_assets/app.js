@@ -548,6 +548,7 @@ function _cellPlay(cell){
   if(!cell || cell._player) return;
   var path=cell.dataset.path; if(!path) return;
   var video=cell.querySelector('video'); if(!video) return;
+  video.onerror=null;
   var wsUrl=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/surv/ws/'+path;
   var hlsUrl=location.origin+'/surv/'+path+'/index.m3u8';
   cell._liveProg={v:-1, at:Date.now()};
@@ -564,7 +565,7 @@ function _cellPlay(cell){
   if(video.requestVideoFrameCallback) cell._frameCallback=video.requestVideoFrameCallback(firstFrame);
   else {cell._firstData=firstFrame;video.addEventListener('loadeddata',firstFrame,{once:true});}
   cell._player=playWS(video, wsUrl,
-    function(){ if(_cellShouldBeLive(cell) && !playHLS(video,hlsUrl)) _cellReconnect(cell); },
+    function(){ if(_cellShouldBeLive(cell) && !playHLS(video,hlsUrl,function(){if(_cellShouldBeLive(cell))_cellReconnect(cell);})) _cellReconnect(cell); },
     function(){ _cellReconnect(cell); });    // post-init death: zombie reconnect
   _cellUnfreeze(cell);
 }
@@ -593,6 +594,7 @@ function _cellStop(cell){
   if(cell._player){ try{ cell._player.close&&cell._player.close(); }catch(e){} cell._player=null; }
   var video=cell.querySelector('video');
   if(video){
+    video.onerror=null;
     if(cell._unfreezeHide){ video.removeEventListener('timeupdate', cell._unfreezeHide); cell._unfreezeHide=null; }
     try{ video.removeAttribute('src'); video.load(); }catch(e){}
   }
@@ -650,6 +652,8 @@ function gridWatchdog(){
     var video=c.querySelector('video'); if(!video) return;
     var prog=Math.max(video.currentTime||0, _bufEnd(video));
     var p=c._liveProg||(c._liveProg={v:-1,at:now});
+    // Queued/pre-init attempts own a separate deadline; they are not stalled video.
+    if(c._player.starting && c._player.starting()){p.at=now;return;}
     if(prog>p.v+0.01){ p.v=prog; p.at=now; c._liveBackoff=0; }
     else if(now-p.at>LIVE_STALL_MS){ p.at=now; _cellReconnect(c); }
   });
@@ -711,7 +715,7 @@ function stopLiveGrid(){
 // live grid leaves cells black there. Desktop handles many fine — we only gate
 // playback by visibility on mobile, leaving desktop's all-at-once behavior intact.
 function _isMobile(){ return _isIOS() || /Android|Mobile/i.test(navigator.userAgent); }
-function playHLS(video, hlsUrl){ if(!video.canPlayType('application/vnd.apple.mpegurl')) return false; video.src=hlsUrl; video.play().catch(function(){}); return true; }
+function playHLS(video, hlsUrl, onError){ if(!video.canPlayType('application/vnd.apple.mpegurl')) return false; video.onerror=function(){video.onerror=null;if(onError)onError();}; video.src=hlsUrl; video.play().catch(function(){}); return true; }
 function liveCellHTML(s){
   var off=!s.active;
   return '<video class="cellvid" muted autoplay playsinline></video>'+
@@ -1257,7 +1261,7 @@ function upStartLive(){
   up._liveProg={v:-1, at:Date.now()};
   var generation=up._seekSeq;
   up.player=playWS(upVideo, wsUrl,
-    function(){ if(up.open && up.mode==='live' && generation===up._seekSeq && !playHLS(upVideo,hlsUrl))upLiveReconnect(); },
+    function(){ if(up.open && up.mode==='live' && generation===up._seekSeq && !playHLS(upVideo,hlsUrl,function(){if(generation===up._seekSeq)upLiveReconnect();}))upLiveReconnect(); },
     function(){ if(generation===up._seekSeq)upLiveReconnect(); });
   upSyncLiveWindow(); upEnsureTimeline(true); clearTimeout(up._liveTimer); upLiveTick();
 }
@@ -1543,7 +1547,8 @@ function upLiveTick(){
   if(up.player && upVideo){
     var prog=Math.max(upVideo.currentTime||0, _bufEnd(upVideo));
     var p=up._liveProg||(up._liveProg={v:-1,at:Date.now()});
-    if(prog>p.v+0.01){ p.v=prog; p.at=Date.now(); up._liveBackoff=0; }
+    if(up.player.starting && up.player.starting()){p.at=Date.now();}
+    else if(prog>p.v+0.01){ p.v=prog; p.at=Date.now(); up._liveBackoff=0; }
     else if(Date.now()-p.at>LIVE_STALL_MS){ p.at=Date.now(); upLiveReconnect(); }
   }
   up._liveTimer=setTimeout(upLiveTick,1000);
