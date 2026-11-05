@@ -1,11 +1,14 @@
 package main
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +18,22 @@ import (
 
 //go:embed dashboard_assets
 var dashboardAssets embed.FS
+
+// Content versions also survive CDN rules that override origin cache headers.
+// HTML remains revalidated, while each changed asset gets a new cache key.
+var dashboardAssetURL = regexp.MustCompile(`/dashboard/assets/[^"'\s?<>]+`)
+
+func versionDashboardHTML(b []byte) []byte {
+	return dashboardAssetURL.ReplaceAllFunc(b, func(url []byte) []byte {
+		name := strings.TrimPrefix(string(url), "/dashboard/assets/")
+		asset, err := dashboardAssets.ReadFile("dashboard_assets/" + name)
+		if err != nil {
+			return url
+		}
+		sum := sha256.Sum256(asset)
+		return []byte(fmt.Sprintf("%s?v=%x", url, sum[:8]))
+	})
+}
 
 // dashboardEnabled reports whether the operator dashboard is configured.
 func (h *Hub) dashboardEnabled() bool { return h.effectiveDashToken() != "" }
@@ -419,7 +438,7 @@ func (h *Hub) HandleDashboardStatic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(b)
+	w.Write(versionDashboardHTML(b))
 }
 
 // HandleWallLayout returns the live-wall mosaic layout for the given agent.
@@ -473,7 +492,8 @@ func (h *Hub) HandleWallPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(b)
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Write(versionDashboardHTML(b))
 }
 
 // registerDashboard wires routes onto mux only when the dashboard is enabled.
