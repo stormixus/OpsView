@@ -63,8 +63,8 @@ test('thumbnail priority applies only to first six cards, including appended pag
  vm.runInContext(src.slice(src.indexOf('function evCardHTML('),src.indexOf('// Render the Protect-style')),ctx);
  const ev={start:1000,stream:'cam',ch:1,name:'camera'};
  assert.match(ctx.evCardHTML(ev,0),/loading="eager" fetchpriority="high"/);
- assert.match(ctx.evCardHTML(ev,6),/loading="lazy" fetchpriority="low"/);
- assert.match(ctx.evCardHTML(ev,24),/loading="lazy" fetchpriority="low"/);
+ assert.match(ctx.evCardHTML(ev,6),/loading="lazy" fetchpriority="auto"/);
+ assert.match(ctx.evCardHTML(ev,24),/loading="lazy" fetchpriority="auto"/);
 });
 
 test('leaving events cancels pending load and ignores a response after navigation', async()=>{
