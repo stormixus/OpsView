@@ -336,3 +336,113 @@ test('real playWS synchronous constructor failure leaves no closed handle blocki
   h.context._cellStop(cell);
   assert.equal(h.timers.size,0);
 });
+
+function rotationTick(h) {
+  const timer=h.intervals.get(h.context.gridSched.timer);
+  assert.equal(timer.delay,5000);
+  timer.callback();
+}
+
+test('desktop and mobile first-picture attempts survive five-second dwell ticks during startup grace',()=>{
+  for(const mobile of [false,true]){
+    const h=liveHarness({mobile}),cap=mobile?4:12;
+    const cells=Array.from({length:cap*2},(_,i)=>h.makeCell(i+1));
+    h.context.startLiveGrid(cells);h.observers[0].enter(cells);
+    const initial=cells.slice(0,cap).map(cell=>cell._player);
+    for(let tick=0;tick<2;tick++){
+      h.advanceClock(5000);rotationTick(h);
+      assert.equal(h.context.gridSched.start,0);
+      for(let i=0;i<cap;i++){
+        assert.equal(cells[i]._player,initial[i],'five-second rotation cancelled an undecoded original attempt');
+        assert.equal(initial[i].closed,false);
+      }
+      assert.equal(h.active.size,cap);assert.ok(h.maxActive<=cap);
+    }
+  }
+});
+
+test('a decoded first picture still warms the next unseen channel before the fixed grace deadline',()=>{
+  const h=liveHarness({mobile:true}),cells=[1,2,3,4,5].map(h.makeCell);
+  h.context.startLiveGrid(cells);h.observers[0].enter(cells);
+  const deadline=h.context.gridSched.warmUntil,initial=cells[0]._player;
+  h.advanceClock(11000);
+  assert.equal(cells[4]._player,undefined);
+  cells[0].video.decodeFrame();
+  assert.equal(cells[0]._hasFrame,true);assert.equal(initial.closed,true);
+  assert.ok(cells[4]._player&&!cells[4]._player.closed);
+  assert.equal(h.context.gridSched.warmUntil,deadline,'first frames must not continually extend the grace period');
+  assert.equal(h.active.size,4);assert.equal(h.maxActive,4);
+});
+
+test('startup grace expires and ordinary rotation proceeds even when channels remain unavailable',()=>{
+  for(const mobile of [false,true]){
+    const h=liveHarness({mobile}),cap=mobile?4:12;
+    const cells=Array.from({length:cap*2},(_,i)=>h.makeCell(i+1));
+    h.context.startLiveGrid(cells);h.observers[0].enter(cells);
+    const first=cells[0]._player,deadline=h.context.gridSched.warmUntil;
+    h.advanceClock(13000);rotationTick(h);
+    assert.equal(h.context.gridSched.start,cap);
+    assert.equal(first.closed,true,'an unavailable initial channel held the rotation indefinitely');
+    assert.ok(cells.slice(0,cap).every(cell=>cell._player===null));
+    assert.ok(cells.slice(cap).every(cell=>cell._player&&!cell._player.closed));
+    assert.equal(h.context.gridSched.warmUntil,deadline);
+    h.advanceClock(5000);rotationTick(h);
+    assert.equal(h.context.gridSched.start,0);
+    assert.ok(cells.slice(0,cap).every(cell=>cell._player&&!cell._player.closed));
+    assert.equal(h.active.size,cap);assert.ok(h.maxActive<=cap);
+  }
+});
+
+test('a late first frame after grace expiry cannot steal the active ordinary-rotation window',()=>{
+  for(const mobile of [false,true]){
+    const h=liveHarness({mobile}),cap=mobile?4:12;
+    const cells=Array.from({length:cap*2},(_,i)=>h.makeCell(i+1));
+    h.context.startLiveGrid(cells);h.observers[0].enter(cells);
+    h.advanceClock(13000);rotationTick(h);
+    const current=cells.slice(cap).map(cell=>cell._player);
+    cells[cap].video.decodeFrame();
+    assert.equal(cells[cap]._hasFrame,true);
+    for(let i=0;i<cap;i++){
+      assert.equal(cells[cap+i]._player,current[i],'late first frame reset the rotation to an earlier unseen window');
+      assert.equal(current[i].closed,false);
+    }
+    assert.ok(cells.slice(0,cap).every(cell=>cell._player===null));
+    assert.equal(h.active.size,cap);
+  }
+});
+
+test('newly visible unseen cells refresh grace while repeated visibility and seeded newcomers do not',()=>{
+  const h=liveHarness({mobile:true}),initial=[1,2,3,4].map(h.makeCell);
+  const unseen=h.makeCell(5),seeded=h.makeCell(6);seeded._hasFrame=true;
+  h.context.startLiveGrid([...initial,unseen,seeded]);h.observers[0].enter(initial);
+  const expired=h.context.gridSched.warmUntil;
+  h.advanceClock(13000);rotationTick(h);
+  h.observers[0].enter([unseen]);
+  const refreshed=h.context.gridSched.warmUntil;
+  assert.ok(refreshed>expired);
+  assert.ok(unseen._player&&!unseen._player.closed);
+  const active=[...h.active];
+  h.advanceClock(5000);rotationTick(h);
+  assert.ok(active.every(player=>!player.closed),'newly visible channel lost its refreshed startup attempt');
+  h.observers[0].enter([unseen]);
+  assert.equal(h.context.gridSched.warmUntil,refreshed,'repeated intersection reports extended grace indefinitely');
+  h.observers[0].enter([seeded]);
+  assert.equal(h.context.gridSched.warmUntil,refreshed,'an already seeded newcomer unnecessarily reset grace');
+  assert.equal(h.active.size,4);assert.equal(h.maxActive,4);
+});
+
+test('all seeded viewport cells resume normal dwell without waiting for the startup deadline',()=>{
+  const h=liveHarness({mobile:true}),cells=[1,2,3,4,5,6,7,8].map(h.makeCell);
+  h.context.startLiveGrid(cells);h.observers[0].enter(cells);
+  for(let i=0;i<cells.length;i++){
+    const next=cells.find(cell=>cell._player&&!cell._hasFrame);
+    assert.ok(next,'an unseen cell was never given a first-picture attempt');
+    next.video.decodeFrame();
+  }
+  assert.ok(cells.every(cell=>cell._hasFrame));
+  h.advanceClock(5000);rotationTick(h);
+  assert.equal(h.context.gridSched.start,4);
+  assert.ok(cells.slice(4).every(cell=>cell._player&&!cell._player.closed));
+  assert.ok(cells.slice(0,4).every(cell=>cell._player===null));
+  assert.equal(h.active.size,4);
+});

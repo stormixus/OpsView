@@ -528,7 +528,7 @@ function cellHTML(s){
 // rotates the live window (gridrotate.js) so every on-screen cell cycles through a live
 // turn; a rotated-out cell freezes its last frame instead of going black. An
 // IntersectionObserver excludes scrolled-off cells from the rotation pool.
-var LIVE_CAP_DESKTOP=12, LIVE_CAP_MOBILE=4, ROTATE_DWELL_MS=5000;
+var LIVE_CAP_DESKTOP=12, LIVE_CAP_MOBILE=4, ROTATE_DWELL_MS=5000, LIVE_WARMUP_MS=12000;
 // Zombie-live: a started cell whose feed dies (socket drop or silent stall) is torn
 // down and reconnected with backoff, forever, as long as it should be live — instead
 // of going black and staying black. LIVE_STALL_MS = max gap with no frame progress
@@ -560,7 +560,7 @@ function _cellPlay(cell){
     if(!cell._wantLive || generation!==cell._playGeneration) return;
     cell._hasFrame=true;cell._firstFrameAt=performance.now();
     video.dataset.viewportToFrameMs=Math.round(cell._firstFrameAt-(cell._visibleAt||started));
-    if(gridSched && gridSched.eligible.some(function(c){return !c._hasFrame;})) gridRotate(false);
+    if(gridSched && performance.now()<gridSched.warmUntil && gridSched.eligible.some(function(c){return !c._hasFrame;})) gridRotate(false);
   }
   if(video.requestVideoFrameCallback) cell._frameCallback=video.requestVideoFrameCallback(firstFrame);
   else {cell._firstData=firstFrame;video.addEventListener('loadeddata',firstFrame,{once:true});}
@@ -625,6 +625,9 @@ var gridSched=null;
 function gridRotate(advance){
   if(!gridSched || up.open) return; // player overlay covers the grid — don't decode under it
   var pool=gridSched.eligible, cap=liveCap();
+  // A slow first picture must not lose its decoder to the five-second dwell.
+  // Bound this grace period so an unavailable channel cannot hold rotation.
+  if(advance && performance.now()<gridSched.warmUntil && pool.some(function(c){return !c._hasFrame;}))advance=false;
   if(advance) gridSched.start=nextStart(pool.length, cap, gridSched.start);
   // Seed a first decoded picture for newly visible cells before dwelling on
   // cells that already have a frozen picture. Decoder concurrency stays capped.
@@ -660,7 +663,7 @@ function gridWatchdog(){
 }
 function startLiveGrid(cells,agent){
   stopGridSched();
-  gridSched={ eligible:[], start:0, timer:null, wd:null, obs:null };
+  gridSched={ eligible:[], start:0, timer:null, wd:null, obs:null, warmUntil:0 };
   if(agent&&typeof createGridWSFactory==='function')gridSched.mux=createGridWSFactory(agent,_isMobile()?2:4);
   // Track on-screen cells for ALL platforms now: the pool is whatever's visible, and
   // rotation caps concurrent decoders within it.
@@ -672,7 +675,10 @@ function startLiveGrid(cells,agent){
       if(en.isIntersecting){ if(i<0){c._visibleAt=performance.now();entered.push(c);} }
       else { if(i>=0) gridSched.eligible.splice(i,1); if(c._player){ _cellFreeze(c); _cellStop(c); } }
     });
-    if(entered.length){gridSched.eligible=entered.concat(gridSched.eligible);gridSched.start=0;}
+    if(entered.length){
+      gridSched.eligible=entered.concat(gridSched.eligible);gridSched.start=0;
+      if(entered.some(function(c){return !c._hasFrame;}))gridSched.warmUntil=performance.now()+LIVE_WARMUP_MS;
+    }
     gridRotate(false); // newly visible cells connect immediately, within the cap
   }, {rootMargin:'0px'});
   cells.forEach(function(c){ gridSched.obs.observe(c); });
