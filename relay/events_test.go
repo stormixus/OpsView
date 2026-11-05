@@ -2,8 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -191,5 +194,117 @@ func TestRecListDays(t *testing.T) {
 	// nothing valid -> empty
 	if d := recListDays("", "", ""); len(d) != 0 {
 		t.Fatalf("empty: %v", d)
+	}
+}
+
+// Reads must return owned snapshots and include every completed append, even
+// while timeline readers and asynchronous plate recognition are active.
+func TestEventStoreConcurrentReadAppend(t *testing.T) {
+	for _, disk := range []bool{false, true} {
+		t.Run(fmt.Sprint("disk=", disk), func(t *testing.T) {
+			dir := ""
+			if disk {
+				dir = t.TempDir()
+			}
+			es := newEventStore(dir)
+			const base = int64(1_000_000)
+			day := dayKeyFromMs(base)
+			done := make(chan struct{})
+			var wg sync.WaitGroup
+			for n := 0; n < 4; n++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for {
+						select {
+						case <-done:
+							return
+						default:
+						}
+						snapshot := es.eventsForDay("cam", day)
+						if len(snapshot) > 0 {
+							snapshot[0].Kind = "caller mutation"
+						}
+						es.updateOpenPlate("cam", base, "1234")
+					}
+				}()
+			}
+			for n := 0; n < 100; n++ {
+				start := base + int64(n)*2000
+				es.add("cam", "motion", true, start)
+				es.add("cam", "motion", false, start+1000)
+			}
+			close(done)
+			wg.Wait()
+			got := es.eventsForDay("cam", day)
+			if len(got) != 100 {
+				t.Fatalf("lost appends: got %d", len(got))
+			}
+			for _, iv := range got {
+				if iv.Kind != "motion" {
+					t.Fatalf("shared snapshot: %+v", iv)
+				}
+			}
+			reloaded := es
+			if disk {
+				reloaded = newEventStore(dir)
+			}
+			if got := reloaded.eventsForDay("cam", day); len(got) != 100 {
+				t.Fatalf("persisted %d events", len(got))
+			}
+		})
+	}
+}
+
+func TestEventStoreAppendSameMtimeInvalidates(t *testing.T) {
+	es := newEventStore(t.TempDir())
+	const base = int64(1_000_000)
+	day := dayKeyFromMs(base)
+	es.add("cam", "motion", true, base)
+	es.add("cam", "motion", false, base+1000)
+	es.eventsForDay("cam", day)
+	path := filepath.Join(es.recDir, "cam", ".events", day+".jsonl")
+	info, _ := os.Stat(path)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString("{\"start\":2000,\"end\":2010,\"kind\":\"person\"}\n")
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if got := es.eventsForDay("cam", day); len(got) != 2 {
+		t.Fatalf("stale cache: %+v", got)
+	}
+}
+
+func TestEventStoreScanErrorPreservesRetentionWithoutCaching(t *testing.T) {
+	es := newEventStore(t.TempDir())
+	const base = int64(1_000_000)
+	es.add("cam", "motion", true, base)
+	es.add("cam", "motion", false, base+1000)
+	day := dayKeyFromMs(base)
+	path := filepath.Join(es.recDir, "cam", ".events", day+".jsonl")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString(strings.Repeat("x", 1024*1024+1))
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !es.overlaps("cam", 1000, 1001) {
+		t.Fatal("scan failure hid valid event from retention")
+	}
+	es.mu.Lock()
+	_, cached := es.cache["cam|"+day]
+	es.mu.Unlock()
+	if cached {
+		t.Fatal("partial scan cached")
 	}
 }
