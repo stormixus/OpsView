@@ -184,6 +184,13 @@ func (r *Recorder) startLocked(outputPath, sourcePath string) {
 	log.Printf("[rec] recording %s (source %s) -> %s", outputPath, sourcePath, outDir)
 }
 
+// Fragmented MP4 writes its initialization metadata immediately. An active
+// five-minute file can then be decoded before it rolls over; packets remain
+// stream-copied, preserving the original camera codec/quality.
+func recordingOutputArgs(segSecs int, pattern string) []string {
+	return []string{"-c", "copy", "-an", "-f", "segment", "-segment_time", fmt.Sprint(segSecs), "-segment_format", "mp4", "-segment_format_options", "movflags=+frag_keyframe+empty_moov+default_base_moof:flush_packets=1", "-reset_timestamps", "1", "-strftime", "1", "-flush_packets", "1", pattern}
+}
+
 // supervise runs ffmpeg and restarts it (with backoff) until ctx is cancelled.
 func (r *Recorder) supervise(ctx context.Context, path, hlsURL, outDir string) {
 	backoff := 3 * time.Second
@@ -198,19 +205,10 @@ func (r *Recorder) supervise(ctx context.Context, path, hlsURL, outDir string) {
 		}
 		// %Y%m%d_%H%M%S in the filename keeps segments time-sortable per channel.
 		pattern := filepath.Join(outDir, "%Y%m%d_%H%M%S.mp4")
-		cmd := exec.CommandContext(ctx, "ffmpeg",
-			"-hide_banner", "-loglevel", "error",
-			"-rw_timeout", "15000000", // 15s I/O timeout so a dead HLS doesn't hang
-			"-i", hlsURL,
-			"-c", "copy", "-an",
-			"-f", "segment",
-			"-segment_time", fmt.Sprintf("%d", r.segSecs),
-			"-segment_format", "mp4",
-			"-segment_format_options", "movflags=+faststart",
-			"-reset_timestamps", "1",
-			"-strftime", "1",
-			pattern,
-		)
+		args := []string{"-hide_banner", "-loglevel", "error", "-rw_timeout", "15000000", "-i", hlsURL}
+		args = append(args, recordingOutputArgs(r.segSecs, pattern)...)
+		cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+
 		err := cmd.Run()
 		if ctx.Err() != nil {
 			return // cancelled
