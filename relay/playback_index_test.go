@@ -164,3 +164,43 @@ func TestPlaybackRangeIndexKeepsListingSizesSeparate(t *testing.T) {
 		})
 	}
 }
+
+func TestPlaybackNameScanRejectsDirectoriesAndDeletedCachedFiles(t *testing.T) {
+	rec := &Recorder{dir: t.TempDir(), segSecs: 300}
+	stream := "site/dvr1_ch1"
+	start := time.Date(2026, 6, 7, 12, 0, 0, 0, time.Local)
+	first := writePlaybackIndexSegment(t, rec, stream, start)
+	last := writePlaybackIndexSegment(t, rec, stream, start.Add(300*time.Second))
+	dir, _ := rec.safeStreamDir(stream)
+	for _, at := range []time.Time{start.Add(time.Minute), start.AddDate(0, 0, 1)} {
+		if err := os.Mkdir(filepath.Join(dir, at.Format(recNameLayout)+".mp4"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := rec.segmentsForExport(stream, start.Unix(), start.Unix()+600)
+	if len(got) != 2 || got[0].Name != first || got[0].Dur != 300 || got[1].Name != last {
+		t.Fatalf("MP4-shaped directory altered recording coverage: %+v", got)
+	}
+	if got := rec.segments(stream, "20260607"); len(got) != 2 || got[0].Size != 7 {
+		t.Fatalf("download listing included directory or lost sizes: %+v", got)
+	}
+	if got := rec.days(stream); len(got) != 1 || got[0] != "20260607" {
+		t.Fatalf("directory-only day became recording coverage: %+v", got)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, first)); err != nil {
+		t.Fatal(err)
+	}
+	// Even if directory timestamp resolution leaves an old names cache valid,
+	// the requested band must reject files which disappeared after enumeration.
+	if err := os.Chtimes(dir, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	got = rec.segmentsForExport(stream, start.Unix(), start.Unix()+600)
+	if len(got) != 1 || got[0].Name != last {
+		t.Fatalf("deleted cached filename still selected: %+v", got)
+	}
+}
