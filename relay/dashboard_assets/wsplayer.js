@@ -147,7 +147,7 @@ function playWS(video, wsUrl, onFail, onEnd, socketFactory){
   var MS=_msCtor();
   if(!MS){ onFail&&onFail(); return null; }
   var managed=(typeof window.ManagedMediaSource!=='undefined' && MS===window.ManagedMediaSource);
-  var ms=new MS(), sb=null, ws=null, gotInit=false, closed=false, initData=null, q=[], srcEl=null, cancelConnect=null, tm=null, objUrl=URL.createObjectURL(ms);
+  var ms=new MS(), sb=null, ws=null, gotInit=false, connected=false, closed=false, initData=null, q=[], srcEl=null, cancelConnect=null, tm=null, objUrl=URL.createObjectURL(ms);
   var started=performance.now();
   if(video.dataset){video.dataset.wsStartedAt=started;delete video.dataset.wsOpenMs;delete video.dataset.wsInitMs;delete video.dataset.wsQueuedMs;}
   function cleanup(){
@@ -159,6 +159,7 @@ function playWS(video, wsUrl, onFail, onEnd, socketFactory){
     try{URL.revokeObjectURL(objUrl);}catch(e){}
   }
   function fail(){ if(closed)return; closed=true; clearTimeout(tm); cleanup(); onFail&&onFail(); }
+  function startupDeadline(){clearTimeout(tm);tm=setTimeout(function(){if(!gotInit)fail();},6000);}
   function end(){ if(closed)return; closed=true; clearTimeout(tm); cleanup(); onEnd&&onEnd(); }
   function die(){ if(gotInit) end(); else fail(); } // post-init death -> reconnect; pre-init -> HLS
   function flush(){ if(!sb||sb.updating||!q.length)return; var next=q.shift();try{sb.appendBuffer(next);}catch(err){ if(err&&err.name==='QuotaExceededError'){ q.unshift(next);try{ if(sb.buffered.length){var e=sb.buffered.end(sb.buffered.length-1); if(e>8)sb.remove(0,e-4);} }catch(e2){} } else die(); } }
@@ -182,11 +183,17 @@ function playWS(video, wsUrl, onFail, onEnd, socketFactory){
     cancelConnect=release;
     if(closed){release();return;}
     if(video.dataset)video.dataset.wsQueuedMs=Math.round(performance.now()-started);
-    tm=setTimeout(function(){ if(!gotInit) fail(); },6000);
+    startupDeadline();
     try{ws=socketFactory?socketFactory(wsUrl):new WebSocket(wsUrl);}catch(e){fail();return;}
     if(video.dataset)video.dataset.wsShared=ws.shared?'1':'0';
     ws.binaryType='arraybuffer';
-    ws.onopen=function(){release();if(video.dataset)video.dataset.wsOpenMs=Math.round(performance.now()-started);};
+    ws.onopen=function(){
+      if(closed||connected)return;
+      connected=true;
+      // Handshake latency must not consume the channel initialization budget.
+      if(!gotInit)startupDeadline();
+      release();if(video.dataset)video.dataset.wsOpenMs=Math.round(performance.now()-started);
+    };
     ws.onmessage=function(ev){
       if(closed)return;
       var data=new Uint8Array(ev.data);
