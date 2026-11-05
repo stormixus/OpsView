@@ -6,6 +6,7 @@ All notable changes to OpsView are documented here.
 
 ### Fixed
 
+- Live players admit at most four simultaneous WebSocket handshakes, start response deadlines after admission, and keep startup waits separate from stalled-video watchdogs. Native HLS errors now reconnect immediately, with stale handlers removed on navigation.
 - Recording indexes enumerate names before querying metadata, avoiding implicit per-entry `lstat` calls on volumes that do not return directory-entry types. Range requests validate only their time band and neighbours; download listings and calendar days still exclude directories.
 - Cold recording-range lookups index filenames without reading every MP4's byte size. Download listings keep a separate size-bearing cache, while playback and exact previews avoid unnecessary recording-volume metadata reads.
 - Dashboard and wall HTML use content-versioned asset URLs so CDN/browser caching cannot keep an older interface after a relay update.

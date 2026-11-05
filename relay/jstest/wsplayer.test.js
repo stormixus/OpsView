@@ -32,8 +32,8 @@ class FakeEvents {
 }
 
 function playerHarness(options = {}) {
-  const mediaSources = [], sockets = [], order = [], revoked = [], timers = new Map();
-  let timerID = 0, now = 100;
+  const mediaSources = [], sockets = [], order = [], revoked = [], timers = new Map(), deadlines = new Map();
+  let timerID = 0, now = 100, maxConnecting = 0;
   class FakeSourceBuffer extends FakeEvents {
     constructor() {
       super();
@@ -86,13 +86,17 @@ function playerHarness(options = {}) {
   }
   class FakeWebSocket {
     constructor(url) {
+      if(options.throwConstructor) throw new Error("constructor failed");
       this.url = url;
+      this.opened = false;
       this.closed = false;
       this.closeCount = 0;
       sockets.push(this);
       order.push('socket-created');
+      maxConnecting=Math.max(maxConnecting,sockets.filter(socket=>!socket.opened&&!socket.closed).length);
     }
-    open() { this.onopen?.(); }
+    open() { this.opened=true; this.onopen?.(); }
+    error() { this.closed=true; this.onerror?.(); }
     sendFrame(bytes) { this.onmessage?.({ data: Uint8Array.from(bytes).buffer }); }
     close() {
       this.closeCount++;
@@ -100,10 +104,14 @@ function playerHarness(options = {}) {
       this.onclose?.();
     }
   }
-  const video = new FakeEvents();
-  video.dataset = {};
-  video.playCount = 0;
-  video.play = () => { video.playCount++; return Promise.resolve(); };
+  const makeVideo = () => {
+    const video = new FakeEvents();
+    video.dataset = {};
+    video.playCount = 0;
+    video.play = () => { video.playCount++; return Promise.resolve(); };
+    return video;
+  };
+  const video = makeVideo();
   const callbacks = { failed: 0, ended: 0 };
   const context = vm.createContext({
     window: options.noMediaSource ? {} : { MediaSource: FakeMediaSource },
@@ -112,13 +120,23 @@ function playerHarness(options = {}) {
     Uint8Array,
     performance: { now: () => now++ },
     URL: { createObjectURL: () => 'blob:test', revokeObjectURL: url => revoked.push(url) },
-    setTimeout: callback => { timers.set(++timerID, callback); return timerID; },
-    clearTimeout: id => timers.delete(id),
+    setTimeout: (callback, delay) => { timers.set(++timerID, callback); deadlines.set(timerID, now+delay); return timerID; },
+    clearTimeout: id => { timers.delete(id); deadlines.delete(id); },
   });
   vm.runInContext(source, context);
-  const start = () => context.playWS(video, 'wss://example.test/stream',
-    () => callbacks.failed++, () => callbacks.ended++);
-  return { context, start, video, mediaSources, sockets, order, revoked, timers, callbacks };
+  const start = (target=video, counts=callbacks, url='wss://example.test/stream') => context.playWS(target, url,
+    () => counts.failed++, () => counts.ended++);
+  function advance(ms) {
+    const target=now+ms;
+    while(true){
+      const due=[...deadlines].filter(([,at])=>at<=target).sort((a,b)=>a[1]-b[1])[0];
+      if(!due)break;
+      const [id,at]=due,callback=timers.get(id);
+      now=at;timers.delete(id);deadlines.delete(id);callback();
+    }
+    now=target;
+  }
+  return { context, start, video, makeVideo, advance, mediaSources, sockets, order, revoked, timers, deadlines, callbacks, get maxConnecting(){return maxConnecting;} };
 }
 
 test('codecFromInit reads AVC profile/compatibility/level from avcC', () => {
@@ -270,4 +288,103 @@ test('missing MSE support and pre-init deadline both invoke fallback', () => {
 test('HEVC MIME agrees with the actual hev1 sample entry used by the relay',()=>{
  const {context}=playerHarness();
  assert.equal(context.codecFromInit(hevcInit(1,[0x60,0,0,0],[0xb0,0,0,0,0,0],93,'hev1')),'hev1.1.6.L93.B0');
+});
+
+function startMany(h,count){
+  return Array.from({length:count},(_,id)=>{
+    const video=h.makeVideo(),counts={failed:0,ended:0},url=`wss://example.test/${id}`;
+    return {video,counts,url,player:h.start(video,counts,url)};
+  });
+}
+
+test('only four socket handshakes start; each open admits exactly one queued connection',()=>{
+  const h=playerHarness(), runs=startMany(h,12);
+  assert.equal(h.sockets.length,4);
+  assert.equal(h.timers.size,4,'queued starts must not consume initialization deadlines');
+  h.sockets[0].open();
+  assert.equal(h.sockets.length,5);
+  h.sockets[0].open();
+  assert.equal(h.sockets.length,5,'duplicate open must not release a second slot');
+  h.sockets[0].error();
+  assert.equal(h.sockets.length,5,'post-open failure must not release the handshake twice');
+  for(let i=1;i<h.sockets.length;i++)h.sockets[i].open();
+  assert.equal(h.sockets.length,12);
+  assert.equal(h.maxConnecting,4);
+  for(const run of runs)run.player.close();
+});
+
+test('pre-open error or timeout releases one slot and does not leave another handshake alive',()=>{
+  for(const cause of ['error','timeout']){
+    const h=playerHarness(), runs=startMany(h,5);
+    if(cause==='error')h.sockets[0].error();
+    else {
+      const timeout=h.timers.values().next().value;
+      timeout();
+    }
+    assert.equal(runs[0].counts.failed,1);
+    assert.equal(h.sockets.length,5);
+    assert.equal(h.sockets[0].closed,true);
+    h.sockets[0].onerror();h.sockets[0].onclose();
+    assert.equal(h.sockets.length,5);
+    assert.equal(runs[0].counts.failed,1);
+    assert.ok(h.maxConnecting<=4,`a fifth handshake overlapped a timed-out connection (${cause})`);
+    for(const run of runs)run.player.close();
+  }
+});
+
+test('queued connection gets a fresh deadline when admitted rather than expiring while waiting',()=>{
+  const h=playerHarness(), runs=startMany(h,5);
+  const last=runs[4];
+  assert.equal(last.video.dataset.wsQueuedMs,undefined);
+  assert.equal(last.player.starting(),true);
+  h.advance(5900);
+  assert.equal(h.sockets.length,4);
+  h.sockets[0].open();
+  assert.equal(h.sockets.length,5);
+  assert.ok(last.video.dataset.wsQueuedMs>=5900);
+  h.advance(500); // Older starts expire; the newly admitted fifth must survive.
+  assert.deepEqual(last.counts,{failed:0,ended:0});
+  assert.equal(h.sockets[4].closed,false);
+  h.mediaSources[4].open();h.sockets[4].open();h.sockets[4].sendFrame(avcInit());
+  assert.equal(last.player.starting(),false);
+  h.advance(6000);
+  assert.deepEqual(last.counts,{failed:0,ended:0});
+  for(const run of runs)run.player.close();
+});
+
+test('cancelling a queued player removes its start and never creates a socket or timeout later',()=>{
+  const h=playerHarness(), runs=startMany(h,6), cancelled=runs[4];
+  assert.equal(h.sockets.length,4);assert.equal(h.timers.size,4);
+  cancelled.player.close();cancelled.player.close();
+  assert.equal(cancelled.player.starting(),false);
+  assert.equal(h.sockets.length,4);assert.equal(h.timers.size,4);
+  for(let i=0;i<h.sockets.length;i++)h.sockets[i].open();
+  assert.equal(h.sockets.length,5);
+  assert.equal(h.sockets.some(socket=>socket.url===cancelled.url),false);
+  h.advance(20000);
+  assert.deepEqual(cancelled.counts,{failed:0,ended:0});
+  assert.equal(cancelled.video.dataset.wsQueuedMs,undefined);
+  assert.equal(h.timers.size,0);
+  for(const run of runs)run.player.close();
+});
+
+test('constructor errors release their slot so subsequent starts do not remain queued',()=>{
+  const h=playerHarness({throwConstructor:true});
+  const runs=startMany(h,9);
+  assert.equal(h.sockets.length,0);
+  assert.equal(h.timers.size,0);
+  for(const run of runs){assert.deepEqual(run.counts,{failed:1,ended:0});assert.equal(run.player,null);}
+});
+
+test('players queued beyond watchdog threshold remain starting without a premature deadline',()=>{
+  const h=playerHarness(),runs=startMany(h,12);
+  h.advance(9000); // First batch timed out; last four still await admission.
+  assert.equal(h.sockets.length,8);
+  for(const run of runs.slice(8)){
+    assert.equal(run.player.starting(),true);
+    assert.equal(run.video.dataset.wsQueuedMs,undefined);
+    assert.deepEqual(run.counts,{failed:0,ended:0});
+  }
+  assert.equal(h.timers.size,4,'only actually constructed sockets own a deadline');
+  for(const run of runs)run.player.close();
 });

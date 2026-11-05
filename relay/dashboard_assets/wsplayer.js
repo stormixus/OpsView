@@ -29,6 +29,27 @@ function codecFromInit(d){
   }
   return null;
 }
+// Bound simultaneous handshakes, independently of the live decoder cap. A grid
+// burst must not time out sockets which are still waiting behind other starts.
+var _wsConnectActive=0, _wsConnectQueue=[];
+function _pumpWSConnects(){
+  while(_wsConnectActive<4 && _wsConnectQueue.length){
+    var entry=_wsConnectQueue.shift();
+    if(entry.done)continue;
+    entry.active=true;_wsConnectActive++;entry.start(entry.release);
+  }
+}
+function _queueWSConnect(start){
+  var entry={start:start,active:false,done:false};
+  entry.release=function(){
+    if(entry.done)return;
+    entry.done=true;
+    if(entry.active){entry.active=false;_wsConnectActive--;}
+    else {var i=_wsConnectQueue.indexOf(entry);if(i>=0)_wsConnectQueue.splice(i,1);}
+    _pumpWSConnects();
+  };
+  _wsConnectQueue.push(entry);_pumpWSConnects();return entry.release;
+}
 // playWS(video, wsUrl, onFail, onEnd): onFail fires when the stream never starts
 // (pre-init) so the caller can fall back to HLS; onEnd fires when a live stream
 // that HAD started later dies (socket close/error/decode error) so the caller can
@@ -37,12 +58,13 @@ function playWS(video, wsUrl, onFail, onEnd){
   var MS=_msCtor();
   if(!MS){ onFail&&onFail(); return null; }
   var managed=(typeof window.ManagedMediaSource!=='undefined' && MS===window.ManagedMediaSource);
-  var ms=new MS(), sb=null, ws=null, gotInit=false, closed=false, initData=null, q=[], srcEl=null, objUrl=URL.createObjectURL(ms);
+  var ms=new MS(), sb=null, ws=null, gotInit=false, closed=false, initData=null, q=[], srcEl=null, cancelConnect=null, tm=null, objUrl=URL.createObjectURL(ms);
   var started=performance.now();
-  if(video.dataset){video.dataset.wsStartedAt=started;delete video.dataset.wsOpenMs;delete video.dataset.wsInitMs;}
+  if(video.dataset){video.dataset.wsStartedAt=started;delete video.dataset.wsOpenMs;delete video.dataset.wsInitMs;delete video.dataset.wsQueuedMs;}
   function cleanup(){
     video.removeEventListener('error',die);
     try{ws&&ws.close();}catch(e){}
+    if(cancelConnect){cancelConnect();cancelConnect=null;}
     try{if(ms.readyState==='open')ms.endOfStream();}catch(e){}
     try{if(srcEl&&srcEl.parentNode)srcEl.parentNode.removeChild(srcEl);}catch(e){}
     try{URL.revokeObjectURL(objUrl);}catch(e){}
@@ -55,7 +77,6 @@ function playWS(video, wsUrl, onFail, onEnd){
   // classic MediaSource attaches via video.src.
   if(managed){ video.disableRemotePlayback=true; srcEl=document.createElement('source'); srcEl.type='video/mp4'; srcEl.src=objUrl; video.appendChild(srcEl); }
   else { video.src=objUrl; }
-  var tm=setTimeout(function(){ if(!gotInit) fail(); },6000);
   function prepare(){
     if(closed||sb||!initData||ms.readyState!=='open')return;
     var codec=codecFromInit(initData),mime=codec?'video/mp4; codecs="'+codec+'"':'';
@@ -68,18 +89,25 @@ function playWS(video, wsUrl, onFail, onEnd){
   ms.addEventListener('sourceopen',prepare);
   video.addEventListener('error',die);
   // Establish the socket while MSE opens instead of serializing both handshakes.
-  try{ws=new WebSocket(wsUrl);}catch(e){fail();return null;}
-  ws.binaryType='arraybuffer';
-  ws.onopen=function(){if(video.dataset)video.dataset.wsOpenMs=Math.round(performance.now()-started);};
-  ws.onmessage=function(ev){
-    if(closed)return;
-    var data=new Uint8Array(ev.data);
-    if(!initData){initData=data;if(video.dataset)video.dataset.wsInitMs=Math.round(performance.now()-started);}
-    if(q.length>=512){die();return;}
-    q.push(data);prepare();flush();
-  };
-  ws.onerror=die;ws.onclose=die;
+  cancelConnect=_queueWSConnect(function(release){
+    cancelConnect=release;
+    if(closed){release();return;}
+    if(video.dataset)video.dataset.wsQueuedMs=Math.round(performance.now()-started);
+    tm=setTimeout(function(){ if(!gotInit) fail(); },6000);
+    try{ws=new WebSocket(wsUrl);}catch(e){fail();return;}
+    ws.binaryType='arraybuffer';
+    ws.onopen=function(){release();if(video.dataset)video.dataset.wsOpenMs=Math.round(performance.now()-started);};
+    ws.onmessage=function(ev){
+      if(closed)return;
+      var data=new Uint8Array(ev.data);
+      if(!initData){initData=data;if(video.dataset)video.dataset.wsInitMs=Math.round(performance.now()-started);}
+      if(q.length>=512){die();return;}
+      q.push(data);prepare();flush();
+    };
+    ws.onerror=die;ws.onclose=die;
+  });
 
   video.play().catch(function(){});
-  return {close:function(){ if(closed)return; closed=true; clearTimeout(tm); cleanup(); }};
+  if(closed)return null; // synchronous constructor failure must not block caller retry
+  return {starting:function(){return !closed&&!gotInit;},close:function(){ if(closed)return; closed=true; clearTimeout(tm); cleanup(); }};
 }

@@ -5,11 +5,12 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { liveWindow, nextStart } = require('../dashboard_assets/gridrotate.js');
 const source = fs.readFileSync(path.join(__dirname, '../dashboard_assets/app.js'), 'utf8');
+const wsSource = fs.readFileSync(path.join(__dirname, '../dashboard_assets/wsplayer.js'), 'utf8');
 
-function liveHarness({ mobile = false, frameCallbacks = true } = {}) {
+function liveHarness({ mobile = false, frameCallbacks = true, failingRealWebSocket = false } = {}) {
   const timers = new Map(), intervals = new Map(), observers = [], players = [];
   const active = new Set();
-  let nextTimer = 0, clock = 100, maxActive = 0;
+  let nextTimer = 0, clock = 100, maxActive = 0, socketAttempts = 0;
   class Video {
     constructor(id) {
       this.id = id;
@@ -22,6 +23,9 @@ function liveHarness({ mobile = false, frameCallbacks = true } = {}) {
       this.videoHeight = 180;
       this.readyState = 2;
       this.loadCount = 0;
+      this.currentTime=0;this.buffered={length:0};
+      this.canPlayType=()=> 'maybe';
+      this.play=()=>Promise.resolve();
       if (!frameCallbacks) this.requestVideoFrameCallback = undefined;
     }
     requestVideoFrameCallback(callback) {
@@ -35,6 +39,7 @@ function liveHarness({ mobile = false, frameCallbacks = true } = {}) {
     }
     removeEventListener(name, callback) { this.listeners.get(name)?.delete(callback); }
     emit(name) {
+      this[`on${name}`]?.();
       for (const [callback, options] of [...(this.listeners.get(name) || [])]) {
         if (options.once) this.listeners.get(name).delete(callback);
         callback();
@@ -73,7 +78,7 @@ function liveHarness({ mobile = false, frameCallbacks = true } = {}) {
     up: { open: false },
     location: { protocol: 'https:', host: 'example.test', origin: 'https://example.test' },
     performance: { now: () => clock++ },
-    Date,
+    Date:class extends Date {static now(){return clock;}},
     document: {
       hidden: false, addEventListener() {},
       createElement: () => ({ style: {}, getContext: () => ({ drawImage() {} }) }),
@@ -86,7 +91,8 @@ function liveHarness({ mobile = false, frameCallbacks = true } = {}) {
     clearInterval: id => intervals.delete(id),
     playHLS: () => false,
     playWS(video, url, onFail, onEnd) {
-      const player = { video, url, onFail, onEnd, closed: false,
+      const player = { video, url, onFail, onEnd, closed: false, isStarting:true,
+        starting(){return this.isStarting&&!this.closed;},
         close() { this.closed = true; active.delete(this); },
       };
       players.push(player);
@@ -99,9 +105,24 @@ function liveHarness({ mobile = false, frameCallbacks = true } = {}) {
   const end = source.indexOf('// Mobile browsers allow', start);
   assert.ok(start >= 0 && end > start, 'live scheduler source boundaries');
   vm.runInContext(source.slice(start, end), context);
+  const hlsStart=source.indexOf('function playHLS(video, hlsUrl');
+  vm.runInContext(source.slice(hlsStart,source.indexOf('\n',hlsStart)),context);
+  if(failingRealWebSocket){
+    context.window.MediaSource=class {
+      constructor(){this.readyState='closed';}
+      addEventListener(){}
+    };
+    context.navigator={userAgent:'desktop test browser',platform:'Linux',maxTouchPoints:0};
+    context.URL={createObjectURL:()=> 'blob:test',revokeObjectURL(){}};
+    context.WebSocket=class {constructor(){socketAttempts++;throw new Error('blocked socket constructor');}};
+    vm.runInContext(wsSource,context);
+  }
+
   return {
     context, makeCell, timers, intervals, observers, players, active,
     get maxActive() { return maxActive; },
+    get socketAttempts(){return socketAttempts;},
+    advanceClock(ms){clock+=ms;},
     runReconnect() {
       const [id, entry] = timers.entries().next().value;
       timers.delete(id);
@@ -227,4 +248,91 @@ test('_cellStop cancels first-frame work and reconnect timers for both video cal
     staleFrame();
     assert.notEqual(cell._hasFrame, true);
   }
+});
+
+test('native HLS failure schedules reconnect immediately rather than waiting for watchdog',()=>{
+  const h=liveHarness(),cell=h.makeCell(1);
+  h.context.startLiveGrid([cell]);h.observers[0].enter([cell]);
+  const wsPlayer=cell._player;
+  wsPlayer.close();wsPlayer.onFail();
+  assert.match(cell.video.src,/\/surv\/site\/dvr1_ch1\/index.m3u8$/);
+  assert.equal(typeof cell.video.onerror,'function');
+  assert.equal(h.timers.size,0);
+  cell.video.emit('error');
+  assert.equal(h.timers.size,1,'native HLS errors must schedule retry without a watchdog tick');
+  assert.equal(cell.video.onerror,null,'native error handler should be one-shot');
+  assert.equal(cell._player,null);
+  cell.video.emit('error');
+  assert.equal(h.timers.size,1);
+  h.runReconnect();
+  assert.ok(cell._player && cell._player!==wsPlayer);
+});
+
+test('starting and stopping a cell remove stale native HLS error handlers',()=>{
+  const h=liveHarness(),cell=h.makeCell(1);
+  let stale=0;
+  cell.video.onerror=()=>{stale++;};
+  h.context.startLiveGrid([cell]);h.observers[0].enter([cell]);
+  assert.equal(cell.video.onerror,null);
+  cell._player.close();cell._player.onFail();
+  assert.equal(typeof cell.video.onerror,'function');
+  h.context._cellStop(cell);
+  assert.equal(cell.video.onerror,null);
+  cell.video.emit('error');
+  assert.equal(h.timers.size,0);
+  h.context.gridRotate(false);
+  assert.equal(cell.video.onerror,null);
+  assert.equal(stale,0);
+});
+
+test('grid watchdog preserves starting players beyond eight seconds, then still detects established stalls',()=>{
+  const h=liveHarness(),cell=h.makeCell(1);
+  h.context.startLiveGrid([cell]);h.observers[0].enter([cell]);
+  const player=cell._player;
+  cell._liveProg={v:0,at:0};
+  h.advanceClock(9000);h.context.gridWatchdog();
+  assert.equal(player.closed,false);
+  assert.equal(cell._player,player);
+  assert.equal(h.timers.size,0);
+  assert.ok(cell._liveProg.at>=9000);
+  player.isStarting=false;
+  h.advanceClock(9000);h.context.gridWatchdog();
+  assert.equal(player.closed,true,'started streams must retain ordinary stall recovery');
+  assert.equal(h.timers.size,1);
+});
+
+test('fullscreen watchdog preserves queued/starting playback and keeps its next tick scheduled',()=>{
+  const h=liveHarness();let reconnects=0,isStarting=true;
+  Object.assign(h.context,{
+    up:{open:true,mode:'live',player:{starting:()=>isStarting},_liveProg:{v:0,at:0}},
+    upVideo:{currentTime:0,buffered:{length:0}},
+    upSyncLiveWindow(){},upEnsureTimeline(){},upRenderRail(){},
+    upLiveReconnect(){reconnects++;},
+  });
+  const start=source.indexOf('function upLiveTick(){'),end=source.indexOf('\nfunction closePlayer(){',start);
+  vm.runInContext(source.slice(start,end),h.context);
+  h.advanceClock(9000);h.context.upLiveTick();
+  assert.equal(reconnects,0);
+  assert.ok(h.context.up._liveProg.at>=9000);
+  assert.ok([...h.timers.values()].some(timer=>timer.delay===1000),'starting playback must keep ticking');
+  isStarting=false;h.advanceClock(9000);h.context.upLiveTick();
+  assert.equal(reconnects,1,'established fullscreen streams must still recover on a stall');
+});
+
+test('real playWS synchronous constructor failure leaves no closed handle blocking cell retries',()=>{
+  const h=liveHarness({failingRealWebSocket:true}),cell=h.makeCell(1);
+  cell.video.canPlayType=()=>''; // Native HLS unavailable; actual failure callback must retry.
+  h.context.startLiveGrid([cell]);h.observers[0].enter([cell]);
+  assert.equal(h.socketAttempts,1);
+  assert.equal(cell._player,null,'a synchronously failed socket must not return a truthy closed player');
+  assert.equal(h.timers.size,1);
+  h.runReconnect();
+  assert.equal(h.socketAttempts,2,'retry timer was blocked by a closed player handle');
+  assert.equal(cell._player,null);
+  assert.equal(h.timers.size,1,'second failure should schedule the next retry');
+  h.runReconnect();
+  assert.equal(h.socketAttempts,3);
+  assert.equal(cell._player,null);
+  h.context._cellStop(cell);
+  assert.equal(h.timers.size,0);
 });
