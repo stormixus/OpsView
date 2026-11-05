@@ -37,7 +37,8 @@ const maxWSMessageBytes = 32 << 20 // 32 MiB
 // Hub manages all agent sessions (tenants). Each agentSession owns its own
 // publisher, watchers, surveillance proxy/config, frame buffer, and metrics.
 type Hub struct {
-	cfg Config
+	thumbnails thumbnailCache
+	cfg        Config
 
 	mu       sync.RWMutex
 	sessions map[string]*agentSession // keyed by agentID ("default" included)

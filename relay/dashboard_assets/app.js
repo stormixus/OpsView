@@ -280,6 +280,7 @@ function navTo(target){
     return;
   }
   $('#manage-view').classList.remove('active');
+  if(typeof recStop==='function') recStop();
   selected = (target==='overview')? null : target;
   selDvr=dvrParam(); liveEditing=false; var _eb=$('#liveEditBtn'); if(_eb){ _eb.textContent='편집'; _eb.classList.remove('on'); } // restore device filter from URL (/surv/<id>) on reload; in-app nav has no suffix -> 'all'
   $('#sidebar').classList.remove('open');
@@ -714,7 +715,7 @@ function updateCellClocks(){ var ts=fmtTs(new Date()); $$('.cellts').forEach(fun
    was replaced by the unified player; openModal removed). */
 var modal=$('#modal'), modalCell=$('#modalCell');
 var modalPlayer=null;
-function closeModal(){ modal.classList.remove('show'); if(modalPlayer){try{modalPlayer.close&&modalPlayer.close();}catch(e){} modalPlayer=null;} if(typeof recStop==='function') recStop(); modalCell.innerHTML=''; modalCell.classList.remove('bare'); if(opsModalTimer){clearInterval(opsModalTimer);opsModalTimer=null;} }
+function closeModal(){ modal.classList.remove('show'); if(modalPlayer){try{modalPlayer.close&&modalPlayer.close();}catch(e){} modalPlayer=null;} if(typeof recStopVideo==='function') recStopVideo(); modalCell.innerHTML=''; modalCell.classList.remove('bare'); if(opsModalTimer){clearInterval(opsModalTimer);opsModalTimer=null;} }
 $('#modalClose').addEventListener('click', closeModal);
 modal.addEventListener('click', function(e){ if(e.target===modal) closeModal(); });
 document.addEventListener('keydown', function(e){ if(e.key==='Escape'){ closeModal(); closeDrawer(); } });
@@ -782,7 +783,7 @@ modalCell.addEventListener('keydown', function(e){ if(e.target.classList.contain
 /* ============================================================ EVENTS (이벤트) — Protect-style thumbnail grid */
 // recCtx keeps the day + the agent-wide event list (newest-first from the API).
 // segCache memoizes per-stream segment lists for the day (used for modal playback).
-var REC_EV_PAGE = 80; // number of event cards to load per page
+var REC_EV_PAGE = 24; // number of event cards to load per page
 var recCtx = { day:null, selDay:'', availDays:[], eventList:[], eventFilter:'all', segCache:{}, evShown:0, range:null, preset:null };
 function pad2(n){ return (n<10?'0':'')+n; }
 function recDayStr(d){ return ''+d.getFullYear()+pad2(d.getMonth()+1)+pad2(d.getDate()); }
@@ -804,31 +805,61 @@ function recDateInputVal(){ return recCtx.selDay||''; }
 function openRec(){
   var a = selected!==null ? agentById(selected) : null; if(!a) return;
   if(!recDateInputVal()) recSetDateInput(recDayStr(new Date()));
-  recLoadDays();
+  var agent=selected, day=recDateInputVal();
+  // Start the visible list immediately; calendar metadata is independent.
+  var listLoad=recLoadDay(), token=recRangeToken;
+  Promise.all([listLoad, recLoadDays()]).then(function(results){
+    if(selected!==agent || token!==recRangeToken || recCtx.range) return;
+    var list=results[0], days=results[1];
+    // Preserve the newest-recorded-day fallback only for an empty successful list.
+    if(list && !list.length && days.length && days.indexOf(day)<0){
+      recSetDateInput(days[0]); recLoadDay();
+    }
+  });
 }
-// Pick a day that has events/recordings: probe the first stream's available days;
-// if today has nothing recorded, fall back to the newest recorded day.
+// Calendar hints must never gate the event list or overwrite a newer selection.
 function recLoadDays(){
-  var a = selected!==null ? agentById(selected) : null;
-  var probe = a && a.streams && a.streams[0] ? a.streams[0].path : null;
-  if(!probe){ recLoadDay(); return; }
-  fetch(BASE+'/api/rec?stream='+encodeURIComponent(probe)).then(function(r){return r.ok?r.json():null;}).then(function(d){
-    var days=(d&&d.days)||[], want=recDateInputVal();
-    recCtx.availDays=days; // recorded days (probe stream) -> dotted in the calendar
-    if((!want || days.indexOf(want)<0) && days.length) want=days[0];
-    if(want) recSetDateInput(want);
+  var agent=selected, a=selected!==null ? agentById(selected) : null;
+  var probe=a && a.streams && a.streams[0] ? a.streams[0].path : null;
+  recCtx.availDays=[];
+  if(!probe) return Promise.resolve([]);
+  return fetch(BASE+'/api/rec?stream='+encodeURIComponent(probe)).then(function(r){return r.ok?r.json():null;}).then(function(d){
+    var days=(d&&d.days)||[];
+    if(selected!==agent) return [];
+    recCtx.availDays=days;
     if(recCalOpen) recRenderCal();
-    recLoadDay();
-  }).catch(function(){ recLoadDay(); });
+    return days;
+  }).catch(function(){ return []; });
+}
+var recListAbort=null, recEventCache=new Map();
+function recBeginListLoad(){
+  if(recListAbort) recListAbort.abort();
+  recListAbort=new AbortController();
+  return ++recRangeToken;
 }
 function recLoadDay(){
-  var day=recDateInputVal(); if(!day) return;
-  recCtx.day=day; recCtx.range=null; recCtx.segCache={}; recRangeToken++; // invalidate any in-flight range load
+  var day=recDateInputVal(); if(!day) return Promise.resolve(null);
+  var agent=selected, tok=recBeginListLoad();
+  recCtx.day=day; recCtx.range=null; recCtx.segCache={};
   recSetActivePreset(day===recDayStr(new Date())?'today':null);
-  loadRecEventList(day).then(function(list){
-    if(day!==recCtx.day) return; // a newer day was selected mid-flight
-    recCtx.eventList=list||[];
-    recRenderEventList();
+  recCtx.loading=true; recCtx.loadError=false;
+  var key=agent+'|'+day, cached=recEventCache.get(key);
+  // Warm revisits paint immediately, then revalidate for late-arriving events.
+  recCtx.eventList=cached && Date.now()-cached.at<60000 ? cached.list : [];
+  recRenderEventList();
+  return loadRecEventList(day, recListAbort.signal).then(function(list){
+    if(tok!==recRangeToken || selected!==agent) return null;
+    recCtx.loading=false; recCtx.loadError=list===null;
+    if(list===null){ if(!recCtx.eventList.length) recRenderEventList(); return null; }
+    recEventCache.delete(key);
+    if(list.length<=2000){
+      recEventCache.set(key,{at:Date.now(),list:list});
+      while(recEventCache.size>6) recEventCache.delete(recEventCache.keys().next().value);
+    }
+    var unchanged=recCtx.eventList=== (cached&&cached.list) && JSON.stringify(cached.list)===JSON.stringify(list);
+    recCtx.eventList=list;
+    if(!unchanged) recRenderEventList();
+    return list;
   });
 }
 /* ---- date presets (오늘/어제/이번주/지난주/이번달) ---- */
@@ -854,19 +885,21 @@ function recLoadRange(from, to, kind){
   recCtx.range={from:from, to:to}; recCtx.day=null; recCtx.segCache={};
   recSetActivePreset(kind);
   var lbl=$('#recDateLabel'); if(lbl) lbl.textContent=REC_PRESET_LABELS[kind]||(from+'–'+to);
-  var tok=++recRangeToken;
-  fetch(BASE+'/api/rec-events-list?agent='+encodeURIComponent(selected)+'&from='+from+'&to='+to, {credentials:'same-origin'})
-    .then(function(r){ return r.ok? r.json() : null; })
-    .then(function(j){ if(tok!==recRangeToken) return; recCtx.eventList=(j&&Array.isArray(j.events))?j.events:[]; recRenderEventList(); })
-    .catch(function(){ if(tok!==recRangeToken) return; recCtx.eventList=[]; recRenderEventList(); });
+  var tok=recBeginListLoad();
+  recCtx.loading=true; recCtx.loadError=false;
+  recCtx.eventList=[]; recRenderEventList();
+  fetch(BASE+'/api/rec-events-list?agent='+encodeURIComponent(selected)+'&from='+from+'&to='+to, {credentials:'same-origin',signal:recListAbort.signal})
+    .then(function(r){ return r.ok? r.json() : Promise.reject(new Error("event list failed")); })
+    .then(function(j){ if(tok!==recRangeToken) return; recCtx.loading=false; recCtx.eventList=(j&&Array.isArray(j.events))?j.events:[]; recRenderEventList(); })
+    .catch(function(){ if(tok!==recRangeToken) return; recCtx.loading=false; recCtx.loadError=true; recCtx.eventList=[]; recRenderEventList(); });
 }
 (function(){ var p=$('#recPresets'); if(p) p.addEventListener('click', function(e){ var b=e.target.closest('[data-preset]'); if(b) recPreset(b.dataset.preset); }); })();
-function loadRecEventList(day){
+function loadRecEventList(day, signal){
   if(!selected) return Promise.resolve([]);
-  return fetch(BASE+'/api/rec-events-list?agent='+encodeURIComponent(selected)+'&day='+day, {credentials:'same-origin'})
-    .then(function(r){ return r.ok? r.json() : null; })
+  return fetch(BASE+'/api/rec-events-list?agent='+encodeURIComponent(selected)+'&day='+day, {credentials:'same-origin',signal:signal})
+    .then(function(r){ return r.ok? r.json() : Promise.reject(new Error("event list failed")); })
     .then(function(j){ return (j&&Array.isArray(j.events)) ? j.events : []; })
-    .catch(function(){ return []; });
+    .catch(function(){ return null; });
 }
 var REC_KIND_NAMES={person:'사람',vehicle:'차량',motion:'모션',linecross:'라인',intrusion:'침입'};
 // Inline SVG glyphs for the event-kind filter chips (전체/사람/차량/…).
@@ -884,13 +917,13 @@ function recFilterChip(kind, label){
 }
 var recIntersectObs = null; // IntersectionObserver for infinite scroll sentinel
 // Helper: generate HTML for a single event card
-function evCardHTML(ev){
+function evCardHTML(ev, index){
   var d=new Date(ev.start*1000), kind=ev.kind||'motion', kindLabel=REC_KIND_NAMES[kind]||kind;
   var when=(d.getMonth()+1)+'월 '+pad2(d.getDate())+', '+pad2(d.getHours())+':'+pad2(d.getMinutes());
-  var thumbUrl=BASE+'/api/rec-thumb?stream='+encodeURIComponent(ev.stream)+'&t='+ev.start;
+  var thumbUrl=BASE+'/api/rec-thumb?stream='+encodeURIComponent(ev.stream)+'&t='+ev.start+'&v=2';
   var plateHtml = ev.plate ? '<span class="ev-plate-badge">🚗 ' + escHtml(ev.plate) + '</span>' : '';
   return '<button class="ev-cell ev-k-'+escAttr(kind)+'" data-stream="'+escAttr(ev.stream)+'" data-start="'+ev.start+'" data-ch="'+escAttr(''+ev.ch)+'">'+
-    '<img class="ev-cellimg" loading="lazy" src="'+escAttr(thumbUrl)+'" alt="'+escAttr(kindLabel)+'">'+
+    '<img class="ev-cellimg" loading="'+(index<6?'eager':'lazy')+'" fetchpriority="'+(index<6?'high':'low')+'" decoding="async" src="'+escAttr(thumbUrl)+'" alt="'+escAttr(kindLabel)+'">'+
     plateHtml +
     '<div class="ev-cellbar"><span class="ev-celltxt"><span class="ev-celltime">'+escHtml(when)+'</span>'+
     '<span class="ev-cellcam">'+escHtml(ev.name)+' · CH'+escHtml(''+ev.ch)+'</span></span>'+
@@ -912,11 +945,12 @@ function recRenderEventList(){
   });
   filtersEl.innerHTML=filters.join('');
   $('#recMeta').textContent = events.length ? (events.length+'건') : '';
-  if(!events.length){ grid.innerHTML='<div class="ev-grid-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg><b>이벤트 없음</b></div>'; recCleanupIntersect(); return; }
+  if(!events.length){ grid.innerHTML='<div class="ev-grid-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg><b>'+(recCtx.loading?'이벤트 불러오는 중…':recCtx.loadError?'이벤트를 불러오지 못했습니다':'이벤트 없음')+'</b></div>'; recCleanupIntersect(); return; }
   var filtered = recCtx.eventFilter==='all' ? events : events.filter(function(ev){ return (ev.kind||'motion')===recCtx.eventFilter; });
   if(!filtered.length){ grid.innerHTML='<div class="ev-grid-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg><b>선택한 종류 이벤트 없음</b></div>'; recCleanupIntersect(); return; }
   // Reset for fresh render (day/filter change)
   recCtx.evShown = 0;
+  recCleanupIntersect();
   grid.innerHTML = '';
   recAppendEvents(grid, filtered);
 }
@@ -927,7 +961,7 @@ function recAppendEvents(grid, filtered){
   var end = Math.min(start + REC_EV_PAGE, filtered.length);
   var slice = filtered.slice(start, end);
   if(!slice.length) return;
-  var html = slice.map(evCardHTML).join('');
+  var html = slice.map(function(ev, i){ return evCardHTML(ev, start+i); }).join('');
   grid.insertAdjacentHTML('beforeend', html);
   recCtx.evShown = end;
   // Attach onerror handler to newly appended thumbnails
@@ -956,7 +990,7 @@ function recSetupIntersect(grid, filtered){
     if(entries[0] && entries[0].isIntersecting){
       recAppendEvents(grid, filtered);
     }
-  }, { rootMargin: '600px' });
+  }, { rootMargin: '200px' });
   recIntersectObs.observe(sentinel);
 }
 // Cleanup the IntersectionObserver and sentinel
@@ -1047,9 +1081,10 @@ $('#recCal').addEventListener('click', function(e){
 });
 document.addEventListener('click', function(){ if(recCalOpen) recCalClose(); });
 document.addEventListener('keydown', function(e){ if(e.key==='Escape' && recCalOpen) recCalClose(); });
-// No live playback on this tab; recStop tears down only the event modal video.
+// Navigation stops event requests/scrolling; dismissing a modal only stops its video.
 var recModalVideo=null;
-function recStop(){ if(recModalVideo){ try{ recModalVideo.pause(); recModalVideo.removeAttribute('src'); recModalVideo.load(); }catch(e){} recModalVideo=null; } }
+function recStop(){ recRangeToken++; if(recListAbort) recListAbort.abort(); recCleanupIntersect(); recStopVideo(); }
+function recStopVideo(){ if(recModalVideo){ try{ recModalVideo.pause(); recModalVideo.removeAttribute('src'); recModalVideo.load(); }catch(e){} recModalVideo=null; } }
 /* ============================================================ UNIFIED PLAYER (통합 플레이어) */
 var up = {
   open:false, stream:null, name:'', sub:'', codec:'h264', path:'',

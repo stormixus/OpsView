@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"container/list"
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -16,8 +19,9 @@ import (
 )
 
 const (
-	thumbTimeout  = 10 * time.Second
-	thumbCacheCap = 512
+	thumbTimeout    = 10 * time.Second
+	thumbCacheCap   = 512
+	thumbCacheBytes = 32 << 20
 
 	// evThumbNearWindowSec bounds how far rec-thumb will reach for a substitute
 	// event snapshot when the requested second has no exact thumb and no live
@@ -112,9 +116,16 @@ func (h *Hub) storeEventThumb(stream string, tsMs int64, jpeg []byte) {
 		log.Printf("[rec-thumb] %s: mkdir evthumbs: %v", stream, err)
 		return
 	}
-	tmp := dst + ".tmp"
-	if err := os.WriteFile(tmp, jpeg, 0o644); err != nil {
-		log.Printf("[rec-thumb] %s: write event thumb: %v", stream, err)
+	f, err := os.CreateTemp(filepath.Dir(dst), ".thumb-*")
+	if err != nil {
+		return
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	_, writeErr := f.Write(jpeg)
+	closeErr := f.Close()
+	if writeErr != nil || closeErr != nil {
+		log.Printf("[rec-thumb] %s: write event thumb: %v / %v", stream, writeErr, closeErr)
 		return
 	}
 	if err := os.Rename(tmp, dst); err != nil {
@@ -165,10 +176,103 @@ func extractLast4Digits(s string) string {
 	return string(digits[len(digits)-4:])
 }
 
-var (
-	thumbCache   = make(map[string][]byte)
-	thumbCacheMu sync.Mutex
-)
+// Each Hub owns its image cache; keys include the recording root. Stored files
+// are revalidated with stat, including inode identity for atomic replacements.
+// Only image bytes count toward the 32 MiB budget; entries are also capped.
+type thumbEntry struct {
+	key  string
+	img  []byte
+	info os.FileInfo
+}
+type thumbnailCache struct {
+	mu      sync.Mutex
+	entries map[string]*list.Element
+	lru     list.List
+	bytes   int
+}
+
+func (c *thumbnailCache) get(key string, info os.FileInfo) []byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	el := c.entries[key]
+	if el == nil {
+		return nil
+	}
+	v := el.Value.(thumbEntry)
+	valid := info == nil && v.info == nil
+	if info != nil && v.info != nil {
+		valid = os.SameFile(info, v.info) && info.ModTime().Equal(v.info.ModTime()) && info.Size() == v.info.Size()
+	}
+	if !valid {
+		c.remove(el)
+		return nil
+	}
+	c.lru.MoveToFront(el)
+	return v.img
+}
+func (c *thumbnailCache) remove(el *list.Element) {
+	v := el.Value.(thumbEntry)
+	c.bytes -= len(v.img)
+	delete(c.entries, v.key)
+	c.lru.Remove(el)
+}
+func (c *thumbnailCache) put(key string, img []byte, info os.FileInfo) {
+	if len(img) == 0 || len(img) > maxEventThumbBytes {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.entries == nil {
+		c.entries = make(map[string]*list.Element)
+	}
+	if el := c.entries[key]; el != nil {
+		c.remove(el)
+	}
+	for c.bytes+len(img) > thumbCacheBytes || len(c.entries) >= thumbCacheCap {
+		c.remove(c.lru.Back())
+	}
+	c.entries[key] = c.lru.PushFront(thumbEntry{key, img, info})
+	c.bytes += len(img)
+}
+func (h *Hub) storedThumb(path string) []byte {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxEventThumbBytes {
+		return nil
+	}
+	if img := h.thumbnails.get(path, info); img != nil {
+		return img
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	// f.Stat identifies the file actually read even if a writer renamed it after stat.
+	info, err = f.Stat()
+	if err != nil {
+		return nil
+	}
+	img, err := io.ReadAll(io.LimitReader(f, maxEventThumbBytes+1))
+	if err != nil || len(img) == 0 || len(img) > maxEventThumbBytes {
+		return nil
+	}
+	h.thumbnails.put(path, img, info)
+	return img
+}
+
+// Revalidate browser copies so a late snapshot replacing the same second is
+// visible; unchanged bytes return 304 while the server uses its memory cache.
+func serveRecThumb(w http.ResponseWriter, r *http.Request, img []byte) {
+	etag := fmt.Sprintf(`"%x"`, sha256.Sum256(img))
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "private, no-cache")
+	w.Header().Set("ETag", etag)
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Write(img)
+}
 
 // HandleDashboardRecThumb extracts a JPEG thumbnail from a recording at a given
 // unix timestamp. Admin-gated. ?stream=<path>&t=<unix_sec>.
@@ -194,25 +298,18 @@ func (h *Hub) HandleDashboardRecThumb(w http.ResponseWriter, r *http.Request) {
 	// finds <recDir>/<stream>/.evthumbs/<t>.jpg. Fall through to ffmpeg only when
 	// there's no stored thumb (scrub/other times).
 	if recDir := h.recRootDir(); recDir != "" {
-		if img, err := os.ReadFile(evThumbPath(recDir, stream, t)); err == nil && len(img) > 0 {
-			w.Header().Set("Content-Type", "image/jpeg")
-			w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-			w.Write(img)
+		if img := h.storedThumb(evThumbPath(recDir, stream, t)); len(img) > 0 {
+			serveRecThumb(w, r, img)
 			return
 		}
 	}
 
 	// check cache
-	cacheKey := fmt.Sprintf("%s|%d", stream, t)
-	thumbCacheMu.Lock()
-	if img, ok := thumbCache[cacheKey]; ok {
-		thumbCacheMu.Unlock()
-		w.Header().Set("Content-Type", "image/jpeg")
-		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-		w.Write(img)
+	cacheKey := fmt.Sprintf("%s|%s|%d", h.recRootDir(), stream, t)
+	if img := h.thumbnails.get(cacheKey, nil); img != nil {
+		serveRecThumb(w, r, img)
 		return
 	}
-	thumbCacheMu.Unlock()
 
 	// find the segment containing t
 	segs := h.rec.segmentsForExport(stream, t, t+1)
@@ -230,10 +327,8 @@ func (h *Hub) HandleDashboardRecThumb(w http.ResponseWriter, r *http.Request) {
 		// event snapshot so the timeline thumbnail still renders.
 		if recDir := h.recRootDir(); recDir != "" {
 			if p := nearestEvThumb(recDir, stream, t, evThumbNearWindowSec); p != "" {
-				if img, err := os.ReadFile(p); err == nil && len(img) > 0 {
-					w.Header().Set("Content-Type", "image/jpeg")
-					w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-					w.Write(img)
+				if img := h.storedThumb(p); len(img) > 0 {
+					serveRecThumb(w, r, img)
 					return
 				}
 			}
@@ -269,15 +364,7 @@ func (h *Hub) HandleDashboardRecThumb(w http.ResponseWriter, r *http.Request) {
 
 	img := out.Bytes()
 
-	// store in cache (bounded: reset map when it grows past the cap)
-	thumbCacheMu.Lock()
-	if len(thumbCache) >= thumbCacheCap {
-		thumbCache = make(map[string][]byte)
-	}
-	thumbCache[cacheKey] = img
-	thumbCacheMu.Unlock()
+	h.thumbnails.put(cacheKey, img, nil)
 
-	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-	w.Write(img)
+	serveRecThumb(w, r, img)
 }

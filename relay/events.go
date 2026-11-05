@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"hash/fnv"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,6 +31,7 @@ type openInterval struct {
 
 type evDayCache struct {
 	mtime time.Time
+	size  int64
 	ivals []eventInterval
 }
 
@@ -40,6 +42,9 @@ type eventStore struct {
 	recDir     string
 	maxEventMs int64
 
+	// ioMu serializes file reads/appends per stream without holding the global
+	// state lock during disk I/O. Stripes bound lock memory for arbitrary streams.
+	ioMu  [64]sync.Mutex
 	mu    sync.Mutex
 	open  map[openKey]openInterval
 	cache map[string]evDayCache // "stream|day" -> intervals (mtime-keyed)
@@ -58,21 +63,33 @@ func dayKeyFromMs(ms int64) string {
 	return time.UnixMilli(ms).In(time.Local).Format("20060102")
 }
 
+func (e *eventStore) streamLock(stream string) *sync.Mutex {
+	h := fnv.New32a()
+	h.Write([]byte(stream))
+	return &e.ioMu[h.Sum32()%uint32(len(e.ioMu))]
+}
+
 // add ingests one edge. Active=true opens an interval (force-closing any stale
 // open one past maxEventMs); Active=false closes the open interval.
 func (e *eventStore) add(stream, kind string, active bool, tsMs int64) {
 	if stream == "" || kind == "" || tsMs <= 0 {
 		return
 	}
+	lock := e.streamLock(stream)
+	lock.Lock()
+	defer lock.Unlock()
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	k := openKey{stream, kind}
 	if active {
 		if cur, ok := e.open[k]; ok {
 			// stale open: force-close at start+max before opening the new one
-			e.closeLocked(stream, kind, cur.startMs, cur.startMs+e.maxEventMs, cur.plate)
+			e.open[k] = openInterval{startMs: tsMs}
+			e.mu.Unlock()
+			e.closeInterval(stream, kind, cur.startMs, cur.startMs+e.maxEventMs, cur.plate)
+			return
 		}
 		e.open[k] = openInterval{startMs: tsMs}
+		e.mu.Unlock()
 		return
 	}
 	if cur, ok := e.open[k]; ok {
@@ -81,25 +98,31 @@ func (e *eventStore) add(stream, kind string, active bool, tsMs int64) {
 		if end > cur.startMs+e.maxEventMs {
 			end = cur.startMs + e.maxEventMs
 		}
-		e.closeLocked(stream, kind, cur.startMs, end, cur.plate)
+		e.mu.Unlock()
+		e.closeInterval(stream, kind, cur.startMs, end, cur.plate)
+		return
 	}
+	e.mu.Unlock()
 }
 
-// closeLocked appends a finished interval (caller holds e.mu).
-func (e *eventStore) closeLocked(stream, kind string, startMs, endMs int64, plate string) {
+// closeInterval appends a finished interval (caller holds the stream lock).
+func (e *eventStore) closeInterval(stream, kind string, startMs, endMs int64, plate string) {
 	iv := eventInterval{Start: startMs / 1000, End: endMs / 1000, Kind: kind, Plate: plate}
 	startDay := dayKeyFromMs(startMs)
-	e.fileIntervalLocked(stream, startDay, iv)
+	e.fileInterval(stream, startDay, iv)
 	// An event straddling local midnight must be findable on BOTH days, else the
 	// next day's marker view misses it and the janitor could delete a post-midnight
 	// segment it overlaps (overlaps() only queries the segment's own day).
 	if endDay := dayKeyFromMs(endMs); endDay != startDay {
-		e.fileIntervalLocked(stream, endDay, iv)
+		e.fileInterval(stream, endDay, iv)
 	}
 }
 
 // updateOpenPlate updates the plate number for an active open event or recently cached event.
 func (e *eventStore) updateOpenPlate(stream string, tsMs int64, plate string) {
+	lock := e.streamLock(stream)
+	lock.Lock()
+	defer lock.Unlock()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -127,9 +150,9 @@ func (e *eventStore) updateOpenPlate(stream string, tsMs int64, plate string) {
 	}
 }
 
-// fileIntervalLocked appends a closed interval to one day's JSONL (and the
-// in-memory cache when recDir==""), invalidating that day's cache. Caller holds e.mu.
-func (e *eventStore) fileIntervalLocked(stream, day string, iv eventInterval) {
+// fileInterval appends a closed interval to one day's JSONL (and the
+// in-memory cache when recDir==""), invalidating that day's cache. Caller holds the stream lock.
+func (e *eventStore) fileInterval(stream, day string, iv eventInterval) {
 	if e.recDir != "" {
 		dir := filepath.Join(e.recDir, filepath.FromSlash(stream), ".events")
 		if err := os.MkdirAll(dir, 0o755); err == nil {
@@ -141,8 +164,12 @@ func (e *eventStore) fileIntervalLocked(stream, day string, iv eventInterval) {
 			}
 		}
 	}
-	// invalidate the day cache so the next read re-loads
-	delete(e.cache, stream+"|"+day)
+	// Invalidate only after the append, under the same stream lock as readers.
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.recDir != "" {
+		delete(e.cache, stream+"|"+day)
+	}
 	// also keep an in-memory copy for the recDir=="" case
 	if e.recDir == "" {
 		key := stream + "|" + day
@@ -154,20 +181,30 @@ func (e *eventStore) fileIntervalLocked(stream, day string, iv eventInterval) {
 
 // eventsForDay returns intervals for (stream,day), mtime-cached from the JSONL.
 func (e *eventStore) eventsForDay(stream, day string) []eventInterval {
+	lock := e.streamLock(stream)
+	lock.Lock()
+	defer lock.Unlock()
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	key := stream + "|" + day
 	if e.recDir == "" {
-		return append([]eventInterval(nil), e.cache[key].ivals...)
+		ivals := append([]eventInterval(nil), e.cache[key].ivals...)
+		e.mu.Unlock()
+		return ivals
 	}
+	e.mu.Unlock()
 	p := filepath.Join(e.recDir, filepath.FromSlash(stream), ".events", day+".jsonl")
 	info, err := os.Stat(p)
 	if err != nil {
 		return nil
 	}
-	if c, ok := e.cache[key]; ok && c.mtime.Equal(info.ModTime()) {
-		return append([]eventInterval(nil), c.ivals...)
+	e.mu.Lock()
+	c, ok := e.cache[key]
+	if ok && c.mtime.Equal(info.ModTime()) && c.size == info.Size() {
+		ivals := append([]eventInterval(nil), c.ivals...)
+		e.mu.Unlock()
+		return ivals
 	}
+	e.mu.Unlock()
 	f, err := os.Open(p)
 	if err != nil {
 		return nil
@@ -182,8 +219,15 @@ func (e *eventStore) eventsForDay(stream, day string) []eventInterval {
 			ivals = append(ivals, iv)
 		}
 	}
-	e.cache[key] = evDayCache{mtime: info.ModTime(), ivals: ivals}
-	return append([]eventInterval(nil), ivals...)
+	if sc.Err() != nil {
+		// Preserve valid intervals for retention decisions, but never cache a partial scan.
+		return ivals
+	}
+	e.mu.Lock()
+	e.cache[key] = evDayCache{mtime: info.ModTime(), size: info.Size(), ivals: ivals}
+	result := append([]eventInterval(nil), ivals...)
+	e.mu.Unlock()
+	return result
 }
 
 // overlaps reports whether [startSec,endSec] overlaps any event for the stream on
@@ -369,11 +413,17 @@ func (h *Hub) HandleDashboardRecEventsList(w http.ResponseWriter, r *http.Reques
 		var cfg proto.SurvConfig
 		if json.Unmarshal(raw[proto.HeaderSize:], &cfg) == nil {
 			for _, ch := range cfg.Channels {
+				if r.Context().Err() != nil {
+					return
+				}
 				if !ch.Enabled {
 					continue
 				}
 				stream := streamPath(sess.id, streamIDFor(ch.DVRID, ch.ChNum))
 				for _, d := range days {
+					if r.Context().Err() != nil {
+						return
+					}
 					for _, iv := range h.events.eventsForDay(stream, d) {
 						items = append(items, recEventItem{
 							Stream: stream,
