@@ -6,6 +6,7 @@ All notable changes to OpsView are documented here.
 
 ### Fixed
 
+- Event thumbnails beyond the first six retain native lazy loading with automatic fetch priority, so visible images are not forced into the browser's low-priority queue.
 - Live players admit at most four simultaneous WebSocket handshakes, start response deadlines after admission, and keep startup waits separate from stalled-video watchdogs. Native HLS errors now reconnect immediately, with stale handlers removed on navigation.
 - Recording indexes enumerate names before querying metadata, avoiding implicit per-entry `lstat` calls on volumes that do not return directory-entry types. Range requests validate only their time band and neighbours; download listings and calendar days still exclude directories.
 - Cold recording-range lookups index filenames without reading every MP4's byte size. Download listings keep a separate size-bearing cache, while playback and exact previews avoid unnecessary recording-volume metadata reads.

@@ -967,7 +967,7 @@ function evCardHTML(ev, index){
   var thumbUrl=BASE+'/api/rec-thumb?stream='+encodeURIComponent(ev.stream)+'&t='+ev.start+'&size=card&v=3';
   var plateHtml = ev.plate ? '<span class="ev-plate-badge">🚗 ' + escHtml(ev.plate) + '</span>' : '';
   return '<button class="ev-cell ev-k-'+escAttr(kind)+'" data-stream="'+escAttr(ev.stream)+'" data-start="'+ev.start+'" data-ch="'+escAttr(''+ev.ch)+'">'+
-    '<img class="ev-cellimg" loading="'+(index<6?'eager':'lazy')+'" fetchpriority="'+(index<6?'high':'low')+'" decoding="async" src="'+escAttr(thumbUrl)+'" alt="'+escAttr(kindLabel)+'">'+
+    '<img class="ev-cellimg" loading="'+(index<6?'eager':'lazy')+'" fetchpriority="'+(index<6?'high':'auto')+'" decoding="async" src="'+escAttr(thumbUrl)+'" alt="'+escAttr(kindLabel)+'">'+
     plateHtml +
     '<div class="ev-cellbar"><span class="ev-celltxt"><span class="ev-celltime">'+escHtml(when)+'</span>'+
     '<span class="ev-cellcam">'+escHtml(ev.name)+' · CH'+escHtml(''+ev.ch)+'</span></span>'+
@@ -1014,7 +1014,7 @@ function recAppendEvents(grid, filtered){
       var wrap=document.createElement('div');wrap.innerHTML=evCardHTML(ev,start+i);card=wrap.firstElementChild;
     }
     var image=card.querySelector('img');
-    image.loading=start+i<6?'eager':'lazy';image.fetchPriority=start+i<6?'high':'low';
+    image.loading=start+i<6?'eager':'lazy';image.fetchPriority=start+i<6?'high':'auto';
     recCardCache.delete(key);recCardCache.set(key,{at:now,sig:sig,node:card});
     while(recCardCache.size>REC_CARD_CACHE_CAP)recCardCache.delete(recCardCache.keys().next().value);
     fragment.appendChild(card);
