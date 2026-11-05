@@ -24,7 +24,7 @@ type liveGridControl struct {
 type liveGridSubscription struct {
 	hub     *survWSHub
 	client  *survWSClient
-	initial bool
+	startup uint8 // remaining startup packets: init, then the first keyframe
 }
 
 func (h *Hub) HandleDashboardLiveGridWS(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +80,7 @@ func (h *Hub) HandleDashboardLiveGridWS(w http.ResponseWriter, r *http.Request) 
 			}
 			session.survProxy.mu.RUnlock()
 			if hub != nil {
-				subs[control.Slot] = liveGridSubscription{hub: hub, client: hub.add(), initial: true}
+				subs[control.Slot] = liveGridSubscription{hub: hub, client: hub.add(), startup: 2}
 			}
 		}
 		write := func(slot uint16, fragment []byte) error {
@@ -101,30 +101,35 @@ func (h *Hub) HandleDashboardLiveGridWS(w http.ResponseWriter, r *http.Request) 
 				continue
 			default:
 			}
-			// Initialization is small but required before MSE can accept media.
-			// Deliver it before an established channel's larger GOP backlog can
-			// consume the shared connection's initial congestion window.
-			initialized := false
-			for slot, sub := range subs {
-				if !sub.initial {
-					continue
-				}
-				select {
-				case fragment, ok := <-sub.client.send:
-					if !ok {
-						remove(slot)
+			// Send ready initialization packets first, then each new channel's
+			// first keyframe, before established channels' queued GOP media.
+			// hub.add() and deferred seeding both guarantee init/keyframe FIFO.
+			prioritized := false
+			for phase := uint8(2); phase > 0; phase-- {
+				for slot, sub := range subs {
+					if sub.startup != phase {
 						continue
 					}
-					sub.initial = false
-					subs[slot] = sub
-					if err := write(slot, fragment); err != nil {
-						return
+					select {
+					case fragment, ok := <-sub.client.send:
+						if !ok {
+							remove(slot)
+							continue
+						}
+						sub.startup--
+						subs[slot] = sub
+						if err := write(slot, fragment); err != nil {
+							return
+						}
+						prioritized = true
+					default:
 					}
-					initialized = true
-				default:
+				}
+				if prioritized {
+					break
 				}
 			}
-			if initialized {
+			if prioritized {
 				continue
 			}
 			cases := []reflect.SelectCase{
@@ -155,8 +160,8 @@ func (h *Hub) HandleDashboardLiveGridWS(w http.ResponseWriter, r *http.Request) 
 					continue
 				}
 				fragment := value.Interface().([]byte)
-				if sub := subs[slot]; sub.initial {
-					sub.initial = false
+				if sub := subs[slot]; sub.startup > 0 {
+					sub.startup--
 					subs[slot] = sub
 				}
 				if err := write(slot, fragment); err != nil {
