@@ -10,15 +10,17 @@ import (
 )
 
 const liveGridMaxSubscriptions = 16
+const liveGridMaxInflight = 256 << 10
 
 // The dashboard grid shares a single handshake/connection. JSON controls add or
 // remove a uint16 slot; binary replies prefix that slot to an unchanged fMP4
 // message. The existing per-channel GOP caches and bounded client queues remain
 // authoritative. Fullscreen and older clients retain the single-stream route.
 type liveGridControl struct {
-	Op     string `json:"op"`
-	Slot   uint16 `json:"slot"`
-	Stream string `json:"stream,omitempty"`
+	Op       string `json:"op"`
+	Slot     uint16 `json:"slot"`
+	Stream   string `json:"stream,omitempty"`
+	Received uint64 `json:"received,omitempty"`
 }
 
 type liveGridSubscription struct {
@@ -41,6 +43,7 @@ func (h *Hub) HandleDashboardLiveGridWS(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		return
 	}
+	flow := r.URL.Query().Get("flow") == "1"
 	controls := make(chan liveGridControl, liveGridMaxSubscriptions)
 	done, writerDone := make(chan struct{}), make(chan struct{})
 	defer func() {
@@ -51,6 +54,14 @@ func (h *Hub) HandleDashboardLiveGridWS(w http.ResponseWriter, r *http.Request) 
 	go func() {
 		defer close(writerDone)
 		defer conn.Close()
+		if flow {
+			conn.SetWriteDeadline(time.Now().Add(survWSWriteWait))
+			if err := conn.WriteJSON(map[string]any{"op": "flow", "window": liveGridMaxInflight}); err != nil {
+				return
+			}
+		}
+		var sent, acknowledged uint64
+		canSend := func() bool { return !flow || sent-acknowledged < liveGridMaxInflight }
 		subs := make(map[uint16]liveGridSubscription)
 		remove := func(slot uint16) {
 			if sub, ok := subs[slot]; ok {
@@ -64,6 +75,12 @@ func (h *Hub) HandleDashboardLiveGridWS(w http.ResponseWriter, r *http.Request) 
 			}
 		}()
 		apply := func(control liveGridControl) {
+			if control.Op == "ack" {
+				if control.Received > acknowledged && control.Received <= sent {
+					acknowledged = control.Received
+				}
+				return
+			}
 			if control.Op == "unsub" {
 				remove(control.Slot)
 				return
@@ -88,7 +105,11 @@ func (h *Hub) HandleDashboardLiveGridWS(w http.ResponseWriter, r *http.Request) 
 			binary.BigEndian.PutUint16(packet, slot)
 			copy(packet[2:], fragment)
 			conn.SetWriteDeadline(time.Now().Add(survWSWriteWait))
-			return conn.WriteMessage(websocket.BinaryMessage, packet)
+			if err := conn.WriteMessage(websocket.BinaryMessage, packet); err != nil {
+				return err
+			}
+			sent += uint64(len(packet))
+			return nil
 		}
 		ping := time.NewTicker(survWSPingPeriod)
 		defer ping.Stop()
@@ -107,7 +128,7 @@ func (h *Hub) HandleDashboardLiveGridWS(w http.ResponseWriter, r *http.Request) 
 			prioritized := false
 			for phase := uint8(2); phase > 0; phase-- {
 				for slot, sub := range subs {
-					if sub.startup != phase {
+					if sub.startup != phase || !canSend() {
 						continue
 					}
 					select {
@@ -140,6 +161,9 @@ func (h *Hub) HandleDashboardLiveGridWS(w http.ResponseWriter, r *http.Request) 
 			}
 			slots := make([]uint16, 0, len(subs))
 			for slot, sub := range subs {
+				if !canSend() {
+					break
+				}
 				slots = append(slots, slot)
 				cases = append(cases, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(sub.client.send)})
 			}
@@ -180,7 +204,11 @@ func (h *Hub) HandleDashboardLiveGridWS(w http.ResponseWriter, r *http.Request) 
 		if err := conn.ReadJSON(&control); err != nil {
 			return
 		}
-		if control.Slot == 0 || (control.Op != "sub" && control.Op != "unsub") {
+		if control.Op == "ack" {
+			if !flow || control.Slot != 0 {
+				return
+			}
+		} else if control.Slot == 0 || (control.Op != "sub" && control.Op != "unsub") {
 			return
 		}
 		if control.Op == "sub" {
