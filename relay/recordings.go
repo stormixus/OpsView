@@ -92,10 +92,11 @@ func (r *Recorder) days(stream string) []string {
 		r.idxMu.Unlock()
 	}
 	set := map[string]bool{}
-	for _, e := range readDirSafe(dir) {
-		n := e.Name()
-		if !e.IsDir() && strings.HasSuffix(n, ".mp4") && len(n) >= 8 {
-			set[n[:8]] = true
+	for _, n := range readDirNamesSafe(dir) {
+		if strings.HasSuffix(n, ".mp4") && len(n) >= 8 && !set[n[:8]] {
+			if info, err := os.Lstat(filepath.Join(dir, n)); err == nil && !info.IsDir() {
+				set[n[:8]] = true
+			}
 		}
 	}
 	out := make([]string, 0, len(set))
@@ -143,9 +144,8 @@ func (r *Recorder) indexedSegments(stream, day string, withSize bool) []recSegme
 		r.idxMu.Unlock()
 	}
 	var segs []recSegment
-	for _, e := range readDirSafe(dir) {
-		n := e.Name()
-		if e.IsDir() || !strings.HasPrefix(n, day) || !strings.HasSuffix(n, ".mp4") {
+	for _, n := range readDirNamesSafe(dir) {
+		if !strings.HasPrefix(n, day) || !strings.HasSuffix(n, ".mp4") {
 			continue
 		}
 		t, err := time.ParseInLocation(recNameLayout, strings.TrimSuffix(n, ".mp4"), time.Local)
@@ -154,8 +154,8 @@ func (r *Recorder) indexedSegments(stream, day string, withSize bool) []recSegme
 		}
 		var size int64
 		if withSize {
-			info, err := e.Info()
-			if err != nil {
+			info, err := os.Lstat(filepath.Join(dir, n))
+			if err != nil || info.IsDir() {
 				continue
 			}
 			size = info.Size()
@@ -204,6 +204,23 @@ func (r *Recorder) segmentsForExport(stream string, start, end int64) []recSegme
 	for _, day := range daysInRange(start-int64(nominal), end+int64(nominal)) {
 		segs = append(segs, r.indexedSegments(stream, day, false)...)
 	}
+	// A names-only directory scan does not resolve file types. Validate just the
+	// requested band (including duration neighbours), rather than every retained
+	// file. Directories with MP4-shaped names must never affect coverage/duration.
+	files := segs[:0]
+	dir, ok := r.safeStreamDir(stream)
+	if !ok {
+		return nil
+	}
+	for _, s := range segs {
+		if s.Start < start-int64(nominal) || s.Start > end+int64(nominal) {
+			continue
+		}
+		if info, err := os.Lstat(filepath.Join(dir, s.Name)); err == nil && !info.IsDir() {
+			files = append(files, s)
+		}
+	}
+	segs = files
 	for i := range segs {
 		segs[i].Dur = nominal
 		if i+1 < len(segs) {
@@ -234,12 +251,20 @@ func (r *Recorder) segmentFile(stream, name string) (string, bool) {
 	return filepath.Join(dir, name), true
 }
 
-func readDirSafe(dir string) []os.DirEntry {
-	e, err := os.ReadDir(dir)
+func readDirNamesSafe(dir string) []string {
+	f, err := os.Open(dir)
 	if err != nil {
 		return nil
 	}
-	return e
+	defer f.Close()
+	// os.ReadDir can lstat EVERY entry when a filesystem returns DT_UNKNOWN
+	// (notably union/FUSE volumes). Readdirnames only enumerates names, letting
+	// callers narrow by timestamp before asking for any metadata.
+	names, err := f.Readdirnames(-1)
+	if err != nil {
+		return nil
+	}
+	return names
 }
 
 // HandleDashboardRecordings lists recording days (no day param) or the segments
