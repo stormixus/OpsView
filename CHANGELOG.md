@@ -6,7 +6,7 @@ All notable changes to OpsView are documented here.
 
 ### Fixed
 
-- Shared live-grid connections send ready channel initialization packets before queued video fragments, avoiding startup deadlines caused by another channel's GOP backlog.
+- Shared live-grid connections send ready channel initialization packets and then each new channel's first keyframe before queued video fragments, reducing startup contention from another channel's GOP backlog.
 - The dashboard live grid multiplexes its active channel streams over up to four authenticated WebSocket connections on desktop and two on mobile, distributing subscriptions across healthy connections while preserving per-channel fMP4 packets and existing decoder limits. Viewport changes unsubscribe channels, stale slot generations are isolated, and unavailable shared upgrades retain the single-stream fallback.
 - Event thumbnails beyond the first six retain native lazy loading with automatic fetch priority, so visible images are not forced into the browser's low-priority queue.
 - Live players admit at most four simultaneous WebSocket handshakes, start response deadlines after admission, and keep startup waits separate from stalled-video watchdogs. Native HLS errors now reconnect immediately, with stale handlers removed on navigation.

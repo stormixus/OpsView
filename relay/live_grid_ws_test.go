@@ -244,15 +244,17 @@ func TestLiveGridWSMalformedControlsCloseAndReleaseSubscriptions(t *testing.T) {
 // Queue all controls behind the first hub's subscription lock. A websocket
 // ping/pong then proves the reader has accepted those controls before releasing
 // the writer; the assertion does not depend on TCP timing or future requests.
-func TestLiveGridWSInitialMetadataPrecedesAlreadyQueuedMedia(t *testing.T) {
+func TestLiveGridWSInitialPicturesPrecedeAlreadyQueuedMedia(t *testing.T) {
 	h, base := gridTestServer(t)
 	const subscriptions = 16
 	hubs := make([]*survWSHub, subscriptions)
 	initial := make(map[uint16][]byte)
+	keyframes := make(map[uint16][]byte)
 	for i := range hubs {
 		var seed [][]byte
 		hubs[i], seed = seedGridTestStream(t, h, "site-a", fmt.Sprintf("dvr1_ch%d", i+1), byte(i+1))
 		initial[uint16(i+1)] = seed[0]
+		keyframes[uint16(i+1)] = seed[1]
 	}
 	// A ready channel has substantial queued GOP media as well as its init.
 	for i := 0; i < 64; i++ {
@@ -276,12 +278,12 @@ func TestLiveGridWSInitialMetadataPrecedesAlreadyQueuedMedia(t *testing.T) {
 		data []byte
 		err  error
 	}
-	packets := make(chan received, subscriptions)
+	packets := make(chan received, 2*subscriptions)
 	readerDone := make(chan struct{})
 	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 	go func() {
 		defer close(readerDone)
-		for i := 0; i < subscriptions; i++ {
+		for i := 0; i < 2*subscriptions; i++ {
 			kind, data, err := conn.ReadMessage()
 			if err != nil {
 				packets <- received{err: err}
@@ -309,19 +311,21 @@ func TestLiveGridWSInitialMetadataPrecedesAlreadyQueuedMedia(t *testing.T) {
 		t.Fatal("reader did not accept queued controls behind blocked writer")
 	}
 	unlock()
-	seen := make(map[uint16]bool)
-	for i := 0; i < subscriptions; i++ {
-		select {
-		case packet := <-packets:
-			if packet.err != nil {
-				t.Fatal(packet.err)
+	for phase, expected := range []map[uint16][]byte{initial, keyframes} {
+		seen := make(map[uint16]bool)
+		for i := 0; i < subscriptions; i++ {
+			select {
+			case packet := <-packets:
+				if packet.err != nil {
+					t.Fatal(packet.err)
+				}
+				if seen[packet.slot] || !bytes.Equal(packet.data, expected[packet.slot]) {
+					t.Fatalf("queued GOP media overtook another ready subscription's startup: phase=%d packet=%d slot=%d bytes=%d", phase, i, packet.slot, len(packet.data))
+				}
+				seen[packet.slot] = true
+			case <-time.After(3 * time.Second):
+				t.Fatal("initial picture was not delivered")
 			}
-			if seen[packet.slot] || !bytes.Equal(packet.data, initial[packet.slot]) {
-				t.Fatalf("queued GOP media overtook another ready subscription's initialization: packet=%d slot=%d bytes=%d", i, packet.slot, len(packet.data))
-			}
-			seen[packet.slot] = true
-		case <-time.After(3 * time.Second):
-			t.Fatal("initial metadata was not delivered")
 		}
 	}
 	conn.Close()
