@@ -50,11 +50,74 @@ function _queueWSConnect(start){
   };
   _wsConnectQueue.push(entry);_pumpWSConnects();return entry.release;
 }
+// One authenticated socket carries the grid's active channels. Each virtual
+// socket keeps the existing MSE player lifecycle and per-channel message order.
+function createGridWSFactory(agent){
+  var physical=null, subscribers=new Map(), nextSlot=1, stopped=false, idle=null, startup=null, legacy=false;
+  var endpoint=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/dashboard/api/live-grid-ws?agent='+encodeURIComponent(agent);
+  function command(v,op){if(physical&&physical.readyState===1)physical.send(JSON.stringify({op:op,slot:v.slot,stream:v.stream}));}
+  function openVirtual(v){
+    if(v.closed||v.opened)return;
+    v.opened=true;command(v,'sub');
+    Promise.resolve().then(function(){if(!v.closed&&v.onopen)v.onopen();});
+  }
+  function disconnect(socket,opened){
+    if(physical!==socket)return;
+    clearTimeout(startup);startup=null;physical=null;
+    if(socket.readyState<2){try{socket.close();}catch(e){}}
+    if(!opened)legacy=true; // older relays or unavailable upgrades retain the old route
+    var old=Array.from(subscribers.values());subscribers.clear();
+    old.forEach(function(v){v.closed=true;if(v.onclose)v.onclose();});
+  }
+  function connect(){
+    if(physical)return;
+    var socket=new WebSocket(endpoint),opened=false;physical=socket;socket.binaryType='arraybuffer';
+    startup=setTimeout(function(){if(physical===socket&&!opened)disconnect(socket,false);},6000);
+    socket.onopen=function(){if(physical!==socket)return;clearTimeout(startup);startup=null;opened=true;subscribers.forEach(openVirtual);};
+    socket.onmessage=function(ev){
+      if(physical!==socket||!ev.data||typeof ev.data==='string'||ev.data.byteLength<2)return;
+      var slot=new DataView(ev.data).getUint16(0),v=subscribers.get(slot);
+      if(v&&!v.closed&&v.onmessage)v.onmessage({data:ev.data.slice(2)});
+    };
+    socket.onerror=socket.onclose=function(){disconnect(socket,opened);};
+  }
+  return {
+    socket:function(url){
+      if(stopped)throw new Error('grid closed');
+      if(legacy)return new WebSocket(url);
+      clearTimeout(idle);
+      var stream=url.slice(url.lastIndexOf('/')+1);
+      if(!/^dvr[0-9]+_ch[0-9]+$/.test(stream))throw new Error('invalid grid stream');
+      // Recycle the physical generation before a wire slot can be reused. Late
+      // frames from the old socket can never be decoded as a different channel.
+      if(nextSlot>65535){nextSlot=1;if(physical)disconnect(physical,true);}
+      var slot=nextSlot++;
+      var v={slot:slot,stream:stream,closed:false,opened:false,shared:true,close:function(){
+        if(v.closed)return;
+        v.closed=true;subscribers.delete(slot);command(v,'unsub');
+        if(!subscribers.size)idle=setTimeout(function(){
+          if(subscribers.size||!physical)return;
+          var old=physical;physical=null;clearTimeout(startup);startup=null;try{old.close();}catch(e){}
+        },1000);
+      }};
+      subscribers.set(slot,v);
+      try{connect();if(physical&&physical.readyState===1)openVirtual(v);}
+      catch(e){subscribers.delete(slot);v.closed=true;throw e;}
+      return v;
+    },
+    close:function(){
+      stopped=true;clearTimeout(idle);clearTimeout(startup);startup=null;
+      var old=physical;physical=null;if(old){try{old.close();}catch(e){}}
+      var clients=Array.from(subscribers.values());subscribers.clear();
+      clients.forEach(function(v){v.closed=true;if(v.onclose)v.onclose();});
+    }
+  };
+}
 // playWS(video, wsUrl, onFail, onEnd): onFail fires when the stream never starts
 // (pre-init) so the caller can fall back to HLS; onEnd fires when a live stream
 // that HAD started later dies (socket close/error/decode error) so the caller can
 // reconnect ("zombie" live). A deliberate close() suppresses both.
-function playWS(video, wsUrl, onFail, onEnd){
+function playWS(video, wsUrl, onFail, onEnd, socketFactory){
   var MS=_msCtor();
   if(!MS){ onFail&&onFail(); return null; }
   var managed=(typeof window.ManagedMediaSource!=='undefined' && MS===window.ManagedMediaSource);
@@ -94,7 +157,8 @@ function playWS(video, wsUrl, onFail, onEnd){
     if(closed){release();return;}
     if(video.dataset)video.dataset.wsQueuedMs=Math.round(performance.now()-started);
     tm=setTimeout(function(){ if(!gotInit) fail(); },6000);
-    try{ws=new WebSocket(wsUrl);}catch(e){fail();return;}
+    try{ws=socketFactory?socketFactory(wsUrl):new WebSocket(wsUrl);}catch(e){fail();return;}
+    if(video.dataset)video.dataset.wsShared=ws.shared?'1':'0';
     ws.binaryType='arraybuffer';
     ws.onopen=function(){release();if(video.dataset)video.dataset.wsOpenMs=Math.round(performance.now()-started);};
     ws.onmessage=function(ev){
