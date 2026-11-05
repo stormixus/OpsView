@@ -566,7 +566,7 @@ function _cellPlay(cell){
   else {cell._firstData=firstFrame;video.addEventListener('loadeddata',firstFrame,{once:true});}
   cell._player=playWS(video, wsUrl,
     function(){ if(_cellShouldBeLive(cell) && !playHLS(video,hlsUrl,function(){if(_cellShouldBeLive(cell))_cellReconnect(cell);})) _cellReconnect(cell); },
-    function(){ _cellReconnect(cell); });    // post-init death: zombie reconnect
+    function(){ _cellReconnect(cell); },gridSched&&gridSched.mux?gridSched.mux.socket:null);    // post-init death: zombie reconnect
   _cellUnfreeze(cell);
 }
 // _cellReconnect tears down a dead live cell and, if it still belongs in the live
@@ -658,9 +658,10 @@ function gridWatchdog(){
     else if(now-p.at>LIVE_STALL_MS){ p.at=now; _cellReconnect(c); }
   });
 }
-function startLiveGrid(cells){
+function startLiveGrid(cells,agent){
   stopGridSched();
   gridSched={ eligible:[], start:0, timer:null, wd:null, obs:null };
+  if(agent&&typeof createGridWSFactory==='function')gridSched.mux=createGridWSFactory(agent);
   // Track on-screen cells for ALL platforms now: the pool is whatever's visible, and
   // rotation caps concurrent decoders within it.
   gridSched.obs=new IntersectionObserver(function(entries){
@@ -683,10 +684,11 @@ function startLiveGrid(cells){
 }
 function stopGridSched(){
   if(!gridSched) return;
-  if(gridSched.timer) clearInterval(gridSched.timer);
-  if(gridSched.wd) clearInterval(gridSched.wd);
-  if(gridSched.obs){ try{ gridSched.obs.disconnect(); }catch(e){} }
-  gridSched=null;
+  var old=gridSched;gridSched=null;
+  if(old.timer) clearInterval(old.timer);
+  if(old.wd) clearInterval(old.wd);
+  if(old.obs){ try{ old.obs.disconnect(); }catch(e){} }
+  if(old.mux)old.mux.close();
 }
 // On tab re-show / network recovery, reset backoffs and immediately re-evaluate the
 // grid so a long-idle viewer snaps back to live (and the Ops snapshot refreshes)
@@ -740,7 +742,7 @@ function renderGrid(a){
   grid.dataset.agent=a.id;
   var cells=$$('#grid .cell');
   list.forEach(function(s, i){ if(cells[i]) cells[i].dataset.path=s.path; });
-  startLiveGrid(cells); // rotate a capped set of live decoders across the cells
+  startLiveGrid(cells,a.id); // rotate a capped set of live decoders across the cells
   if(liveEditing) wireLiveEdit(a);
   updateCellClocks();
 }

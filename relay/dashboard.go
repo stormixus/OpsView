@@ -517,6 +517,7 @@ func (h *Hub) registerDashboard(mux *http.ServeMux) {
 	mux.HandleFunc("/dashboard/api/rec-events", h.HandleDashboardRecEvents)
 	mux.HandleFunc("/dashboard/api/rec-thumb", h.HandleDashboardRecThumb)
 	mux.HandleFunc("/dashboard/api/rec-events-list", h.HandleDashboardRecEventsList)
+	mux.HandleFunc("/dashboard/api/live-grid-ws", h.HandleDashboardLiveGridWS)
 	mux.HandleFunc("/dashboard/api/rec-timeline", h.HandleDashboardRecTimeline)
 	mux.HandleFunc("/dashboard/api/rec-sprite", h.HandleDashboardRecSprite)
 	mux.HandleFunc("/dashboard/api/lpr-frames", h.HandleDashboardLPRFrames)
