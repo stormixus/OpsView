@@ -357,7 +357,7 @@ function setTab(t){
   $$('#agent-view .pane').forEach(function(p){ p.classList.remove('active'); });
   $('#'+t+'-pane').classList.add('active');
   if(t==='live' && selected){ renderGrid(agentById(selected)); }
-  else { stopLiveGrid(); }
+  else { stopLiveGrid(true); }
   if(t==='rec' && selected){ openRec(); } else { recStop(); }
 }
 $$('#agent-view .tab').forEach(function(b){ b.addEventListener('click', function(){ setTab(b.dataset.tab); }); });
@@ -529,6 +529,7 @@ function cellHTML(s){
 // turn; a rotated-out cell freezes its last frame instead of going black. An
 // IntersectionObserver excludes scrolled-off cells from the rotation pool.
 var LIVE_CAP_DESKTOP=12, LIVE_CAP_MOBILE=4, ROTATE_DWELL_MS=5000, LIVE_WARMUP_MS=12000;
+var gridTransportCache=typeof createGridTransportCache==='function'?createGridTransportCache():null;
 // Zombie-live: a started cell whose feed dies (socket drop or silent stall) is torn
 // down and reconnected with backoff, forever, as long as it should be live — instead
 // of going black and staying black. LIVE_STALL_MS = max gap with no frame progress
@@ -662,9 +663,9 @@ function gridWatchdog(){
   });
 }
 function startLiveGrid(cells,agent){
-  stopGridSched();
+  stopGridSched(true);
   gridSched={ eligible:[], start:0, timer:null, wd:null, obs:null, warmUntil:0 };
-  if(agent&&typeof createGridWSFactory==='function')gridSched.mux=createGridWSFactory(agent,_isMobile()?2:4);
+  if(agent&&typeof createGridWSFactory==='function')gridSched.mux=gridTransportCache?gridTransportCache.acquire(agent,_isMobile()?2:4):createGridWSFactory(agent,_isMobile()?2:4);
   // Track on-screen cells for ALL platforms now: the pool is whatever's visible, and
   // rotation caps concurrent decoders within it.
   gridSched.obs=new IntersectionObserver(function(entries){
@@ -688,13 +689,18 @@ function startLiveGrid(cells,agent){
   gridSched.wd=setInterval(function(){ if(!document.hidden) gridWatchdog(); }, WATCHDOG_MS);
   _installGridResume();
 }
-function stopGridSched(){
-  if(!gridSched) return;
+function stopGridSched(keepTransport){
   var old=gridSched;gridSched=null;
-  if(old.timer) clearInterval(old.timer);
-  if(old.wd) clearInterval(old.wd);
-  if(old.obs){ try{ old.obs.disconnect(); }catch(e){} }
-  if(old.mux)old.mux.close();
+  if(old){
+    if(old.timer) clearInterval(old.timer);
+    if(old.wd) clearInterval(old.wd);
+    if(old.obs){ try{ old.obs.disconnect(); }catch(e){} }
+    if(old.mux){
+      if(keepTransport&&gridTransportCache)gridTransportCache.release(old.mux);
+      else old.mux.close();
+    }
+  }
+  if(!keepTransport&&gridTransportCache)gridTransportCache.close();
 }
 // On tab re-show / network recovery, reset backoffs and immediately re-evaluate the
 // grid so a long-idle viewer snaps back to live (and the Ops snapshot refreshes)
@@ -707,14 +713,15 @@ function _installGridResume(){
     gridSched.eligible.forEach(function(c){ c._liveBackoff=0; if(c._reconnTimer){ clearTimeout(c._reconnTimer); c._reconnTimer=null; } });
     gridRotate(false); gridWatchdog();
   }
-  document.addEventListener('visibilitychange', function(){ if(!document.hidden){ kick(); if(typeof refreshOpsSnap==='function') refreshOpsSnap(); } });
-  window.addEventListener('online', kick);
+  document.addEventListener('visibilitychange', function(){ if(document.hidden&&gridTransportCache)gridTransportCache.dropIdle(); if(!document.hidden){ kick(); if(typeof refreshOpsSnap==='function') refreshOpsSnap(); } });
+  window.addEventListener('online', function(){if(gridTransportCache)gridTransportCache.dropIdle();kick();});
+  window.addEventListener('pagehide', function(){if(gridTransportCache)gridTransportCache.dropIdle();});
 }
 // suspendLiveGrid frees every grid decoder (freezing each cell's last frame) when the
 // player overlay opens over the grid; gridRotate stays a no-op until it closes.
 function suspendLiveGrid(){ $$('#grid .cell').forEach(function(c){ if(c._player){ _cellFreeze(c); _cellStop(c); } }); }
-function stopLiveGrid(){
-  stopGridSched();
+function stopLiveGrid(keepTransport){
+  stopGridSched(keepTransport);
   var g=$('#grid'); if(!g) return;
   $$('#grid .cell').forEach(_cellStop);  // close sockets before dropping the DOM
   g.innerHTML=''; delete g.dataset.agent;
@@ -736,7 +743,7 @@ function liveCellHTML(s){
     '<div class="expand"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 3H3v6M21 9V3h-6M3 15v6h6M15 21h6v-6"/></svg></div></div>';
 }
 function renderGrid(a){
-  stopLiveGrid();
+  stopLiveGrid(true);
   var grid=$('#grid'), pane=$('#live-pane');
   var list = a.online? activeForView(a) : [];
   pane.classList.toggle('empty', list.length===0);

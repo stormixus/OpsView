@@ -6,6 +6,7 @@ All notable changes to OpsView are documented here.
 
 ### Fixed
 
+- Same-site live tab and filter changes retain healthy shared connections for up to 20 seconds while releasing media subscriptions and decoders immediately. Logout and site changes close them; background/page-exit/network-recovery events discard cached idle connections. This targets quick revisits, with no claim of improved first cold startup.
 - Live players give the admitted WebSocket handshake and the subsequent channel initialization separate six-second deadlines. A slow successful handshake no longer consumes nearly the entire initialization budget; duplicate or late open callbacks cannot restart the deadline.
 - The live grid gives unseen visible channels a bounded 12-second startup grace period before timed decoder rotation can interrupt them. First-frame warming stops when that grace expires, so an unavailable channel cannot continually pull healthy channels out of their rotation.
 - Shared live-grid sockets support optional cumulative receipt acknowledgments that bound unacknowledged video to 256 KiB plus one packet per connection. Subscription changes remain responsive while waiting for receipt. This remains opt-in after public-network comparisons did not establish a consistent speed benefit; the default grid uses the ordinary shared transport.
