@@ -661,7 +661,7 @@ function gridWatchdog(){
 function startLiveGrid(cells,agent){
   stopGridSched();
   gridSched={ eligible:[], start:0, timer:null, wd:null, obs:null };
-  if(agent&&typeof createGridWSFactory==='function')gridSched.mux=createGridWSFactory(agent);
+  if(agent&&typeof createGridWSFactory==='function')gridSched.mux=createGridWSFactory(agent,_isMobile()?2:4);
   // Track on-screen cells for ALL platforms now: the pool is whatever's visible, and
   // rotation caps concurrent decoders within it.
   gridSched.obs=new IntersectionObserver(function(entries){
