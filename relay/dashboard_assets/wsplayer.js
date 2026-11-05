@@ -52,10 +52,11 @@ function _queueWSConnect(start){
 }
 // A bounded pool shares handshakes without putting every channel behind one
 // connection's media backlog. Virtual sockets retain each player's lifecycle.
-function createGridWSFactory(agent,connections){
+function createGridWSFactory(agent,connections,receiptFlow){
+  receiptFlow=receiptFlow===true;
   connections=Math.max(1,Math.min(4,Math.floor(Number(connections)||1)));
   if(connections>1){
-    var pool=Array.from({length:connections},function(){return createGridWSFactory(agent);}),disposed=false;
+    var pool=Array.from({length:connections},function(){return createGridWSFactory(agent,1,receiptFlow);}),disposed=false;
     return {
       socket:function(url){
         if(disposed)throw new Error('grid closed');
@@ -68,7 +69,7 @@ function createGridWSFactory(agent,connections){
     };
   }
   var physical=null, subscribers=new Map(), nextSlot=1, stopped=false, idle=null, startup=null, legacy=false;
-  var endpoint=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/dashboard/api/live-grid-ws?agent='+encodeURIComponent(agent)+'&flow=1';
+  var endpoint=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/dashboard/api/live-grid-ws?agent='+encodeURIComponent(agent)+(receiptFlow?'&flow=1':'');
   function command(v,op){if(physical&&physical.readyState===1)physical.send(JSON.stringify({op:op,slot:v.slot,stream:v.stream}));}
   function openVirtual(v){
     if(v.closed||v.opened)return;

@@ -83,7 +83,7 @@ test('one physical connection sends per-slot controls and preserves each channel
   a.onmessage = event => aData.push(Array.from(new Uint8Array(event.data)));
   b.onmessage = event => bData.push(Array.from(new Uint8Array(event.data)));
   assert.equal(h.sockets.length, 1);
-  assert.match(h.sockets[0].url, /live-grid-ws\?agent=site%20a&flow=1$/);
+  assert.match(h.sockets[0].url, /live-grid-ws\?agent=site%20a$/);
   h.sockets[0].open(); await drain();
   assert.equal(opened, 2);
   assert.deepEqual(h.sockets[0].sent.map(c => [c.op, c.slot, c.stream]), [['sub', a.slot, 'dvr1_ch1'], ['sub', b.slot, 'dvr1_ch2']]);
@@ -335,7 +335,7 @@ test('pool disposal closes unopened and opened children and prevents late callba
 });
 
 test('flow acknowledgments require server capability and count complete binary wire packets cumulatively',async()=>{
-  const h=harness(),factory=h.context.createGridWSFactory('site-a');
+  const h=harness(),factory=h.context.createGridWSFactory('site-a',1,true);
   const client=factory.socket(streamURL(1)),socket=h.sockets[0];
   const delivered=[];client.onmessage=event=>delivered.push(Array.from(new Uint8Array(event.data)));
   socket.open();await drain();
@@ -357,7 +357,7 @@ test('flow acknowledgments require server capability and count complete binary w
 });
 
 test('unknown and closed slots still acknowledge receipt without delivering stale media',async()=>{
-  const h=harness(),factory=h.context.createGridWSFactory('site-a');
+  const h=harness(),factory=h.context.createGridWSFactory('site-a',1,true);
   const old=factory.socket(streamURL(1)),live=factory.socket(streamURL(2)),socket=h.sockets[0];
   let stale=0;const delivered=[];
   old.onmessage=()=>stale++;
@@ -376,7 +376,7 @@ test('unknown and closed slots still acknowledge receipt without delivering stal
 });
 
 test('new physical generation resets negotiation and byte total while late old frames remain ignored',async()=>{
-  const h=harness(),factory=h.context.createGridWSFactory('site-a');
+  const h=harness(),factory=h.context.createGridWSFactory('site-a',1,true);
   const first=factory.socket(streamURL(1)),old=h.sockets[0];
   old.open();await drain();old.message(JSON.stringify({op:'flow',window:8192}));
   old.message(packet(first.slot,[1,2,3,4]));
@@ -397,7 +397,7 @@ test('new physical generation resets negotiation and byte total while late old f
 });
 
 test('bounded physical pools negotiate and accumulate flow credit independently',async()=>{
-  const h=harness(),factory=h.context.createGridWSFactory('site-a',4);
+  const h=harness(),factory=h.context.createGridWSFactory('site-a',4,true);
   const clients=Array.from({length:4},(_,i)=>factory.socket(streamURL(i+1)));
   for(const socket of h.sockets)socket.open();await drain();
   for(const i of [0,1,3])h.sockets[i].message(JSON.stringify({op:'flow',window:8192}));
@@ -414,7 +414,7 @@ test('bounded physical pools negotiate and accumulate flow credit independently'
 });
 
 test('failed ACK write closes the shared generation once and never dispatches unacknowledged media',async()=>{
-  const h=harness(),factory=h.context.createGridWSFactory('site-a');
+  const h=harness(),factory=h.context.createGridWSFactory('site-a',1,true);
   const client=factory.socket(streamURL(1)),socket=h.sockets[0];
   let closed=0,delivered=0;client.onclose=()=>closed++;client.onmessage=()=>delivered++;
   socket.open();await drain();socket.message(JSON.stringify({op:'flow',window:8192}));
@@ -425,4 +425,51 @@ test('failed ACK write closes the shared generation once and never dispatches un
   socket.message(packet(client.slot,[2]));socket.onclose();
   assert.equal(closed,1);assert.equal(delivered,0);
   factory.close();assert.equal(h.timers.size,0);
+});
+
+test('default bounded pools do not request receipt flow or ACK ordinary legacy media',async()=>{
+  const h=harness(),factory=h.context.createGridWSFactory('site a',4);
+  for(let i=0;i<8;i++)factory.socket(streamURL(i+1));
+  assert.equal(h.sockets.length,4);
+  for(const socket of h.sockets){
+    const url=new URL(socket.url);
+    assert.equal(url.searchParams.get('agent'),'site a');
+    assert.equal(url.searchParams.has('flow'),false);
+    socket.open();
+  }
+  await drain();
+  for(const socket of h.sockets){
+    const subscription=socket.sent.find(command=>command.op==='sub');
+    socket.message(packet(subscription.slot,[1,2,3]));
+    assert.equal(socket.sent.some(command=>command.op==='ack'),false);
+  }
+  factory.close();assert.equal(h.timers.size,0);
+});
+
+test('explicit receipt flow opt-in propagates to every child of the bounded pool',async()=>{
+  const h=harness(),factory=h.context.createGridWSFactory('site-a',4,true);
+  for(let i=0;i<8;i++)factory.socket(streamURL(i+1));
+  assert.equal(h.sockets.length,4);
+  for(const socket of h.sockets){
+    assert.equal(new URL(socket.url).searchParams.get('flow'),'1');
+    socket.open();
+  }
+  await drain();
+  for(const socket of h.sockets){
+    socket.message(JSON.stringify({op:'flow',window:8192}));
+    const subscription=socket.sent.find(command=>command.op==='sub');
+    socket.message(packet(subscription.slot,[5,6]));
+    assert.deepEqual(socket.sent.filter(command=>command.op==='ack'),[{op:'ack',received:4}]);
+  }
+  factory.close();assert.equal(h.timers.size,0);
+});
+
+test('truthy non-boolean receipt flow options never opt in implicitly',()=>{
+  for(const option of [undefined,null,false,0,1,'true','1',{},[],new Boolean(true)]){
+    const h=harness(),factory=h.context.createGridWSFactory('site-a',4,option);
+    for(let i=0;i<4;i++)factory.socket(streamURL(i+1));
+    assert.equal(h.sockets.length,4);
+    assert.ok(h.sockets.every(socket=>!new URL(socket.url).searchParams.has('flow')),'only the boolean true may enable receipt flow');
+    factory.close();assert.equal(h.timers.size,0);
+  }
 });
