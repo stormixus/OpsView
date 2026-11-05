@@ -130,3 +130,37 @@ func TestPlaybackTimelineExposesRecordedFilename(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPlaybackRangeIndexKeepsListingSizesSeparate(t *testing.T) {
+	for _, rangeFirst := range []bool{true, false} {
+		t.Run(fmt.Sprintf("rangeFirst=%t", rangeFirst), func(t *testing.T) {
+			rec := &Recorder{dir: t.TempDir(), segSecs: 300}
+			stream := "site/dvr1_ch1"
+			start := time.Date(2026, 6, 7, 12, 0, 0, 0, time.Local)
+			name := writePlaybackIndexSegment(t, rec, stream, start)
+			checkRange := func() {
+				t.Helper()
+				got := rec.segmentsForExport(stream, start.Unix(), start.Unix()+60)
+				if len(got) != 1 || got[0].Name != name || got[0].Size != 0 {
+					t.Fatalf("range must only load temporal metadata: %+v", got)
+				}
+			}
+			checkListing := func() {
+				t.Helper()
+				got := rec.segments(stream, "20260607")
+				if len(got) != 1 || got[0].Name != name || got[0].Size != int64(len("segment")) {
+					t.Fatalf("listing lost actual byte size: %+v", got)
+				}
+			}
+			if rangeFirst {
+				checkRange()
+				checkListing()
+			} else {
+				checkListing()
+				checkRange()
+			}
+			checkRange()
+			checkListing()
+		})
+	}
+}

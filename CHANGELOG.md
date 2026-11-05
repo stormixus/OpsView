@@ -6,6 +6,7 @@ All notable changes to OpsView are documented here.
 
 ### Fixed
 
+- Cold recording-range lookups index filenames without reading every MP4's byte size. Download listings keep a separate size-bearing cache, while playback and exact previews avoid unnecessary recording-volume metadata reads.
 - Dashboard and wall HTML use content-versioned asset URLs so CDN/browser caching cannot keep an older interface after a relay update.
 - Unified recording playback reuses the current MP4 decoder for same-file seeks, cancels superseded lookups before they can change channels/times, and uses filenames returned with timeline coverage instead of waiting for another day-list request. Missing footage stays at the requested time with an explicit empty state.
 - Wheel scrubbing updates the selected clock immediately, coalesces cross-file loading, and can show an accurately extracted video frame while playback starts. Snapshot substitutes are excluded from this preview; extraction is bounded and cancelled with navigation.

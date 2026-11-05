@@ -117,12 +117,22 @@ func (r *Recorder) days(stream string) []string {
 // segments returns the recordings for a stream on a YYYYMMDD day, time-sorted,
 // with durations computed from the gap to the next segment.
 func (r *Recorder) segments(stream, day string) []recSegment {
+	return r.indexedSegments(stream, day, true)
+}
+
+// Time-range lookups need filenames and timestamps, not every file's byte size.
+// Keep their cache separate from the size-bearing download/listing index so a
+// cold seek avoids hundreds of metadata reads on the recording volume.
+func (r *Recorder) indexedSegments(stream, day string, withSize bool) []recSegment {
 	dir, ok := r.safeStreamDir(stream)
 	if !ok || len(day) != 8 {
 		return nil
 	}
 	mtime := dirMtime(dir)
 	key := stream + "|" + day
+	if !withSize {
+		key = "range:" + key
+	}
 	if !mtime.IsZero() {
 		r.idxMu.Lock()
 		if e, ok := r.segCache[key]; ok && e.mtime.Equal(mtime) {
@@ -142,11 +152,15 @@ func (r *Recorder) segments(stream, day string) []recSegment {
 		if err != nil {
 			continue
 		}
-		info, err := e.Info()
-		if err != nil {
-			continue
+		var size int64
+		if withSize {
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			size = info.Size()
 		}
-		segs = append(segs, recSegment{Name: n, Start: t.Unix(), Size: info.Size()})
+		segs = append(segs, recSegment{Name: n, Start: t.Unix(), Size: size})
 	}
 	sort.Slice(segs, func(i, j int) bool { return segs[i].Start < segs[j].Start })
 	nominal := r.segSecs
@@ -188,7 +202,7 @@ func (r *Recorder) segmentsForExport(stream string, start, end int64) []recSegme
 	// segments crossing midnight retain their true gap to the next recording.
 	var segs []recSegment
 	for _, day := range daysInRange(start-int64(nominal), end+int64(nominal)) {
-		segs = append(segs, r.segments(stream, day)...)
+		segs = append(segs, r.indexedSegments(stream, day, false)...)
 	}
 	for i := range segs {
 		segs[i].Dur = nominal
